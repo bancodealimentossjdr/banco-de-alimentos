@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params
@@ -27,12 +27,12 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params
     const body = await request.json()
-    const { producerId, employeeId, date, status, notes, items } = body
+    const { producerId, employeeId, date, status, notes, indemnityValue, items } = body
 
     await prisma.harvestItem.deleteMany({
       where: { harvestId: id },
@@ -46,7 +46,7 @@ export async function PUT(
         date: date ? new Date(date + 'T12:00:00') : undefined,
         status: status || 'agendada',
         notes: notes || null,
-      indemnityValue: indemnityValue ? parseFloat(String(indemnityValue)) : null,
+        indemnityValue: indemnityValue ? parseFloat(String(indemnityValue)) : null,
         items: {
           create: items.map((item: { productId: string; quantity: number; weighed?: boolean }) => ({
             productId: item.productId,
@@ -71,7 +71,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params

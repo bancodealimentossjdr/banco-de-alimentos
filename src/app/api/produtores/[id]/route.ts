@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
 // GET - Buscar produtor por ID
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const produtor = await prisma.producer.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         harvests: {
           include: { items: { include: { product: true } } },
@@ -27,8 +28,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 }
 
 // PUT - Atualizar produtor
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const body = await request.json()
     const { name, phone, address, property, active } = body
 
@@ -37,7 +39,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     const produtor = await prisma.producer.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         name: name.trim(),
         phone: phone || null,
@@ -58,10 +60,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 // DELETE - Excluir produtor
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const produtor = await prisma.producer.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: { _count: { select: { harvests: true } } },
     })
 
@@ -76,7 +79,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       )
     }
 
-    await prisma.producer.delete({ where: { id: params.id } })
+    await prisma.producer.delete({ where: { id } })
     return NextResponse.json({ message: 'Produtor excluído com sucesso' })
   } catch (error) {
     console.error('Erro ao excluir produtor:', error)
