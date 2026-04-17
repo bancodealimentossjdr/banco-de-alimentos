@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==========================================
+// USUÃRIOS (autenticaÃ§Ã£o)
+// ==========================================
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("operador") // admin | operador | visualizador
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// PRODUTOS (o que Ã© doado/distribuÃ­do)
+// ==========================================
+model Product {
+  id        String   @id @default(cuid())
+  name      String
+  category  String
+  unit      String
+  minStock  Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  donationItems     DonationItem[]
+  distributionItems DistributionItem[]
+  harvestItems      HarvestItem[]
+}
+
+// ==========================================
+// DOADORES (quem doa)
+// ==========================================
+model Donor {
+  id        String   @id @default(cuid())
+  name      String
+  type      String
+  category  String
+  contact   String?
+  phone     String?
+  email     String?
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  donations Donation[]
+}
+
+// ==========================================
+// INSTITUIÃ‡Ã•ES BENEFICIÃRIAS (quem recebe)
+// ==========================================
+model Beneficiary {
+  id        String   @id @default(cuid())
+  name      String
+  type      String
+  address   String?
+  phone     String?
+  contact   String?
+  status    String   @default("ativo")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  distributions Distribution[]
+}
+
+// ==========================================
+// FUNCIONÃRIOS (quem faz a coleta/entrega)
+// ==========================================
+model Employee {
+  id        String   @id @default(cuid())
+  name      String
+  role      String?
+  phone     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  donations     Donation[]
+  distributions Distribution[]
+  harvests      SolidarityHarvest[]
+}
+
+// ==========================================
+// DOAÃ‡ÃƒO (entrada de alimentos)
+// ==========================================
+model Donation {
+  id         String   @id @default(cuid())
+  donorId    String
+  employeeId String?
+  date       DateTime @default(now())
+  origin     String   @default("coleta")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  donor    Donor     @relation(fields: [donorId], references: [id])
+  employee Employee? @relation(fields: [employeeId], references: [id])
+  items    DonationItem[]
+}
+
+// ==========================================
+// ITENS DA DOAÃ‡ÃƒO
+// ==========================================
+model DonationItem {
+  id         String  @id @default(cuid())
+  donationId String
+  productId  String
+  quantity   Float
+  weighed    Boolean @default(false)
+
+  donation Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+}
+
+// ==========================================
+// DISTRIBUIÃ‡ÃƒO (saÃ­da de alimentos)
+// ==========================================
+model Distribution {
+  id            String   @id @default(cuid())
+  beneficiaryId String
+  employeeId    String?
+  date          DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  beneficiary Beneficiary @relation(fields: [beneficiaryId], references: [id])
+  employee    Employee?   @relation(fields: [employeeId], references: [id])
+  items       DistributionItem[]
+}
+
+// ==========================================
+// ITENS DA DISTRIBUIÃ‡ÃƒO
+// ==========================================
+model DistributionItem {
+  id             String @id @default(cuid())
+  distributionId String
+  productId      String
+  quantity       Float
+
+  distribution Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+}
+
+// ==========================================
+// PRODUTORES RURAIS (Colheita SolidÃ¡ria)
+// ==========================================
+model Producer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  address   String?
+  property  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  harvests SolidarityHarvest[]
+}
+
+// ==========================================
+// COLHEITA SOLIDARIA (evento de colheita)
+// ==========================================
+model SolidarityHarvest {
+  id             String   @id @default(cuid())
+  producerId     String
+  employeeId     String?
+  date           DateTime @default(now())
+  status         String   @default("agendada")
+  notes          String?
+  indemnityValue Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  producer Producer  @relation(fields: [producerId], references: [id])
+  employee Employee? @relation(fields: [employeeId], references: [id])
+  items    HarvestItem[]
+}
+
+// ==========================================
+// ITENS DA COLHEITA
+// ==========================================
+model HarvestItem {
+  id        String @id @default(cuid())
+  harvestId String
+  productId String
+  quantity  Float
+  weighed   Boolean @default(false)
+
+  harvest SolidarityHarvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
+  product Product           @relation(fields: [productId], references: [id])
+}

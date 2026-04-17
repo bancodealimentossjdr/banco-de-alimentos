@@ -1,0 +1,49 @@
+﻿import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+
+export async function GET() {
+  try {
+    const products = await prisma.product.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+    })
+
+    const stockItems = await Promise.all(
+      products.map(async (product) => {
+        const donated = await prisma.donationItem.aggregate({
+          where: { productId: product.id },
+          _sum: { quantity: true },
+        })
+        const harvested = await prisma.harvestItem.aggregate({
+          where: { productId: product.id },
+          _sum: { quantity: true },
+        })
+        const distributed = await prisma.distributionItem.aggregate({
+          where: { productId: product.id },
+          _sum: { quantity: true },
+        })
+
+        const totalDonated = donated._sum.quantity || 0
+        const totalHarvested = harvested._sum.quantity || 0
+        const totalDistributed = distributed._sum.quantity || 0
+
+        return {
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          unit: product.unit,
+          minStock: product.minStock,
+          donated: totalDonated,
+          harvested: totalHarvested,
+          distributed: totalDistributed,
+          stock: totalDonated + totalHarvested - totalDistributed,
+        }
+      })
+    )
+
+    return NextResponse.json(stockItems)
+  } catch (error) {
+    console.error('Erro GET estoque:', error)
+    return NextResponse.json({ error: 'Erro ao buscar estoque' }, { status: 500 })
+  }
+}
