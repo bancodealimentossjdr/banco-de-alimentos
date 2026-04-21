@@ -3,6 +3,7 @@ import Credentials from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { prisma } from './prisma'
 import { authConfig } from './auth.config'
+import type { UserRole } from '@/types/next-auth'
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -39,7 +40,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          role: user.role as UserRole,
         }
       },
     }),

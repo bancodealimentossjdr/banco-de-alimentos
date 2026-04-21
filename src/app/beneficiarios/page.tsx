@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import PhoneLink from '@/components/PhoneLink'
 
 interface Beneficiary {
   id: string
@@ -19,6 +20,12 @@ const INSTITUTION_TYPES = [
   { value: 'acolhimento', label: 'Instituição de Acolhimento' },
   { value: 'albergue', label: 'Albergue' },
   { value: 'casa_recuperacao', label: 'Casa de Recuperação' },
+  { value: 'apae', label: 'APAE' },
+  { value: 'creche', label: 'Creche' },
+  { value: 'escola', label: 'Escola' },
+  { value: 'igreja', label: 'Igreja / Paróquia' },
+  { value: 'ong', label: 'ONG' },
+  { value: 'asilo', label: 'Asilo / Lar de Idosos' },
   { value: 'outros', label: 'Outros' },
 ]
 
@@ -188,6 +195,7 @@ export default function BeneficiariosPage() {
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm"
+                placeholder="(32) 99999-8888"
               />
             </div>
             <div>
@@ -267,7 +275,9 @@ export default function BeneficiariosPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-600">{b.contact || '-'}</td>
-                      <td className="px-6 py-4 text-gray-600">{b.phone || '-'}</td>
+                      <td className="px-6 py-4 text-gray-600">
+                        <PhoneLink phone={b.phone} />
+                      </td>
                       <td className="px-6 py-4 text-gray-600">{b._count.distributions}</td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
@@ -325,7 +335,7 @@ export default function BeneficiariosPage() {
                   {b.phone && (
                     <div className="flex items-center gap-2">
                       <span className="text-gray-400 w-5 text-center">📞</span>
-                      <a href={`tel:${b.phone}`} className="text-blue-600 underline">{b.phone}</a>
+                      <PhoneLink phone={b.phone} />
                     </div>
                   )}
                   {b.address && (

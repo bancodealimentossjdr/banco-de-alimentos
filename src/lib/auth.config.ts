@@ -1,10 +1,7 @@
 import type { NextAuthConfig } from 'next-auth'
+import { canAccessRoute } from './permissions'
+import type { UserRole } from '@/types/next-auth'
 
-/**
- * Configuração "leve" do NextAuth — compatível com Edge Runtime.
- * NÃO importa Prisma nem bcrypt (que não rodam em Edge).
- * Usado pelo middleware para verificar autenticação via JWT.
- */
 export const authConfig: NextAuthConfig = {
   trustHost: true,
   pages: {
@@ -13,44 +10,43 @@ export const authConfig: NextAuthConfig = {
   session: {
     strategy: 'jwt',
   },
-  providers: [], // Providers ficam no auth.ts (que roda em Node.js runtime)
+  providers: [],
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.role = user.role
-        token.id = user.id
+        token.id = user.id as string
       }
       return token
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.role = token.role as string
+        session.user.role = token.role as UserRole
         session.user.id = token.id as string
       }
       return session
     },
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user
+      const userRole = auth?.user?.role as UserRole | undefined
       const { pathname } = nextUrl
 
-      // Rotas públicas (não precisam de login)
       const publicRoutes = ['/login']
-      const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
-
-      // API de auth é pública
+      const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route))
       const isAuthApi = pathname.startsWith('/api/auth')
 
       if (isAuthApi) return true
 
-      // Se está logado e tenta acessar /login, redireciona para home
       if (isLoggedIn && isPublicRoute) {
         return Response.redirect(new URL('/', nextUrl.origin))
       }
 
-      // Se não está logado e tenta acessar rota protegida, bloqueia
-      // (NextAuth redireciona automaticamente para /login)
       if (!isLoggedIn && !isPublicRoute) {
         return false
+      }
+
+      if (isLoggedIn && !canAccessRoute(userRole, pathname)) {
+        return Response.redirect(new URL('/', nextUrl.origin))
       }
 
       return true

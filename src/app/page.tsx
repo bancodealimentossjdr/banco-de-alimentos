@@ -3,14 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 
-interface Notification {
-  id: string
-  type: string
-  severity: 'critical' | 'warning' | 'info'
-  title: string
-  message: string
-}
-
 interface DashboardData {
   totalDonors: number
   totalBeneficiaries: number
@@ -20,7 +12,6 @@ interface DashboardData {
   totalDistributions: number
   totalProducers: number
   totalHarvests: number
-  notifications: Notification[]
   recentDonations: {
     id: string
     date: string
@@ -44,7 +35,6 @@ interface DashboardData {
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showNotifications, setShowNotifications] = useState(false)
   const [activeTab, setActiveTab] = useState<'doacoes' | 'distribuicoes' | 'colheitas'>('doacoes')
   const hasFetched = useRef(false)
 
@@ -74,26 +64,6 @@ export default function Home() {
     return `${day}/${month}/${year}`
   }
 
-  const notifications = data?.notifications || []
-  const criticalCount = notifications.filter(n => n.severity === 'critical').length
-  const warningCount = notifications.filter(n => n.severity === 'warning').length
-
-  const getSeverityStyle = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'bg-red-50 border-red-200 text-red-800'
-      case 'warning': return 'bg-yellow-50 border-yellow-200 text-yellow-800'
-      default: return 'bg-blue-50 border-blue-200 text-blue-800'
-    }
-  }
-
-  const getSeverityIcon = (severity: string) => {
-    switch (severity) {
-      case 'critical': return '🔴'
-      case 'warning': return '🟡'
-      default: return '🔵'
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
@@ -105,90 +75,11 @@ export default function Home() {
 
   return (
     <div>
-      {/* Header com notificação */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-gray-900">Painel de Controle</h2>
-          <p className="text-gray-500 text-sm mt-0.5">Visão geral do sistema</p>
-        </div>
-        <button
-          onClick={() => setShowNotifications(!showNotifications)}
-          className="relative bg-gray-100 hover:bg-gray-200 p-3 rounded-full transition"
-        >
-          🔔
-          {notifications.length > 0 && (
-            <span className={`absolute -top-1 -right-1 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center ${criticalCount > 0 ? 'bg-red-500' : 'bg-yellow-500'}`}>
-              {notifications.length}
-            </span>
-          )}
-        </button>
+      {/* Header */}
+      <div className="mb-6">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900">Painel de Controle</h2>
+        <p className="text-gray-500 text-sm mt-0.5">Visão geral do sistema</p>
       </div>
-
-      {/* Painel de Notificações */}
-      {showNotifications && (
-        <div className="mb-6 bg-white rounded-xl shadow-sm border p-4 md:p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-gray-900">
-              🔔 Notificações ({notifications.length})
-            </h2>
-            <button
-              onClick={() => setShowNotifications(false)}
-              className="text-gray-400 hover:text-gray-600 text-lg p-1"
-            >
-              ✕
-            </button>
-          </div>
-          {notifications.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">✅ Tudo em ordem! Nenhuma notificação.</p>
-          ) : (
-            <div className="space-y-2">
-              {notifications.map(notif => (
-                <div key={notif.id} className={`border rounded-lg p-3 ${getSeverityStyle(notif.severity)}`}>
-                  <div className="flex items-start gap-2">
-                    <span className="text-base shrink-0">{getSeverityIcon(notif.severity)}</span>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm">{notif.title}</p>
-                      <p className="text-sm mt-0.5 break-words">{notif.message}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Alertas inline */}
-      {!showNotifications && criticalCount > 0 && (
-        <div
-          onClick={() => setShowNotifications(true)}
-          className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-red-100 transition"
-        >
-          <span className="text-2xl shrink-0">⚠️</span>
-          <div className="min-w-0">
-            <p className="font-semibold text-red-800 text-sm md:text-base">
-              {criticalCount} produto(s) com estoque zerado
-              {warningCount > 0 && ` • ${warningCount} com estoque baixo`}
-            </p>
-            <p className="text-xs text-red-600">Toque para ver detalhes</p>
-          </div>
-        </div>
-      )}
-
-      {!showNotifications && criticalCount === 0 && warningCount > 0 && (
-        <div
-          onClick={() => setShowNotifications(true)}
-          className="mb-6 bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-100 transition"
-        >
-          <span className="text-2xl shrink-0">⚡</span>
-          <div className="min-w-0">
-            <p className="font-semibold text-yellow-800 text-sm md:text-base">
-              {warningCount} alerta(s) de estoque
-            </p>
-            <p className="text-xs text-yellow-600">Toque para ver detalhes</p>
-          </div>
-        </div>
-      )}
 
       {/* ====== CONTADORES ====== */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-6">

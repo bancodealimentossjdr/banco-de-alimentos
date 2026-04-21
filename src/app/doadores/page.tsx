@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import PhoneLink from '@/components/PhoneLink'
 
 interface Donor {
   id: string
@@ -179,6 +180,7 @@ export default function DoadoresPage() {
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                placeholder="(32) 99999-8888"
               />
             </div>
             <div>
@@ -258,7 +260,9 @@ export default function DoadoresPage() {
                           {getCategoryLabel(donor.category)}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-gray-600">{donor.phone || '-'}</td>
+                      <td className="px-6 py-4 text-gray-600">
+                        <PhoneLink phone={donor.phone} />
+                      </td>
                       <td className="px-6 py-4 text-gray-600">{donor._count.donations}</td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${donor.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -321,7 +325,7 @@ export default function DoadoresPage() {
                   {donor.phone && (
                     <div className="flex items-center gap-2">
                       <span className="text-gray-400 w-5 text-center">📞</span>
-                      <a href={`tel:${donor.phone}`} className="text-blue-600 underline">{donor.phone}</a>
+                      <PhoneLink phone={donor.phone} />
                     </div>
                   )}
                   {donor.email && (

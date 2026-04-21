@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import PhoneLink from '@/components/PhoneLink'
 
 interface Producer {
   id: string
@@ -236,7 +237,9 @@ export default function ProdutoresPage() {
                       <td className="px-6 py-4 text-sm font-medium text-gray-900">{producer.name}</td>
                       <td className="px-6 py-4 text-sm text-gray-600">{producer.property || '-'}</td>
                       <td className="px-6 py-4 text-sm text-gray-600">{producer.address || '-'}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600">{producer.phone || '-'}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        <PhoneLink phone={producer.phone} />
+                      </td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${producer.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                           {producer.active ? 'Ativo' : 'Inativo'}
@@ -290,7 +293,7 @@ export default function ProdutoresPage() {
                   {producer.phone && (
                     <div className="flex items-center gap-2">
                       <span className="text-gray-400 w-5 text-center">📞</span>
-                      <a href={`tel:${producer.phone}`} className="text-blue-600 underline">{producer.phone}</a>
+                      <PhoneLink phone={producer.phone} />
                     </div>
                   )}
                   {producer.address && (

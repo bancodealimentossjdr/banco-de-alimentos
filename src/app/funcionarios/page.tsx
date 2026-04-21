@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import PhoneLink from '@/components/PhoneLink'
 
 interface Employee {
   id: string
@@ -135,6 +136,7 @@ export default function FuncionariosPage() {
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm"
+                placeholder="(32) 99999-8888"
               />
             </div>
           </div>
@@ -191,7 +193,9 @@ export default function FuncionariosPage() {
                     <tr key={emp.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
                       <td className="px-6 py-4 text-gray-600">{emp.role || '-'}</td>
-                      <td className="px-6 py-4 text-gray-600">{emp.phone || '-'}</td>
+                      <td className="px-6 py-4 text-gray-600">
+                        <PhoneLink phone={emp.phone} />
+                      </td>
                       <td className="px-6 py-4 text-gray-600">{emp._count.donations}</td>
                       <td className="px-6 py-4 text-gray-600">{emp._count.distributions}</td>
                       <td className="px-6 py-4">
@@ -245,7 +249,7 @@ export default function FuncionariosPage() {
                   {emp.phone && (
                     <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
                       <span className="text-gray-400">📞</span>
-                      <a href={`tel:${emp.phone}`} className="text-blue-600 underline">{emp.phone}</a>
+                      <PhoneLink phone={emp.phone} />
                     </div>
                   )}
 

@@ -1,12 +1,25 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
+// Nome do produto que deve sempre aparecer primeiro nas listagens
+const PRIORITY_PRODUCT = 'hortifruti'
+
 export async function GET() {
   try {
     const products = await prisma.product.findMany({
       orderBy: { name: 'asc' },
     })
-    return NextResponse.json(products)
+
+    // Ordena com Hortifruti no topo, depois alfabético
+    const sorted = products.sort((a, b) => {
+      const aIsPriority = a.name.trim().toLowerCase() === PRIORITY_PRODUCT
+      const bIsPriority = b.name.trim().toLowerCase() === PRIORITY_PRODUCT
+      if (aIsPriority && !bIsPriority) return -1
+      if (!aIsPriority && bIsPriority) return 1
+      return a.name.localeCompare(b.name, 'pt-BR')
+    })
+
+    return NextResponse.json(sorted)
   } catch (error) {
     console.error('Erro GET produtos:', error)
     return NextResponse.json({ error: 'Erro ao buscar produtos' }, { status: 500 })
