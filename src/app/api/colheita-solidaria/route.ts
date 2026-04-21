@@ -1,7 +1,11 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
 
 export async function GET() {
+  const authResult = await requireView('colheita-solidaria')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const colheitas = await prisma.solidarityHarvest.findMany({
       orderBy: { date: 'desc' },
@@ -21,12 +25,15 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireEdit('colheita-solidaria')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const body = await request.json()
     const { producerId, employeeId, date, status, notes, items, indemnityValue } = body
 
     if (!producerId) {
-      return NextResponse.json({ error: 'Produtor eh obrigatorio' }, { status: 400 })
+      return NextResponse.json({ error: 'Produtor é obrigatório' }, { status: 400 })
     }
 
     if (!items || items.length === 0) {

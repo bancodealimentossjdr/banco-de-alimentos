@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
 
 export async function GET() {
+  const authResult = await requireView('doadores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const donors = await prisma.donor.findMany({
       orderBy: { name: 'asc' },
@@ -17,6 +21,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireEdit('doadores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const body = await request.json()
     const donor = await prisma.donor.create({

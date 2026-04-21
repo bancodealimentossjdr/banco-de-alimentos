@@ -1,10 +1,14 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEditRecord } from '@/lib/auth-helpers'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireView('colheita-solidaria')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
     const harvest = await prisma.solidarityHarvest.findUnique({
@@ -16,7 +20,7 @@ export async function GET(
       },
     })
     if (!harvest) {
-      return NextResponse.json({ error: 'Colheita nao encontrada' }, { status: 404 })
+      return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
     }
     return NextResponse.json(harvest)
   } catch (error) {
@@ -31,6 +35,19 @@ export async function PUT(
 ) {
   try {
     const { id } = await params
+
+    // Busca o registro ANTES pra checar a trava temporal
+    const existing = await prisma.solidarityHarvest.findUnique({
+      where: { id },
+      select: { createdAt: true },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
+    }
+
+    const authResult = await requireEditRecord('colheita-solidaria', existing.createdAt)
+    if (authResult instanceof NextResponse) return authResult
+
     const body = await request.json()
     const { producerId, employeeId, date, status, notes, indemnityValue, items } = body
 
@@ -74,10 +91,23 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+
+    // Busca o registro ANTES pra checar a trava temporal
+    const existing = await prisma.solidarityHarvest.findUnique({
+      where: { id },
+      select: { createdAt: true },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
+    }
+
+    const authResult = await requireEditRecord('colheita-solidaria', existing.createdAt)
+    if (authResult instanceof NextResponse) return authResult
+
     await prisma.solidarityHarvest.delete({
       where: { id },
     })
-    return NextResponse.json({ message: 'Colheita excluida com sucesso' })
+    return NextResponse.json({ message: 'Colheita excluída com sucesso' })
   } catch (error) {
     console.error('Erro DELETE colheita:', error)
     return NextResponse.json({ error: 'Erro ao excluir colheita' }, { status: 500 })

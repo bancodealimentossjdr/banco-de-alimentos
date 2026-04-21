@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
 
 export async function GET() {
+  const authResult = await requireView('distribuicoes')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const distributions = await prisma.distribution.findMany({
       include: {
-        beneficiary: { select: { id: true, name: true, type: true } },
+        beneficiary: { select: { id: true, name: true } },
         employee: { select: { id: true, name: true } },
         items: {
           include: { product: { select: { name: true, unit: true } } },
@@ -21,9 +25,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireEdit('distribuicoes')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const body = await request.json()
 
+    // Usa meio-dia para evitar que o fuso horário mude o dia
     const dateValue = new Date(body.date + 'T12:00:00')
 
     const distribution = await prisma.distribution.create({
@@ -40,7 +48,7 @@ export async function POST(request: Request) {
         },
       },
       include: {
-        beneficiary: { select: { id: true, name: true, type: true } },
+        beneficiary: { select: { id: true, name: true } },
         employee: { select: { id: true, name: true } },
         items: {
           include: { product: { select: { name: true, unit: true } } },

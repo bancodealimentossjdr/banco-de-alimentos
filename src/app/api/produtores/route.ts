@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
 
 // GET - Listar todos os produtores
 export async function GET() {
+  const authResult = await requireView('produtores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const produtores = await prisma.producer.findMany({
       orderBy: { name: 'asc' },
@@ -19,6 +23,9 @@ export async function GET() {
 
 // POST - Criar novo produtor
 export async function POST(request: NextRequest) {
+  const authResult = await requireEdit('produtores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const body = await request.json()
     const { name, phone, address, property } = body

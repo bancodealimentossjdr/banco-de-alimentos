@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import {
   LayoutDashboard,
   Package,
@@ -15,10 +16,18 @@ import {
   UserCog,
   Tractor,
   Sprout,
+  Shield,
   X,
 } from 'lucide-react'
 
-const menuItems = [
+type MenuItem = {
+  label: string
+  href: string
+  icon: React.ComponentType<{ size?: number; className?: string }>
+  adminOnly?: boolean
+}
+
+const menuItems: MenuItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
   { label: 'Produtos', href: '/produtos', icon: Package },
   { label: 'Doadores', href: '/doadores', icon: HandHeart },
@@ -29,6 +38,7 @@ const menuItems = [
   { label: 'Distribuições', href: '/distribuicoes', icon: Truck },
   { label: 'Colheita Solidária', href: '/colheita-solidaria', icon: Sprout },
   { label: 'Estoque', href: '/estoque', icon: Warehouse },
+  { label: 'Usuários', href: '/usuarios', icon: Shield, adminOnly: true },
 ]
 
 interface SidebarProps {
@@ -45,6 +55,10 @@ export default function Sidebar({
   setCollapsed,
 }: SidebarProps) {
   const pathname = usePathname()
+  const { data: session } = useSession()
+
+  const isAdmin = session?.user.role === 'admin'
+  const visibleItems = menuItems.filter(item => !item.adminOnly || isAdmin)
 
   return (
     <>
@@ -93,7 +107,7 @@ export default function Sidebar({
         {/* Menu */}
         <nav className="flex-1 py-4 overflow-y-auto">
           <ul className="space-y-1 px-2">
-            {menuItems.map((item) => {
+            {visibleItems.map((item) => {
               const isActive = pathname === item.href
               const showLabel = !collapsed || sidebarOpen
               return (

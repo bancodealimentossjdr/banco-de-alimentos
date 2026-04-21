@@ -1,7 +1,11 @@
 ﻿import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView } from '@/lib/auth-helpers'
 
 export async function GET() {
+  const authResult = await requireView('dashboard')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     // Todas as contagens em paralelo
     const [

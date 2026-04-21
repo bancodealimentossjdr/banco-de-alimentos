@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
 
 // Nome do produto que deve sempre aparecer primeiro nas listagens
 const PRIORITY_PRODUCT = 'hortifruti'
 
 export async function GET() {
+  const authResult = await requireView('produtos')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const products = await prisma.product.findMany({
       orderBy: { name: 'asc' },
@@ -27,6 +31,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireEdit('produtos')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const body = await request.json()
     const product = await prisma.product.create({

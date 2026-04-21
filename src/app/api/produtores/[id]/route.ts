@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
 
 // GET - Buscar produtor por ID
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authResult = await requireView('produtores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
     const produtor = await prisma.producer.findUnique({
@@ -29,6 +33,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 // PUT - Atualizar produtor
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authResult = await requireEdit('produtores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -61,6 +68,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 // DELETE - Excluir produtor
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authResult = await requireEdit('produtores')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
     const produtor = await prisma.producer.findUnique({

@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireView, requireEditRecord } from '@/lib/auth-helpers'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireView('doacoes')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
     const donation = await prisma.donation.findUnique({
@@ -16,12 +20,12 @@ export async function GET(
       },
     })
     if (!donation) {
-      return NextResponse.json({ error: 'Doacao nao encontrada' }, { status: 404 })
+      return NextResponse.json({ error: 'Doação não encontrada' }, { status: 404 })
     }
     return NextResponse.json(donation)
   } catch (error) {
-    console.error('Erro GET doacao:', error)
-    return NextResponse.json({ error: 'Erro ao buscar doacao' }, { status: 500 })
+    console.error('Erro GET doação:', error)
+    return NextResponse.json({ error: 'Erro ao buscar doação' }, { status: 500 })
   }
 }
 
@@ -31,6 +35,19 @@ export async function PUT(
 ) {
   try {
     const { id } = await params
+
+    // Busca o registro ANTES pra checar a trava temporal
+    const existing = await prisma.donation.findUnique({
+      where: { id },
+      select: { createdAt: true },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Doação não encontrada' }, { status: 404 })
+    }
+
+    const authResult = await requireEditRecord('doacoes', existing.createdAt)
+    if (authResult instanceof NextResponse) return authResult
+
     const body = await request.json()
     const { donorId, employeeId, date, notes, items } = body
 
@@ -62,8 +79,8 @@ export async function PUT(
 
     return NextResponse.json(donation)
   } catch (error) {
-    console.error('Erro PUT doacao:', error)
-    return NextResponse.json({ error: 'Erro ao atualizar doacao' }, { status: 500 })
+    console.error('Erro PUT doação:', error)
+    return NextResponse.json({ error: 'Erro ao atualizar doação' }, { status: 500 })
   }
 }
 
@@ -73,12 +90,25 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+
+    // Busca o registro ANTES pra checar a trava temporal
+    const existing = await prisma.donation.findUnique({
+      where: { id },
+      select: { createdAt: true },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Doação não encontrada' }, { status: 404 })
+    }
+
+    const authResult = await requireEditRecord('doacoes', existing.createdAt)
+    if (authResult instanceof NextResponse) return authResult
+
     await prisma.donation.delete({
       where: { id },
     })
-    return NextResponse.json({ message: 'Doacao excluida com sucesso' })
+    return NextResponse.json({ message: 'Doação excluída com sucesso' })
   } catch (error) {
-    console.error('Erro DELETE doacao:', error)
-    return NextResponse.json({ error: 'Erro ao excluir doacao' }, { status: 500 })
+    console.error('Erro DELETE doação:', error)
+    return NextResponse.json({ error: 'Erro ao excluir doação' }, { status: 500 })
   }
 }

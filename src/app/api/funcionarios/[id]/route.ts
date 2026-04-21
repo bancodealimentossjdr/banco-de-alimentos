@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireEdit } from '@/lib/auth-helpers'
 
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireEdit('funcionarios')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -34,6 +38,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireEdit('funcionarios')
+  if (authResult instanceof NextResponse) return authResult
+
   try {
     const { id } = await params
 

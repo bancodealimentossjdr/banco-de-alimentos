@@ -1,172 +1,129 @@
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { isAdmin } from '@/lib/permissions'
-import type { UserRole } from '@/types/next-auth'
+import { auth } from '@/lib/auth'
 
-/**
- * GET /api/usuarios/[id]
- * Busca um usuário específico (apenas Admin)
- */
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await auth()
-
-  if (!isAdmin(session?.user?.role)) {
-    return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 })
-  }
-
-  const { id } = await params
-
-  const user = await prisma.user.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      active: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  })
-
-  if (!user) {
-    return NextResponse.json({ error: 'Usuário não encontrado.' }, { status: 404 })
-  }
-
-  return NextResponse.json(user)
-}
-
-/**
- * PATCH /api/usuarios/[id]
- * Atualiza um usuário (apenas Admin)
- * Senha é opcional: se vier, atualiza; se não, mantém a antiga
- */
-export async function PATCH(
+export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-
-  if (!isAdmin(session?.user?.role)) {
-    return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 })
-  }
-
-  const { id } = await params
-
   try {
+    const session = await auth()
+    if (!session || session.user.role !== 'admin') {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 403 })
+    }
+
+    const { id } = await params
     const body = await request.json()
-    const { name, email, password, role, active } = body as {
-      name?: string
-      email?: string
-      password?: string
-      role?: UserRole
-      active?: boolean
+
+    const user = await prisma.user.findUnique({ where: { id } })
+    if (!user) {
+      return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 })
     }
 
-    // Impede admin de desativar ele mesmo (previne lock-out)
-    if (session?.user?.id === id && active === false) {
-      return NextResponse.json(
-        { error: 'Você não pode desativar sua própria conta.' },
-        { status: 400 }
-      )
-    }
-
-    // Impede admin de mudar o próprio role (previne perder acesso)
-    if (session?.user?.id === id && role && role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Você não pode remover seu próprio perfil de administrador.' },
-        { status: 400 }
-      )
-    }
-
-    // Se mudou email, verifica duplicação
-    if (email) {
-      const existing = await prisma.user.findUnique({ where: { email } })
-      if (existing && existing.id !== id) {
+    if (body.email && body.email !== user.email) {
+      const emailExists = await prisma.user.findUnique({
+        where: { email: body.email },
+      })
+      if (emailExists) {
         return NextResponse.json(
-          { error: 'Já existe um usuário com esse email.' },
-          { status: 409 }
-        )
-      }
-    }
-
-    // Monta o update dinâmico
-    const data: Record<string, unknown> = {}
-    if (name !== undefined) data.name = name
-    if (email !== undefined) data.email = email
-    if (role !== undefined) data.role = role
-    if (active !== undefined) data.active = active
-
-    if (password) {
-      if (password.length < 6) {
-        return NextResponse.json(
-          { error: 'A senha deve ter pelo menos 6 caracteres.' },
+          { error: 'Já existe um usuário com este email' },
           { status: 400 }
         )
       }
-      data.password = await bcrypt.hash(password, 12)
     }
 
-    const user = await prisma.user.update({
+    if (session.user.id === id && body.role && body.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Você não pode remover sua própria permissão de administrador' },
+        { status: 400 }
+      )
+    }
+
+    if (session.user.id === id && body.active === false) {
+      return NextResponse.json(
+        { error: 'Você não pode desativar sua própria conta' },
+        { status: 400 }
+      )
+    }
+
+    const updateData: {
+      name?: string
+      email?: string
+      role?: string
+      active?: boolean
+      password?: string
+    } = {}
+
+    if (body.name !== undefined) updateData.name = body.name
+    if (body.email !== undefined) updateData.email = body.email
+    if (body.role !== undefined) updateData.role = body.role
+    if (body.active !== undefined) updateData.active = body.active
+
+    if (body.password && body.password.trim() !== '') {
+      if (body.password.length < 6) {
+        return NextResponse.json(
+          { error: 'A senha deve ter no mínimo 6 caracteres' },
+          { status: 400 }
+        )
+      }
+      updateData.password = await bcrypt.hash(body.password, 10)
+    }
+
+    const updated = await prisma.user.update({
       where: { id },
-      data,
+      data: updateData,
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
         active: true,
-        updatedAt: true,
+        createdAt: true,
       },
     })
 
-    return NextResponse.json(user)
+    return NextResponse.json(updated)
   } catch (error) {
-    console.error('Erro ao atualizar usuário:', error)
+    console.error('Erro PUT usuário:', error)
     return NextResponse.json(
-      { error: 'Erro interno ao atualizar usuário.' },
+      { error: 'Erro ao atualizar usuário' },
       { status: 500 }
     )
   }
 }
 
-/**
- * DELETE /api/usuarios/[id]
- * Remove um usuário (apenas Admin)
- * Impede auto-exclusão
- */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-
-  if (!isAdmin(session?.user?.role)) {
-    return NextResponse.json({ error: 'Acesso negado.' }, { status: 403 })
-  }
-
-  const { id } = await params
-
-  // Impede auto-exclusão
-  if (session?.user?.id === id) {
-    return NextResponse.json(
-      { error: 'Você não pode excluir sua própria conta.' },
-      { status: 400 }
-    )
-  }
-
   try {
+    const session = await auth()
+    if (!session || session.user.role !== 'admin') {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 403 })
+    }
+
+    const { id } = await params
+
+    if (session.user.id === id) {
+      return NextResponse.json(
+        { error: 'Você não pode excluir sua própria conta' },
+        { status: 400 }
+      )
+    }
+
+    const user = await prisma.user.findUnique({ where: { id } })
+    if (!user) {
+      return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 })
+    }
+
     await prisma.user.delete({ where: { id } })
-    return NextResponse.json({ success: true })
+
+    return NextResponse.json({ message: 'Usuário excluído com sucesso' })
   } catch (error) {
-    console.error('Erro ao excluir usuário:', error)
+    console.error('Erro DELETE usuário:', error)
     return NextResponse.json(
-      { error: 'Erro ao excluir usuário.' },
+      { error: 'Erro ao excluir usuário' },
       { status: 500 }
     )
   }
