@@ -48,10 +48,9 @@ export async function PUT(
         notes: notes || null,
         indemnityValue: indemnityValue ? parseFloat(String(indemnityValue)) : null,
         items: {
-          create: items.map((item: { productId: string; quantity: number; weighed?: boolean }) => ({
+          create: items.map((item: { productId: string; quantity: number }) => ({
             productId: item.productId,
             quantity: item.quantity,
-            weighed: item.weighed || false,
           })),
         },
       },

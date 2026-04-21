@@ -120,6 +120,7 @@ model DonationItem {
   donationId String
   productId  String
   quantity   Float
+  boxes      Int?
   weighed    Boolean @default(false)
 
   donation Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
@@ -199,7 +200,6 @@ model HarvestItem {
   harvestId String
   productId String
   quantity  Float
-  weighed   Boolean @default(false)
 
   harvest SolidarityHarvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   product Product           @relation(fields: [productId], references: [id])

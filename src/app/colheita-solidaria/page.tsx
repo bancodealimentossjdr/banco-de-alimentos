@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 interface Producer { id: string; name: string }
 interface ProductOption { id: string; name: string; unit: string }
 interface HarvestItem {
-  id: string; productId: string; quantity: number; weighed: boolean
+  id: string; productId: string; quantity: number
   product: { id: string; name: string; unit: string }
 }
 interface Harvest {
@@ -34,7 +34,7 @@ export default function ColheitaSolidariaPage() {
   const [form, setForm] = useState({
     producerId: '', employeeId: '', date: new Date().toISOString().split('T')[0],
     status: 'agendada', notes: '', indemnityValue: 1.5,
-    items: [{ productId: '', quantity: 0, weighed: false }] as { productId: string; quantity: number; weighed: boolean }[],
+    items: [{ productId: '', quantity: 0 }] as { productId: string; quantity: number }[],
   })
 
   const fetchAll = async () => {
@@ -60,7 +60,7 @@ export default function ColheitaSolidariaPage() {
     setForm({
       producerId: '', employeeId: '', date: new Date().toISOString().split('T')[0],
       status: 'agendada', notes: '', indemnityValue: 1.5,
-      items: [{ productId: '', quantity: 0, weighed: false }],
+      items: [{ productId: '', quantity: 0 }],
     })
     setEditingId(null)
     setShowForm(false)
@@ -74,20 +74,20 @@ export default function ColheitaSolidariaPage() {
       status: harvest.status, notes: harvest.notes || '',
       indemnityValue: harvest.indemnityValue || 1.5,
       items: harvest.items.length > 0
-        ? harvest.items.map(i => ({ productId: i.productId, quantity: i.quantity, weighed: i.weighed }))
-        : [{ productId: '', quantity: 0, weighed: false }],
+        ? harvest.items.map(i => ({ productId: i.productId, quantity: i.quantity }))
+        : [{ productId: '', quantity: 0 }],
     })
     setEditingId(harvest.id)
     setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const addItem = () => setForm({ ...form, items: [...form.items, { productId: '', quantity: 0, weighed: false }] })
+  const addItem = () => setForm({ ...form, items: [...form.items, { productId: '', quantity: 0 }] })
   const removeItem = (index: number) => {
     if (form.items.length <= 1) return
     setForm({ ...form, items: form.items.filter((_, i) => i !== index) })
   }
-  const updateItem = (index: number, field: string, value: string | number | boolean) => {
+  const updateItem = (index: number, field: string, value: string | number) => {
     const newItems = [...form.items]
     newItems[index] = { ...newItems[index], [field]: value }
     setForm({ ...form, items: newItems })
@@ -229,7 +229,6 @@ export default function ColheitaSolidariaPage() {
               <div className="flex-1"><span className="text-xs text-gray-500">Produto *</span></div>
               <div className="w-32"><span className="text-xs text-gray-500">Quantidade *</span></div>
               <div className="w-28 text-right"><span className="text-xs text-gray-500">Indenização</span></div>
-              <div className="w-24"><span className="text-xs text-gray-500">Pesado</span></div>
               <div className="w-8"></div>
             </div>
 
@@ -252,12 +251,13 @@ export default function ColheitaSolidariaPage() {
                     </select>
                   </div>
 
-                  {/* Quantidade + Indenização + Pesado + Remover */}
+                  {/* Quantidade + Indenização + Remover */}
                   <div className="flex gap-2 items-center">
                     <div className="flex-1 lg:w-32 lg:flex-none">
                       <label className="block text-xs text-gray-500 mb-1 lg:hidden">Quantidade *</label>
                       <input
                         type="number"
+                        inputMode="decimal"
                         step="0.1"
                         min="0"
                         value={item.quantity || ''}
@@ -274,17 +274,6 @@ export default function ColheitaSolidariaPage() {
                         R$ {((item.quantity || 0) * form.indemnityValue).toFixed(2)}
                       </span>
                     </div>
-
-                    {/* Pesado checkbox */}
-                    <label className="flex items-center gap-1.5 shrink-0 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={item.weighed}
-                        onChange={e => updateItem(index, 'weighed', e.target.checked)}
-                        className="rounded border-gray-300 text-green-500 focus:ring-green-500"
-                      />
-                      <span className="text-xs text-gray-500">Pesado</span>
-                    </label>
 
                     {/* Remover */}
                     {form.items.length > 1 && (
@@ -502,7 +491,8 @@ export default function ColheitaSolidariaPage() {
             )
           })}
         </div>
-      )}
-    </div>
+      )
+      }
+    </div >
   )
 }

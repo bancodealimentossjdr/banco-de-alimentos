@@ -1,12 +1,18 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { PESO_CAIXA_KG } from '@/lib/constants'
 
 interface Product { id: string; name: string; unit: string }
 interface Donor { id: string; name: string }
 interface Employee { id: string; name: string }
-interface FormItem { productId: string; quantity: number }
-interface DonationItem { id: string; quantity: number; product: { name: string; unit: string } }
+interface FormItem { productId: string; quantity: number; boxes?: number }
+interface DonationItem {
+  id: string
+  quantity: number
+  boxes: number | null
+  product: { name: string; unit: string }
+}
 interface Donation {
   id: string; date: string; notes: string | null
   donor: { id: string; name: string }
@@ -29,8 +35,8 @@ export default function DoacoesPage() {
   const [formItems, setFormItems] = useState<FormItem[]>([{ productId: '', quantity: 0 }])
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
-  const [calcWeights, setCalcWeights] = useState<{ description: string; weight: number }[]>([
-    { description: '', weight: 0 },
+  const [calcWeights, setCalcWeights] = useState<{ boxes: number; weight: number }[]>([
+    { boxes: 0, weight: 0 },
   ])
 
   const fetchAll = async () => {
@@ -60,7 +66,7 @@ export default function DoacoesPage() {
     setEditingId(null)
     setShowForm(false)
     setCalcOpen(null)
-    setCalcWeights([{ description: '', weight: 0 }])
+    setCalcWeights([{ boxes: 0, weight: 0 }])
   }
 
   const startEdit = (donation: Donation) => {
@@ -74,12 +80,12 @@ export default function DoacoesPage() {
       donation.items.map(item => ({
         productId: products.find(p => p.name === item.product.name)?.id || '',
         quantity: item.quantity,
+        boxes: item.boxes ?? undefined,
       }))
     )
     setEditingId(donation.id)
     setShowForm(true)
     setCalcOpen(null)
-    // Scroll para o topo do formulário no mobile
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -96,24 +102,39 @@ export default function DoacoesPage() {
 
   const openCalc = (index: number) => {
     setCalcOpen(index)
-    setCalcWeights([{ description: '', weight: 0 }])
+    setCalcWeights([{ boxes: 0, weight: 0 }])
   }
-  const closeCalc = () => { setCalcOpen(null); setCalcWeights([{ description: '', weight: 0 }]) }
-  const addCalcWeight = () => setCalcWeights([...calcWeights, { description: '', weight: 0 }])
+  const closeCalc = () => { setCalcOpen(null); setCalcWeights([{ boxes: 0, weight: 0 }]) }
+  const addCalcWeight = () => setCalcWeights([...calcWeights, { boxes: 0, weight: 0 }])
   const removeCalcWeight = (i: number) => {
     if (calcWeights.length > 1) setCalcWeights(calcWeights.filter((_, idx) => idx !== i))
   }
-  const updateCalcWeight = (i: number, field: string, value: string | number) => {
+  const updateCalcWeight = (i: number, field: 'boxes' | 'weight', value: number) => {
     const updated = [...calcWeights]
     updated[i] = { ...updated[i], [field]: value }
     setCalcWeights(updated)
   }
-  const calcTotal = calcWeights.reduce((sum, w) => sum + (w.weight || 0), 0)
+
+  // 🧮 Cálculos da calculadora
+  const calcTotalBoxes = calcWeights.reduce((sum, w) => sum + (w.boxes || 0), 0)
+  const calcTotalBruto = calcWeights.reduce((sum, w) => sum + (w.weight || 0), 0)
+  const calcTara = calcTotalBoxes * PESO_CAIXA_KG
+  const calcTotalLiquido = Math.max(0, calcTotalBruto - calcTara)
+
   const applyCalcTotal = () => {
-    if (calcOpen !== null) {
-      updateItem(calcOpen, 'quantity', parseFloat(calcTotal.toFixed(2)))
-      closeCalc()
+    if (calcOpen === null) return
+    if (calcTotalBoxes <= 0) {
+      alert('Informe o número de caixas em pelo menos uma pesagem.')
+      return
     }
+    const updated = [...formItems]
+    updated[calcOpen] = {
+      ...updated[calcOpen],
+      quantity: parseFloat(calcTotalLiquido.toFixed(2)),
+      boxes: calcTotalBoxes,
+    }
+    setFormItems(updated)
+    closeCalc()
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -234,6 +255,7 @@ export default function DoacoesPage() {
                       {index === 0 && <label className="block text-xs text-gray-500 mb-1 hidden sm:block">Quantidade</label>}
                       <input
                         type="number"
+                        inputMode="decimal"
                         step="0.01"
                         min="0.01"
                         value={item.quantity || ''}
@@ -267,6 +289,13 @@ export default function DoacoesPage() {
                   </div>
                 </div>
 
+                {/* Indicador de caixas (quando vier da calculadora) */}
+                {item.boxes !== undefined && item.boxes > 0 && (
+                  <p className="text-xs text-blue-600 mt-1 ml-1">
+                    📦 {item.boxes} caixa{item.boxes > 1 ? 's' : ''} · peso líquido (tara descontada)
+                  </p>
+                )}
+
                 {/* Calculadora */}
                 {calcOpen === index && (
                   <div className="mt-2 p-3 md:p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -274,26 +303,41 @@ export default function DoacoesPage() {
                       <p className="text-sm font-semibold text-blue-700">🧮 Calculadora de Peso</p>
                       <button type="button" onClick={closeCalc} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
                     </div>
-                    <p className="text-xs text-blue-500 mb-3 hidden sm:block">Some os pesos das caixas/sacolas</p>
+                    <p className="text-xs text-blue-500 mb-3">
+                      Informe o número de caixas e o peso bruto de cada pesagem.
+                      A tara ({PESO_CAIXA_KG} kg por caixa) será descontada automaticamente.
+                    </p>
 
                     <div className="space-y-2 mb-3">
                       {calcWeights.map((w, i) => (
                         <div key={i} className="flex flex-col sm:flex-row gap-2 sm:items-center">
                           <span className="text-xs font-medium text-blue-400 w-6 text-center hidden sm:block">{i + 1}.</span>
-                          <input
-                            type="text"
-                            placeholder="Ex: Caixa de tomate"
-                            value={w.description}
-                            onChange={e => updateCalcWeight(i, 'description', e.target.value)}
-                            className="flex-1 border rounded px-3 py-2 text-sm bg-white"
-                          />
-                          <div className="flex gap-2 items-center">
-                            <div className="relative flex-1 sm:w-28 sm:flex-none">
+
+                          {/* Caixas */}
+                          <div className="relative flex-1 sm:w-28 sm:flex-none">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              min="0"
+                              step="1"
+                              placeholder="Caixas"
+                              value={w.boxes || ''}
+                              onChange={e => updateCalcWeight(i, 'boxes', parseInt(e.target.value) || 0)}
+                              className="w-full border rounded px-3 py-2 text-sm pr-10 bg-white"
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">cx</span>
+                          </div>
+
+                          {/* Peso bruto */}
+                          <div className="flex gap-2 items-center flex-1">
+                            <div className="relative flex-1">
                               <input
                                 type="number"
+                                inputMode="decimal"
                                 step="0.01"
                                 min="0"
-                                placeholder="0.00"
+                                placeholder="Peso bruto"
                                 value={w.weight || ''}
                                 onChange={e => updateCalcWeight(i, 'weight', parseFloat(e.target.value) || 0)}
                                 className="w-full border rounded px-3 py-2 text-sm pr-8 bg-white"
@@ -322,19 +366,34 @@ export default function DoacoesPage() {
                       + Adicionar pesagem
                     </button>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white rounded-lg px-4 py-3 border border-blue-200">
-                      <div>
-                        <span className="text-sm text-blue-600 font-medium">Total: </span>
-                        <span className="text-lg font-bold text-blue-700">{calcTotal.toFixed(2)} kg</span>
+                    {/* Resumo */}
+                    <div className="bg-white rounded-lg px-4 py-3 border border-blue-200 mb-3">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600">Total de caixas:</span>
+                        <span className="font-semibold text-gray-800">{calcTotalBoxes}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={applyCalcTotal}
-                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition w-full sm:w-auto"
-                      >
-                        Aplicar peso
-                      </button>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600">Peso bruto:</span>
+                        <span className="text-gray-800">{calcTotalBruto.toFixed(2)} kg</span>
+                      </div>
+                      <div className="flex justify-between text-sm mb-2 text-red-600">
+                        <span>Tara ({calcTotalBoxes} × {PESO_CAIXA_KG} kg):</span>
+                        <span>−{calcTara.toFixed(2)} kg</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t border-blue-100">
+                        <span className="text-sm font-bold text-blue-700">🏷️ Peso líquido:</span>
+                        <span className="text-lg font-bold text-blue-700">{calcTotalLiquido.toFixed(2)} kg</span>
+                      </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={applyCalcTotal}
+                      disabled={calcTotalBoxes <= 0 || calcTotalLiquido <= 0}
+                      className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition w-full sm:w-auto"
+                    >
+                      Aplicar peso
+                    </button>
                   </div>
                 )}
               </div>
@@ -386,61 +445,70 @@ export default function DoacoesPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {donations.map(donation => (
-            <div key={donation.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
-              {/* Cabeçalho do card */}
-              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
-                <div className="min-w-0">
-                  <h3 className="font-bold text-gray-900 truncate">{donation.donor.name}</h3>
-                  <p className="text-sm text-gray-500">
-                    {formatDate(donation.date)}
-                    {donation.employee && (
-                      <>
-                        <span className="hidden sm:inline"> • Coleta: {donation.employee.name}</span>
-                        <span className="block sm:hidden">Coleta: {donation.employee.name}</span>
-                      </>
+          {donations.map(donation => {
+            const totalBoxes = donation.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
+            return (
+              <div key={donation.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
+                {/* Cabeçalho do card */}
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-gray-900 truncate">{donation.donor.name}</h3>
+                    <p className="text-sm text-gray-500">
+                      {formatDate(donation.date)}
+                      {donation.employee && (
+                        <>
+                          <span className="hidden sm:inline"> • Coleta: {donation.employee.name}</span>
+                          <span className="block sm:hidden">Coleta: {donation.employee.name}</span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Ações */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-sm font-medium text-green-600">
+                      {donation.items.length} {donation.items.length === 1 ? 'item' : 'itens'}
+                    </span>
+                    {totalBoxes > 0 && (
+                      <span className="text-sm font-medium text-blue-600">
+                        📦 {totalBoxes} cx
+                      </span>
                     )}
-                  </p>
+                    <button
+                      onClick={() => startEdit(donation)}
+                      className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(donation.id)}
+                      className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                    >
+                      Excluir
+                    </button>
+                  </div>
                 </div>
 
-                {/* Ações */}
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-sm font-medium text-green-600">
-                    {donation.items.length} {donation.items.length === 1 ? 'item' : 'itens'}
-                  </span>
-                  <button
-                    onClick={() => startEdit(donation)}
-                    className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => handleDelete(donation.id)}
-                    className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                  >
-                    Excluir
-                  </button>
+                {/* Tags dos itens */}
+                <div className="flex flex-wrap gap-2">
+                  {donation.items.map(item => (
+                    <span
+                      key={item.id}
+                      className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs sm:text-sm"
+                    >
+                      {item.product.name}: {item.quantity} {item.product.unit}
+                      {item.boxes ? ` · ${item.boxes}cx` : ''}
+                    </span>
+                  ))}
                 </div>
-              </div>
 
-              {/* Tags dos itens */}
-              <div className="flex flex-wrap gap-2">
-                {donation.items.map(item => (
-                  <span
-                    key={item.id}
-                    className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs sm:text-sm"
-                  >
-                    {item.product.name}: {item.quantity} {item.product.unit}
-                  </span>
-                ))}
+                {/* Observações */}
+                {donation.notes && (
+                  <p className="text-sm text-gray-400 mt-2 italic">📝 {donation.notes}</p>
+                )}
               </div>
-
-              {/* Observações */}
-              {donation.notes && (
-                <p className="text-sm text-gray-400 mt-2 italic">📝 {donation.notes}</p>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
