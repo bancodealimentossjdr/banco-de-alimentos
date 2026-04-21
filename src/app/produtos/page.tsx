@@ -7,7 +7,7 @@ interface Product {
   name: string
   category: string
   unit: string
-  minStock: number
+  minStock: number // mantido no type (vem da API), mas não exibido
   _count?: { donationItems: number; distributionItems: number }
 }
 
@@ -24,7 +24,27 @@ const CATEGORIES = [
   { value: 'outros', label: 'Outros' },
 ]
 
-const UNITS = ['kg', 'un', 'L', 'caixa', 'pacote', 'fardo']
+// Unidades novas (abreviadas)
+const UNITS = [
+  { value: 'kg',  label: 'Quilograma (kg)' },
+  { value: 'g',   label: 'Grama (g)' },
+  { value: 'un',  label: 'Unidade (un)' },
+  { value: 'dz',  label: 'Dúzia (dz)' },
+  { value: 'L',   label: 'Litro (L)' },
+  { value: 'ml',  label: 'Mililitro (ml)' },
+  { value: 'cx',  label: 'Caixa (cx)' },
+  { value: 'pct', label: 'Pacote (pct)' },
+  { value: 'sc',  label: 'Saco (sc)' },
+  { value: 'fd',  label: 'Fardo (fd)' },
+]
+
+// Valores legados (produtos antigos) — aparecem só se o produto já usar
+const LEGACY_UNITS: Record<string, string> = {
+  caixa:  'Caixa (legado)',
+  pacote: 'Pacote (legado)',
+  fardo:  'Fardo (legado)',
+  saco:   'Saco (legado)',
+}
 
 const CATEGORY_ICONS: Record<string, string> = {
   hortifruti: '🥬',
@@ -45,7 +65,7 @@ export default function ProdutosPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({
-    name: '', category: 'hortifruti', unit: 'kg', minStock: 0,
+    name: '', category: 'hortifruti', unit: 'kg',
   })
 
   const fetchProducts = async () => {
@@ -64,7 +84,7 @@ export default function ProdutosPage() {
   useEffect(() => { fetchProducts() }, [])
 
   const resetForm = () => {
-    setForm({ name: '', category: 'hortifruti', unit: 'kg', minStock: 0 })
+    setForm({ name: '', category: 'hortifruti', unit: 'kg' })
     setEditingId(null)
     setShowForm(false)
   }
@@ -74,7 +94,6 @@ export default function ProdutosPage() {
       name: product.name,
       category: product.category,
       unit: product.unit,
-      minStock: product.minStock,
     })
     setEditingId(product.id)
     setShowForm(true)
@@ -125,6 +144,17 @@ export default function ProdutosPage() {
   const getCategoryIcon = (value: string) =>
     CATEGORY_ICONS[value] || '📦'
 
+  // Lista de unidades a exibir no select — inclui legado se o produto usar
+  const getUnitOptions = (currentUnit: string) => {
+    const options = [...UNITS]
+    // Se o produto atual usa uma unidade legada, adiciona ela na lista
+    if (currentUnit && !UNITS.some(u => u.value === currentUnit)) {
+      const legacyLabel = LEGACY_UNITS[currentUnit] || `${currentUnit} (legado)`
+      options.push({ value: currentUnit, label: legacyLabel })
+    }
+    return options
+  }
+
   return (
     <div>
       {/* Header da página */}
@@ -144,7 +174,7 @@ export default function ProdutosPage() {
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Produto' : 'Novo Produto'}
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="sm:col-span-2 lg:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
               <input
@@ -174,21 +204,10 @@ export default function ProdutosPage() {
                 onChange={e => setForm({ ...form, unit: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               >
-                {UNITS.map(u => (
-                  <option key={u} value={u}>{u}</option>
+                {getUnitOptions(form.unit).map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Estoque Mínimo</label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                value={form.minStock}
-                onChange={e => setForm({ ...form, minStock: parseFloat(e.target.value) || 0 })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-              />
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 mt-4">
@@ -233,7 +252,7 @@ export default function ProdutosPage() {
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Nome</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Categoria</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Unidade</th>
-                    <th className="px-6 py-3 text-sm font-semibold text-gray-600">Estoque Mín.</th>
+                    <th className="px-6 py-3 text-sm font-semibold text-gray-600">Movimentações</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
                   </tr>
                 </thead>
@@ -249,7 +268,11 @@ export default function ProdutosPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-600">{product.unit}</td>
-                      <td className="px-6 py-4 text-gray-600">{product.minStock} {product.unit}</td>
+                      <td className="px-6 py-4 text-gray-500 text-sm">
+                        {product._count
+                          ? product._count.donationItems + product._count.distributionItems
+                          : 0}
+                      </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-3">
                           <button
@@ -293,15 +316,14 @@ export default function ProdutosPage() {
                   </span>
                 </div>
 
-                {/* Info: estoque mínimo + movimentações */}
-                <div className="flex items-center gap-3 text-sm text-gray-500 mb-3">
-                  <span>📉 Estoque mín: <strong className="text-gray-700">{product.minStock} {product.unit}</strong></span>
-                  {product._count && (
+                {/* Info: movimentações */}
+                {product._count && (
+                  <div className="flex items-center gap-3 text-sm text-gray-500 mb-3">
                     <span className="text-xs text-gray-400">
-                      • {product._count.donationItems + product._count.distributionItems} movimentações
+                      📊 {product._count.donationItems + product._count.distributionItems} movimentações
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Ações */}
                 <div className="flex gap-2 pt-2 border-t border-gray-100">
