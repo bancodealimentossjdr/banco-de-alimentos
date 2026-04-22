@@ -46,8 +46,12 @@ export const authConfig: NextAuthConfig = {
       }
 
       if (isLoggedIn && !canAccessRoute(userRole, pathname)) {
-        return Response.redirect(new URL('/', nextUrl.origin))
-      }
+  const deniedModule = pathname.split('/').filter(Boolean)[0] || 'pagina'
+  const redirectUrl = new URL('/', nextUrl.origin)
+  redirectUrl.searchParams.set('acesso_negado', deniedModule)
+  return Response.redirect(redirectUrl)
+}
+
 
       return true
     },

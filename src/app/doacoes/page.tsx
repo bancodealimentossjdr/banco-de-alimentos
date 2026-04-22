@@ -1,5 +1,5 @@
 'use client'
-
+import { usePermissions } from '@/hooks/usePermissions'
 import { useEffect, useState } from 'react'
 import { PESO_CAIXA_KG } from '@/lib/constants'
 
@@ -35,6 +35,7 @@ export default function DoacoesPage() {
   const [formItems, setFormItems] = useState<FormItem[]>([{ productId: '', quantity: 0 }])
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
+  const { canEdit } = usePermissions()
   const [calcWeights, setCalcWeights] = useState<{ boxes: number; weight: number }[]>([
     { boxes: 0, weight: 0 },
   ])
@@ -173,12 +174,14 @@ export default function DoacoesPage() {
       {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">📥 Doações / Coletas</h2>
-        <button
-          onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
-          className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-        >
-          {showForm ? 'Cancelar' : '+ Nova Doação'}
-        </button>
+        {canEdit('doacoes') && (
+  <button
+    onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
+    className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+  >
+    {showForm ? 'Cancelar' : '+ Nova Doação'}
+  </button>
+)}
       </div>
 
       {/* Formulário */}
@@ -474,18 +477,22 @@ export default function DoacoesPage() {
                         📦 {totalBoxes} cx
                       </span>
                     )}
-                    <button
-                      onClick={() => startEdit(donation)}
-                      className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(donation.id)}
-                      className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                    >
-                      Excluir
-                    </button>
+                    {canEdit('doacoes') && (
+  <>
+    <button
+      onClick={() => startEdit(donation)}
+      className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+    >
+      Editar
+    </button>
+    <button
+      onClick={() => handleDelete(donation.id)}
+      className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+    >
+      Excluir
+    </button>
+  </>
+)}
                   </div>
                 </div>
 

@@ -1,40 +1,62 @@
 'use client'
 
 import { useSession } from 'next-auth/react'
-import {
-  canEdit as canEditFn,
-  canEditRecord as canEditRecordFn,
-  canView as canViewFn,
-  type Module,
-} from '@/lib/permissions'
-import type { UserRole } from '@/types/next-auth'
 
-type PermissionsHook = {
-  role: UserRole | null
-  isAuthenticated: boolean
-  isLoading: boolean
-  isAdmin: boolean
-  isOperador: boolean
-  isVisualizador: boolean
-  canView: (module: Module) => boolean
-  canEdit: (module: Module) => boolean
-  canEditRecord: (module: Module, createdAt: Date | string) => boolean
-}
+export type Role = 'admin' | 'operador' | 'visualizador'
 
-export function usePermissions(): PermissionsHook {
+// Módulos que admin + operador podem editar (operação diária)
+const OPERATIONAL_MODULES = ['doacoes', 'distribuicoes', 'colheita-solidaria'] as const
+
+// Módulos que SÓ admin pode editar (cadastros estruturais)
+const ADMIN_ONLY_MODULES = [
+  'produtos',
+  'doadores',
+  'beneficiarios',
+  'funcionarios',
+  'produtores',
+  'usuarios',
+] as const
+
+export type Module =
+  | (typeof OPERATIONAL_MODULES)[number]
+  | (typeof ADMIN_ONLY_MODULES)[number]
+
+export function usePermissions() {
   const { data: session, status } = useSession()
-  const role = (session?.user?.role ?? null) as UserRole | null
+
+  const role = (session?.user?.role as Role | undefined) ?? 'visualizador'
+  const isAdmin = role === 'admin'
+  const isOperador = role === 'operador'
+  const isVisualizador = role === 'visualizador'
+  const isLoading = status === 'loading'
+
+  /**
+   * Verifica se o usuário pode CRIAR/EDITAR/EXCLUIR em um módulo.
+   * - admin: todos os módulos
+   * - operador: apenas módulos operacionais
+   * - visualizador: nenhum
+   */
+  const canEdit = (module: Module): boolean => {
+    if (isVisualizador) return false
+    if (isAdmin) return true
+    // operador
+    return (OPERATIONAL_MODULES as readonly string[]).includes(module)
+  }
+
+  /**
+   * Visualizar é liberado para todos os roles autenticados.
+   */
+  const canView = (_module: Module): boolean => {
+    return !!session
+  }
 
   return {
     role,
-    isAuthenticated: status === 'authenticated',
-    isLoading: status === 'loading',
-    isAdmin: role === 'admin',
-    isOperador: role === 'operador',
-    isVisualizador: role === 'visualizador',
-    canView: (module) => (role ? canViewFn(role, module) : false),
-    canEdit: (module) => (role ? canEditFn(role, module) : false),
-    canEditRecord: (module, createdAt) =>
-      role ? canEditRecordFn(role, module, createdAt) : false,
+    isAdmin,
+    isOperador,
+    isVisualizador,
+    isLoading,
+    canEdit,
+    canView,
   }
 }
