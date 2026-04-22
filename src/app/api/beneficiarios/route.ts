@@ -1,19 +1,26 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskBeneficiarioList } from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('beneficiarios')
   if (authResult instanceof NextResponse) return authResult
 
   try {
+    const session = await auth()
+    const role = session?.user?.role
+
     const beneficiaries = await prisma.beneficiary.findMany({
       orderBy: { name: 'asc' },
       include: {
         _count: { select: { distributions: true } },
       },
     })
-    return NextResponse.json(beneficiaries)
+
+    const masked = maskBeneficiarioList(beneficiaries, role)
+    return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro GET beneficiários:', error)
     return NextResponse.json({ error: 'Erro ao buscar instituições' }, { status: 500 })

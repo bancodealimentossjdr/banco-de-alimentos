@@ -9,6 +9,9 @@ export async function GET() {
   if (authResult instanceof NextResponse) return authResult
 
   try {
+    const session = await auth()
+    const role = session?.user?.role
+
     const donors = await prisma.donor.findMany({
       orderBy: { name: 'asc' },
       include: {
@@ -16,11 +19,8 @@ export async function GET() {
       },
     })
 
-    // 🔐 Aplica máscara se a sessão for de visualizador
-    const session = await auth()
-    const donorsSeguros = maskDoadorList(donors, session?.user?.role)
-
-    return NextResponse.json(donorsSeguros)
+    const masked = maskDoadorList(donors, role)
+    return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro GET doadores:', error)
     return NextResponse.json({ error: 'Erro ao buscar doadores' }, { status: 500 })

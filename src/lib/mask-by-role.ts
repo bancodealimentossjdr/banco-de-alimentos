@@ -1,5 +1,6 @@
 import type { UserRole } from '@/types/next-auth'
 import { maskCPF, maskPhone, maskEmail, maskAddress, maskContactName } from './mask'
+import { canEdit, type Module } from './permissions'
 
 /**
  * Retorna true se o role deve ver dados mascarados.
@@ -66,9 +67,40 @@ export function maskBeneficiarioList<T extends BeneficiarioLike>(
   return list.map((b) => maskBeneficiario(b, role))
 }
 
-// ---------- Helper genérico para CPF (caso apareça em outro módulo) ----------
-export { maskCPF, maskPhone, maskEmail, maskAddress, maskContactName }
-import { canEdit, type Module } from './permissions'
+// ---------- PRODUTOR RURAL ----------
+type ProdutorLike = {
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  contact?: string | null
+  cpf?: string | null
+  [key: string]: unknown
+}
+
+export function maskProdutor<T extends ProdutorLike>(
+  p: T,
+  role: UserRole | undefined | null
+): T {
+  if (!shouldMaskPersonalData(role)) return p
+  return {
+    ...p,
+    phone: maskPhone(p.phone ?? null),
+    email: maskEmail(p.email ?? null),
+    address: maskAddress(p.address ?? null),
+    contact: maskContactName(p.contact ?? null),
+    cpf: maskCPF(p.cpf ?? null),
+  }
+}
+
+export function maskProdutorList<T extends ProdutorLike>(
+  list: T[],
+  role: UserRole | undefined | null
+): T[] {
+  if (!shouldMaskPersonalData(role)) return list
+  return list.map((p) => maskProdutor(p, role))
+}
+
+// ---------- Helpers por módulo (notes em somente-leitura) ----------
 
 /**
  * Retorna true se o role é "somente leitura" no módulo.
@@ -105,27 +137,6 @@ export function maskNotesListIfReadOnly<T extends { notes?: string | null }>(
   if (!isReadOnlyInModule(role, module)) return list
   return list.map((item) => maskNotesIfReadOnly(item, role, module))
 }
-// ---------- PRODUTOR RURAL ----------
-type ProdutorLike = {
-  phone?: string | null
-  email?: string | null
-  address?: string | null
-  contact?: string | null
-  cpf?: string | null
-  [key: string]: unknown
-}
 
-export function maskProdutor<T extends ProdutorLike>(
-  p: T,
-  role: UserRole | undefined | null
-): T {
-  if (!shouldMaskPersonalData(role)) return p
-  return {
-    ...p,
-    phone: maskPhone(p.phone ?? null),
-    email: maskEmail(p.email ?? null),
-    address: maskAddress(p.address ?? null),
-    contact: maskContactName(p.contact ?? null),
-    cpf: maskCPF(p.cpf ?? null),
-  }
-}
+// ---------- Re-exports ----------
+export { maskCPF, maskPhone, maskEmail, maskAddress, maskContactName }

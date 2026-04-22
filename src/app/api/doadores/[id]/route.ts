@@ -1,6 +1,39 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireEdit } from '@/lib/auth-helpers'
+import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskDoador } from '@/lib/mask-by-role'
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authResult = await requireView('doadores')
+  if (authResult instanceof NextResponse) return authResult
+
+  try {
+    const { id } = await params
+    const session = await auth()
+    const role = session?.user?.role
+
+    const donor = await prisma.donor.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { donations: true } },
+      },
+    })
+
+    if (!donor) {
+      return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
+    }
+
+    const masked = maskDoador(donor, role)
+    return NextResponse.json(masked)
+  } catch (error) {
+    console.error('Erro GET doador:', error)
+    return NextResponse.json({ error: 'Erro ao buscar doador' }, { status: 500 })
+  }
+}
 
 export async function PUT(
   request: Request,
@@ -59,7 +92,9 @@ export async function DELETE(
 
     if (donor._count.donations > 0) {
       return NextResponse.json(
-        { error: `Não é possível excluir: este doador possui ${donor._count.donations} doação(ões) vinculada(s).` },
+        {
+          error: `Não é possível excluir: este doador possui ${donor._count.donations} doação(ões) vinculada(s).`,
+        },
         { status: 400 }
       )
     }
