@@ -1,6 +1,8 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskNotesListIfReadOnly, maskProdutor, shouldMaskPersonalData } from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('colheita-solidaria')
@@ -17,13 +19,30 @@ export async function GET() {
         },
       },
     })
-    return NextResponse.json(colheitas)
+
+    // 🔐 Aplica máscaras conforme o role
+    const session = await auth()
+    const role = session?.user?.role
+
+    // 1) Mascara notes se for somente leitura no módulo
+    let colheitasSeguras = maskNotesListIfReadOnly(colheitas, role, 'colheita-solidaria')
+
+    // 2) Mascara dados pessoais do produtor se for visualizador
+    if (shouldMaskPersonalData(role)) {
+      colheitasSeguras = colheitasSeguras.map((c) => ({
+        ...c,
+        producer: c.producer ? maskProdutor(c.producer, role) : c.producer,
+      }))
+    }
+
+    return NextResponse.json(colheitasSeguras)
   } catch (error) {
     console.error('Erro ao buscar colheitas:', error)
     return NextResponse.json({ error: 'Erro ao buscar colheitas' }, { status: 500 })
   }
 }
 
+// POST continua exatamente igual, não mexe
 export async function POST(request: NextRequest) {
   const authResult = await requireEdit('colheita-solidaria')
   if (authResult instanceof NextResponse) return authResult

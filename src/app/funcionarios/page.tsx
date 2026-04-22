@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import PhoneLink from '@/components/PhoneLink'
+import { usePermissions } from '@/hooks/usePermissions'
 
 interface Employee {
   id: string
@@ -13,6 +14,9 @@ interface Employee {
 }
 
 export default function FuncionariosPage() {
+  const { canEdit } = usePermissions()
+  const podeEditar = canEdit('funcionarios')
+
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -94,16 +98,18 @@ export default function FuncionariosPage() {
       {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">👷 Funcionários</h2>
-        <button
-          onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
-          className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-        >
-          {showForm ? 'Cancelar' : '+ Novo Funcionário'}
-        </button>
+        {podeEditar && (
+          <button
+            onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
+            className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+          >
+            {showForm ? 'Cancelar' : '+ Novo Funcionário'}
+          </button>
+        )}
       </div>
 
       {/* Formulário */}
-      {showForm && (
+      {showForm && podeEditar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Funcionário' : 'Novo Funcionário'}
@@ -169,7 +175,9 @@ export default function FuncionariosPage() {
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">👷</p>
           <p className="text-xl">Nenhum funcionário cadastrado</p>
-          <p className="text-sm mt-2">Clique em &quot;+ Novo Funcionário&quot; para começar</p>
+          {podeEditar && (
+            <p className="text-sm mt-2">Clique em &quot;+ Novo Funcionário&quot; para começar</p>
+          )}
         </div>
       ) : (
         <>
@@ -185,7 +193,9 @@ export default function FuncionariosPage() {
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Coletas</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Entregas</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Status</th>
-                    <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
+                    {podeEditar && (
+                      <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -203,22 +213,24 @@ export default function FuncionariosPage() {
                           {emp.active ? 'Ativo' : 'Inativo'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => startEdit(emp)}
-                            className="text-blue-500 hover:text-blue-700 text-sm font-medium"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => handleDelete(emp.id, emp.name)}
-                            className="text-red-500 hover:text-red-700 text-sm font-medium"
-                          >
-                            Excluir
-                          </button>
-                        </div>
-                      </td>
+                      {podeEditar && (
+                        <td className="px-6 py-4">
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => startEdit(emp)}
+                              className="text-blue-500 hover:text-blue-700 text-sm font-medium"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => handleDelete(emp.id, emp.name)}
+                              className="text-red-500 hover:text-red-700 text-sm font-medium"
+                            >
+                              Excluir
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -269,21 +281,23 @@ export default function FuncionariosPage() {
                     </div>
                   </div>
 
-                  {/* Ações */}
-                  <div className="flex gap-2 pt-2 border-t border-gray-100">
-                    <button
-                      onClick={() => startEdit(emp)}
-                      className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
-                    >
-                      ✏️ Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(emp.id, emp.name)}
-                      className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
-                    >
-                      🗑️ Excluir
-                    </button>
-                  </div>
+                  {/* Ações — só aparecem pra quem pode editar */}
+                  {podeEditar && (
+                    <div className="flex gap-2 pt-2 border-t border-gray-100">
+                      <button
+                        onClick={() => startEdit(emp)}
+                        className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
+                      >
+                        ✏️ Editar
+                      </button>
+                      <button
+                        onClick={() => handleDelete(emp.id, emp.name)}
+                        className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
+                      >
+                        🗑️ Excluir
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })}

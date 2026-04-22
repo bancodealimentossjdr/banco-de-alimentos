@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import { usePermissions } from '@/hooks/usePermissions'
 
 interface Product { id: string; name: string; unit: string }
 interface Beneficiary { id: string; name: string; type: string }
@@ -27,6 +28,9 @@ interface FormItem {
 }
 
 export default function DistribuicoesPage() {
+  const { canEdit } = usePermissions()
+  const podeEditar = canEdit('distribuicoes')
+
   const [distributions, setDistributions] = useState<Distribution[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([])
@@ -160,16 +164,18 @@ export default function DistribuicoesPage() {
       {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">📤 Distribuições</h2>
-        <button
-          onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
-          className="bg-red-500 hover:bg-red-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-        >
-          {showForm ? 'Cancelar' : '+ Nova Distribuição'}
-        </button>
+        {podeEditar && (
+          <button
+            onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
+            className="bg-red-500 hover:bg-red-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+          >
+            {showForm ? 'Cancelar' : '+ Nova Distribuição'}
+          </button>
+        )}
       </div>
 
       {/* Formulário */}
-      {showForm && (
+      {showForm && podeEditar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Distribuição' : 'Registrar Distribuição'}
@@ -306,7 +312,9 @@ export default function DistribuicoesPage() {
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">📤</p>
           <p className="text-xl">Nenhuma distribuição registrada</p>
-          <p className="text-sm mt-2">Clique em &quot;+ Nova Distribuição&quot; para começar</p>
+          {podeEditar && (
+            <p className="text-sm mt-2">Clique em &quot;+ Nova Distribuição&quot; para começar</p>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -332,18 +340,22 @@ export default function DistribuicoesPage() {
                   <span className="text-sm font-medium text-red-600">
                     {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
                   </span>
-                  <button
-                    onClick={() => startEdit(dist)}
-                    className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => handleDelete(dist.id)}
-                    className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                  >
-                    Excluir
-                  </button>
+                  {podeEditar && (
+                    <>
+                      <button
+                        onClick={() => startEdit(dist)}
+                        className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleDelete(dist.id)}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                      >
+                        Excluir
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import { usePermissions } from '@/hooks/usePermissions'
 
 interface Product {
   id: string
@@ -60,6 +61,9 @@ const CATEGORY_ICONS: Record<string, string> = {
 }
 
 export default function ProdutosPage() {
+  const { canEdit } = usePermissions()
+  const podeEditar = canEdit('produtos')
+
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -160,16 +164,18 @@ export default function ProdutosPage() {
       {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">📦 Produtos</h2>
-        <button
-          onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
-          className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-        >
-          {showForm ? 'Cancelar' : '+ Novo Produto'}
-        </button>
+        {podeEditar && (
+          <button
+            onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+          >
+            {showForm ? 'Cancelar' : '+ Novo Produto'}
+          </button>
+        )}
       </div>
 
       {/* Formulário */}
-      {showForm && (
+      {showForm && podeEditar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Produto' : 'Novo Produto'}
@@ -239,7 +245,9 @@ export default function ProdutosPage() {
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">📦</p>
           <p className="text-xl">Nenhum produto cadastrado</p>
-          <p className="text-sm mt-2">Clique em &quot;+ Novo Produto&quot; para começar</p>
+          {podeEditar && (
+            <p className="text-sm mt-2">Clique em &quot;+ Novo Produto&quot; para começar</p>
+          )}
         </div>
       ) : (
         <>
@@ -253,7 +261,9 @@ export default function ProdutosPage() {
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Categoria</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Unidade</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Movimentações</th>
-                    <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
+                    {podeEditar && (
+                      <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -273,22 +283,24 @@ export default function ProdutosPage() {
                           ? product._count.donationItems + product._count.distributionItems
                           : 0}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => startEdit(product)}
-                            className="text-blue-500 hover:text-blue-700 text-sm font-medium"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => handleDelete(product.id, product.name)}
-                            className="text-red-500 hover:text-red-700 text-sm font-medium"
-                          >
-                            Excluir
-                          </button>
-                        </div>
-                      </td>
+                      {podeEditar && (
+                        <td className="px-6 py-4">
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => startEdit(product)}
+                              className="text-blue-500 hover:text-blue-700 text-sm font-medium"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => handleDelete(product.id, product.name)}
+                              className="text-red-500 hover:text-red-700 text-sm font-medium"
+                            >
+                              Excluir
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -325,21 +337,23 @@ export default function ProdutosPage() {
                   </div>
                 )}
 
-                {/* Ações */}
-                <div className="flex gap-2 pt-2 border-t border-gray-100">
-                  <button
-                    onClick={() => startEdit(product)}
-                    className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
-                  >
-                    ✏️ Editar
-                  </button>
-                  <button
-                    onClick={() => handleDelete(product.id, product.name)}
-                    className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
-                  >
-                    🗑️ Excluir
-                  </button>
-                </div>
+                {/* Ações — só aparecem pra quem pode editar */}
+                {podeEditar && (
+                  <div className="flex gap-2 pt-2 border-t border-gray-100">
+                    <button
+                      onClick={() => startEdit(product)}
+                      className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
+                    >
+                      ✏️ Editar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(product.id, product.name)}
+                      className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
+                    >
+                      🗑️ Excluir
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

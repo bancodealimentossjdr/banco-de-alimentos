@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { usePermissions } from '@/hooks/usePermissions'
 
 interface Producer { id: string; name: string }
 interface ProductOption { id: string; name: string; unit: string }
@@ -23,6 +24,9 @@ const STATUS_OPTIONS = [
 ]
 
 export default function ColheitaSolidariaPage() {
+  const { canEdit } = usePermissions()
+  const podeEditar = canEdit('colheita-solidaria')
+
   const [harvests, setHarvests] = useState<Harvest[]>([])
   const [producers, setProducers] = useState<Producer[]>([])
   const [products, setProducts] = useState<ProductOption[]>([])
@@ -134,16 +138,18 @@ export default function ColheitaSolidariaPage() {
       {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">🌿 Colheita Solidária</h2>
-        <button
-          onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
-          className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-        >
-          {showForm ? 'Cancelar' : '+ Nova Colheita'}
-        </button>
+        {podeEditar && (
+          <button
+            onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
+            className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+          >
+            {showForm ? 'Cancelar' : '+ Nova Colheita'}
+          </button>
+        )}
       </div>
 
       {/* Formulário */}
-      {showForm && (
+      {showForm && podeEditar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Colheita' : 'Nova Colheita'}
@@ -367,7 +373,9 @@ export default function ColheitaSolidariaPage() {
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">🌿</p>
           <p className="text-xl">Nenhuma colheita registrada</p>
-          <p className="text-sm mt-2">Clique em &quot;+ Nova Colheita&quot; para começar</p>
+          {podeEditar && (
+            <p className="text-sm mt-2">Clique em &quot;+ Nova Colheita&quot; para começar</p>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -396,21 +404,23 @@ export default function ColheitaSolidariaPage() {
                     </p>
                   </div>
 
-                  {/* Ações */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => startEdit(harvest)}
-                      className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(harvest.id)}
-                      className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                    >
-                      Excluir
-                    </button>
-                  </div>
+                  {/* Ações — só aparecem pra quem pode editar */}
+                  {podeEditar && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => startEdit(harvest)}
+                        className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleDelete(harvest.id)}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Itens */}

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskDoadorList } from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('doadores')
@@ -13,7 +15,12 @@ export async function GET() {
         _count: { select: { donations: true } },
       },
     })
-    return NextResponse.json(donors)
+
+    // 🔐 Aplica máscara se a sessão for de visualizador
+    const session = await auth()
+    const donorsSeguros = maskDoadorList(donors, session?.user?.role)
+
+    return NextResponse.json(donorsSeguros)
   } catch (error) {
     console.error('Erro GET doadores:', error)
     return NextResponse.json({ error: 'Erro ao buscar doadores' }, { status: 500 })

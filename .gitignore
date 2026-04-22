@@ -50,3 +50,6 @@ dev.db-journal
 .env
 .env.local
 .env*.local
+
+.vercel
+.env*.local

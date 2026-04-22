@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import PhoneLink from '@/components/PhoneLink'
+import { usePermissions } from '@/hooks/usePermissions'
 
 interface Producer {
   id: string
@@ -14,6 +15,9 @@ interface Producer {
 }
 
 export default function ProdutoresPage() {
+  const { canEdit } = usePermissions()
+  const podeEditar = canEdit('produtores')
+
   const [producers, setProducers] = useState<Producer[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -112,16 +116,18 @@ export default function ProdutoresPage() {
           <h2 className="text-xl md:text-2xl font-bold text-gray-900">🚜 Produtores Rurais</h2>
           <p className="text-gray-500 text-sm mt-0.5">{producers.length} produtor(es) cadastrado(s)</p>
         </div>
-        <button
-          onClick={() => { if (showForm) resetForm(); else { resetForm(); setShowForm(true) } }}
-          className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-        >
-          {showForm ? 'Cancelar' : '+ Novo Produtor'}
-        </button>
+        {podeEditar && (
+          <button
+            onClick={() => { if (showForm) resetForm(); else { resetForm(); setShowForm(true) } }}
+            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+          >
+            {showForm ? 'Cancelar' : '+ Novo Produtor'}
+          </button>
+        )}
       </div>
 
       {/* Formulário */}
-      {showForm && (
+      {showForm && podeEditar && (
         <div className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Produtor' : '➕ Novo Produtor'}
@@ -212,7 +218,9 @@ export default function ProdutoresPage() {
           <p className="text-sm mt-2">
             {search
               ? 'Tente buscar com outros termos'
-              : 'Clique em "+ Novo Produtor" para começar'}
+              : podeEditar
+                ? 'Clique em "+ Novo Produtor" para começar'
+                : 'Aguarde o cadastro por um administrador'}
           </p>
         </div>
       ) : (
@@ -228,7 +236,9 @@ export default function ProdutoresPage() {
                     <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Endereço</th>
                     <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Telefone</th>
                     <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Ações</th>
+                    {podeEditar && (
+                      <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Ações</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -245,22 +255,24 @@ export default function ProdutoresPage() {
                           {producer.active ? 'Ativo' : 'Inativo'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => handleEdit(producer)}
-                            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => handleToggleActive(producer)}
-                            className={`text-sm font-medium ${producer.active ? 'text-red-600 hover:text-red-800' : 'text-green-600 hover:text-green-800'}`}
-                          >
-                            {producer.active ? 'Desativar' : 'Reativar'}
-                          </button>
-                        </div>
-                      </td>
+                      {podeEditar && (
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => handleEdit(producer)}
+                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => handleToggleActive(producer)}
+                              className={`text-sm font-medium ${producer.active ? 'text-red-600 hover:text-red-800' : 'text-green-600 hover:text-green-800'}`}
+                            >
+                              {producer.active ? 'Desativar' : 'Reativar'}
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -304,25 +316,27 @@ export default function ProdutoresPage() {
                   )}
                 </div>
 
-                {/* Ações */}
-                <div className="flex gap-2 pt-2 border-t border-gray-100">
-                  <button
-                    onClick={() => handleEdit(producer)}
-                    className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
-                  >
-                    ✏️ Editar
-                  </button>
-                  <button
-                    onClick={() => handleToggleActive(producer)}
-                    className={`flex-1 text-center py-2 rounded-lg text-sm font-medium transition ${
-                      producer.active
-                        ? 'text-red-600 hover:bg-red-50'
-                        : 'text-green-600 hover:bg-green-50'
-                    }`}
-                  >
-                    {producer.active ? '⛔ Desativar' : '✅ Reativar'}
-                  </button>
-                </div>
+                {/* Ações — só aparecem pra quem pode editar */}
+                {podeEditar && (
+                  <div className="flex gap-2 pt-2 border-t border-gray-100">
+                    <button
+                      onClick={() => handleEdit(producer)}
+                      className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
+                    >
+                      ✏️ Editar
+                    </button>
+                    <button
+                      onClick={() => handleToggleActive(producer)}
+                      className={`flex-1 text-center py-2 rounded-lg text-sm font-medium transition ${
+                        producer.active
+                          ? 'text-red-600 hover:bg-red-50'
+                          : 'text-green-600 hover:bg-green-50'
+                      }`}
+                    >
+                      {producer.active ? '⛔ Desativar' : '✅ Reativar'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
