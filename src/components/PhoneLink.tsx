@@ -1,5 +1,7 @@
 'use client'
 
+import { usePermissions } from '@/hooks/usePermissions'
+
 interface PhoneLinkProps {
   phone: string | null | undefined
   /** Se true, mostra só o número sem os ícones (útil em contextos compactos) */
@@ -43,6 +45,8 @@ function buildWhatsAppUrl(phone: string): string {
 }
 
 export default function PhoneLink({ phone, textOnly = false, className = '' }: PhoneLinkProps) {
+  const { isVisualizador, isLoading } = usePermissions()
+
   if (!phone || !phone.trim()) {
     return <span className="text-gray-400">-</span>
   }
@@ -51,7 +55,10 @@ export default function PhoneLink({ phone, textOnly = false, className = '' }: P
   const formatted = formatPhone(phone)
   const isMobile = digits.length === 11 // celular BR tem 11 dígitos (com DDD)
 
-  if (textOnly) {
+  // 🔒 Visualizador (ou enquanto carrega a sessão): só texto, sem ícones clicáveis
+  // O número já vem mascarado do backend (ex: "(32) ****-8888"), então não faz
+  // sentido oferecer "Ligar" ou "WhatsApp" — seria um link quebrado.
+  if (textOnly || isVisualizador || isLoading) {
     return <span className={className}>{formatted}</span>
   }
 
