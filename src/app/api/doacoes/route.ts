@@ -31,4 +31,43 @@ export async function GET() {
   }
 }
 
-// POST continua igual, não precisa mexer
+export async function POST(request: Request) {
+  // 🔐 Só admin/operador podem criar doações
+  const authResult = await requireEdit('doacoes')
+  if (authResult instanceof NextResponse) return authResult
+
+  try {
+    const body = await request.json()
+
+    // Usa meio-dia para evitar que o fuso horário mude o dia
+    const dateValue = new Date(body.date + 'T12:00:00')
+
+    const donation = await prisma.donation.create({
+      data: {
+        donorId: body.donorId,
+        employeeId: body.employeeId || null,
+        date: dateValue,
+        notes: body.notes || null,
+        items: {
+          create: body.items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            boxes: item.boxes ?? null,
+          })),
+        },
+      },
+      include: {
+        donor: { select: { id: true, name: true } },
+        employee: { select: { id: true, name: true } },
+        items: {
+          include: { product: { select: { name: true, unit: true } } },
+        },
+      },
+    })
+
+    return NextResponse.json(donation, { status: 201 })
+  } catch (error) {
+    console.error('Erro POST doação:', error)
+    return NextResponse.json({ error: 'Erro ao criar doação' }, { status: 500 })
+  }
+}
