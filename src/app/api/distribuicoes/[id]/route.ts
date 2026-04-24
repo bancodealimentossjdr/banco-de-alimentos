@@ -63,9 +63,10 @@ export async function PUT(
         date: date ? new Date(date + 'T12:00:00') : undefined,
         notes: notes || null,
         items: {
-          create: items.map((item: { productId: string; quantity: number }) => ({
+          create: items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
             productId: item.productId,
             quantity: item.quantity,
+            boxes: item.boxes ?? null,
           })),
         },
       },

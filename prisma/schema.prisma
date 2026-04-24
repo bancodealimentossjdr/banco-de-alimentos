@@ -9,7 +9,7 @@ datasource db {
 }
 
 // ==========================================
-// USUÃRIOS (autenticaÃ§Ã£o)
+// USUÁRIOS (autenticação)
 // ==========================================
 model User {
   id        String   @id @default(cuid())
@@ -23,7 +23,7 @@ model User {
 }
 
 // ==========================================
-// PRODUTOS (o que Ã© doado/distribuÃ­do)
+// PRODUTOS (o que é doado/distribuído)
 // ==========================================
 model Product {
   id        String   @id @default(cuid())
@@ -60,7 +60,7 @@ model Donor {
 }
 
 // ==========================================
-// INSTITUIÃ‡Ã•ES BENEFICIÃRIAS (quem recebe)
+// INSTITUIÇÕES BENEFICIÁRIAS (quem recebe)
 // ==========================================
 model Beneficiary {
   id        String   @id @default(cuid())
@@ -78,7 +78,7 @@ model Beneficiary {
 }
 
 // ==========================================
-// FUNCIONÃRIOS (quem faz a coleta/entrega)
+// FUNCIONÁRIOS (quem faz a coleta/entrega)
 // ==========================================
 model Employee {
   id        String   @id @default(cuid())
@@ -95,7 +95,7 @@ model Employee {
 }
 
 // ==========================================
-// DOAÃ‡ÃƒO (entrada de alimentos)
+// DOAÇÃO (entrada de alimentos)
 // ==========================================
 model Donation {
   id         String   @id @default(cuid())
@@ -113,7 +113,7 @@ model Donation {
 }
 
 // ==========================================
-// ITENS DA DOAÃ‡ÃƒO
+// ITENS DA DOAÇÃO
 // ==========================================
 model DonationItem {
   id         String  @id @default(cuid())
@@ -128,7 +128,7 @@ model DonationItem {
 }
 
 // ==========================================
-// DISTRIBUIÃ‡ÃƒO (saÃ­da de alimentos)
+// DISTRIBUIÇÃO (saída de alimentos)
 // ==========================================
 model Distribution {
   id            String   @id @default(cuid())
@@ -145,20 +145,21 @@ model Distribution {
 }
 
 // ==========================================
-// ITENS DA DISTRIBUIÃ‡ÃƒO
+// ITENS DA DISTRIBUIÇÃO
 // ==========================================
 model DistributionItem {
   id             String @id @default(cuid())
   distributionId String
   productId      String
   quantity       Float
+  boxes          Int?
 
   distribution Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
   product      Product      @relation(fields: [productId], references: [id])
 }
 
 // ==========================================
-// PRODUTORES RURAIS (Colheita SolidÃ¡ria)
+// PRODUTORES RURAIS (Colheita Solidária)
 // ==========================================
 model Producer {
   id        String   @id @default(cuid())
@@ -174,7 +175,7 @@ model Producer {
 }
 
 // ==========================================
-// COLHEITA SOLIDARIA (evento de colheita)
+// COLHEITA SOLIDÁRIA (evento de colheita)
 // ==========================================
 model SolidarityHarvest {
   id             String   @id @default(cuid())
@@ -200,6 +201,7 @@ model HarvestItem {
   harvestId String
   productId String
   quantity  Float
+  boxes     Int?   // 👈 ADICIONAR ESTA LINHA
 
   harvest SolidarityHarvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   product Product           @relation(fields: [productId], references: [id])

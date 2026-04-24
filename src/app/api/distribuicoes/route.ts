@@ -48,9 +48,10 @@ export async function POST(request: Request) {
         date: dateValue,
         notes: body.notes || null,
         items: {
-          create: body.items.map((item: { productId: string; quantity: number }) => ({
+          create: body.items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
             productId: item.productId,
             quantity: item.quantity,
+            boxes: item.boxes ?? null,
           })),
         },
       },

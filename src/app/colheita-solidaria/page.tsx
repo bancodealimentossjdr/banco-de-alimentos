@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
+import CalculadoraPeso from '@/components/CalculadoraPeso'
 
 interface Producer { id: string; name: string }
 interface ProductOption { id: string; name: string; unit: string }
 interface HarvestItem {
-  id: string; productId: string; quantity: number
+  id: string; productId: string; quantity: number; boxes: number | null
   product: { id: string; name: string; unit: string }
 }
 interface Harvest {
@@ -15,6 +16,12 @@ interface Harvest {
   producer: { id: string; name: string }
   employee: { id: string; name: string } | null
   items: HarvestItem[]
+}
+
+interface FormItem {
+  productId: string
+  quantity: number
+  boxes?: number
 }
 
 const STATUS_OPTIONS = [
@@ -38,8 +45,10 @@ export default function ColheitaSolidariaPage() {
   const [form, setForm] = useState({
     producerId: '', employeeId: '', date: new Date().toISOString().split('T')[0],
     status: 'agendada', notes: '', indemnityValue: 1.5,
-    items: [{ productId: '', quantity: 0 }] as { productId: string; quantity: number }[],
+    items: [{ productId: '', quantity: 0 }] as FormItem[],
   })
+
+  const [calcOpen, setCalcOpen] = useState<number | null>(null)
 
   const fetchAll = async () => {
     try {
@@ -68,6 +77,7 @@ export default function ColheitaSolidariaPage() {
     })
     setEditingId(null)
     setShowForm(false)
+    setCalcOpen(null)
   }
 
   const startEdit = (harvest: Harvest) => {
@@ -78,11 +88,16 @@ export default function ColheitaSolidariaPage() {
       status: harvest.status, notes: harvest.notes || '',
       indemnityValue: harvest.indemnityValue || 1.5,
       items: harvest.items.length > 0
-        ? harvest.items.map(i => ({ productId: i.productId, quantity: i.quantity }))
+        ? harvest.items.map(i => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            boxes: i.boxes ?? undefined,
+          }))
         : [{ productId: '', quantity: 0 }],
     })
     setEditingId(harvest.id)
     setShowForm(true)
+    setCalcOpen(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -90,12 +105,16 @@ export default function ColheitaSolidariaPage() {
   const removeItem = (index: number) => {
     if (form.items.length <= 1) return
     setForm({ ...form, items: form.items.filter((_, i) => i !== index) })
+    if (calcOpen === index) setCalcOpen(null)
   }
   const updateItem = (index: number, field: string, value: string | number) => {
     const newItems = [...form.items]
     newItems[index] = { ...newItems[index], [field]: value }
     setForm({ ...form, items: newItems })
   }
+
+  const openCalc = (index: number) => setCalcOpen(index)
+  const closeCalc = () => setCalcOpen(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -126,11 +145,13 @@ export default function ColheitaSolidariaPage() {
 
   const formTotalKg = form.items.reduce((sum, item) => sum + (item.quantity || 0), 0)
   const formTotalIndemnity = formTotalKg * form.indemnityValue
+  const formTotalBoxes = form.items.reduce((sum, item) => sum + (item.boxes || 0), 0)
 
   const getHarvestIndemnity = (harvest: Harvest) => {
     const total = harvest.items.reduce((sum, item) => sum + item.quantity, 0)
+    const totalBoxes = harvest.items.reduce((sum, item) => sum + (item.boxes || 0), 0)
     const rate = harvest.indemnityValue || 1.5
-    return { totalKg: total, rate, totalValue: total * rate }
+    return { totalKg: total, totalBoxes, rate, totalValue: total * rate }
   }
 
   return (
@@ -235,63 +256,102 @@ export default function ColheitaSolidariaPage() {
               <div className="flex-1"><span className="text-xs text-gray-500">Produto *</span></div>
               <div className="w-32"><span className="text-xs text-gray-500">Quantidade *</span></div>
               <div className="w-28 text-right"><span className="text-xs text-gray-500">Indenização</span></div>
-              <div className="w-8"></div>
+              <div className="w-20"></div>
             </div>
 
             <div className="space-y-3">
               {form.items.map((item, index) => (
-                <div
-                  key={index}
-                  className="flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 bg-gray-50 lg:bg-transparent rounded-lg lg:rounded-none"
-                >
-                  {/* Produto */}
-                  <div className="flex-1">
-                    <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
-                    <select
-                      value={item.productId}
-                      onChange={e => updateItem(index, 'productId', e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                    >
-                      <option value="">Selecione um produto</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
-                    </select>
-                  </div>
-
-                  {/* Quantidade + Indenização + Remover */}
-                  <div className="flex gap-2 items-center">
-                    <div className="flex-1 lg:w-32 lg:flex-none">
-                      <label className="block text-xs text-gray-500 mb-1 lg:hidden">Quantidade *</label>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.1"
-                        min="0"
-                        value={item.quantity || ''}
-                        onChange={e => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                <div key={index}>
+                  <div className="flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 bg-gray-50 lg:bg-transparent rounded-lg lg:rounded-none">
+                    {/* Produto */}
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
+                      <select
+                        value={item.productId}
+                        onChange={e => updateItem(index, 'productId', e.target.value)}
                         className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                        placeholder="0"
-                      />
+                      >
+                        <option value="">Selecione um produto</option>
+                        {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
+                      </select>
                     </div>
 
-                    {/* Indenização calculada */}
-                    <div className="w-24 lg:w-28 text-right shrink-0">
-                      <span className="block text-xs text-gray-500 mb-1 lg:hidden">Indenização</span>
-                      <span className={`text-sm font-semibold ${item.quantity > 0 ? 'text-amber-700' : 'text-gray-300'}`}>
-                        R$ {((item.quantity || 0) * form.indemnityValue).toFixed(2)}
-                      </span>
-                    </div>
+                    {/* Quantidade + Calculadora + Indenização + Remover */}
+                    <div className="flex gap-2 items-center">
+                      <div className="flex-1 lg:w-32 lg:flex-none">
+                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">Quantidade *</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          value={item.quantity || ''}
+                          onChange={e => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                          className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                          placeholder="0"
+                        />
+                      </div>
 
-                    {/* Remover */}
-                    {form.items.length > 1 && (
+                      {/* 🧮 Botão calculadora */}
                       <button
                         type="button"
-                        onClick={() => removeItem(index)}
-                        className="shrink-0 p-2 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-sm"
+                        onClick={() => calcOpen === index ? closeCalc() : openCalc(index)}
+                        className={`shrink-0 p-2.5 rounded-lg border text-lg ${
+                          calcOpen === index
+                            ? 'bg-blue-100 border-blue-300'
+                            : 'bg-white border-gray-200 hover:bg-blue-50'
+                        }`}
+                        title="Calculadora de peso"
                       >
-                        ✕
+                        🧮
                       </button>
-                    )}
+
+                      {/* Indenização calculada */}
+                      <div className="w-24 lg:w-28 text-right shrink-0">
+                        <span className="block text-xs text-gray-500 mb-1 lg:hidden">Indenização</span>
+                        <span className={`text-sm font-semibold ${item.quantity > 0 ? 'text-amber-700' : 'text-gray-300'}`}>
+                          R$ {((item.quantity || 0) * form.indemnityValue).toFixed(2)}
+                        </span>
+                      </div>
+
+                      {/* Remover */}
+                      {form.items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          className="shrink-0 p-2 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-sm"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Indicador de caixas */}
+                  {item.boxes !== undefined && item.boxes > 0 && (
+                    <p className="text-xs text-blue-600 mt-1 ml-1">
+                      📦 {item.boxes} caixa{item.boxes > 1 ? 's' : ''} · peso líquido (tara descontada)
+                    </p>
+                  )}
+
+                  {/* Calculadora */}
+                  {calcOpen === index && (
+                    <div className="mt-2">
+                      <CalculadoraPeso
+                        onApply={(pesoLiquido, totalCaixas) => {
+                          const newItems = [...form.items]
+                          newItems[index] = {
+                            ...newItems[index],
+                            quantity: pesoLiquido,
+                            boxes: totalCaixas,
+                          }
+                          setForm({ ...form, items: newItems })
+                          setCalcOpen(null)
+                        }}
+                        onClose={closeCalc}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -305,6 +365,11 @@ export default function ColheitaSolidariaPage() {
                 <span className="text-xs text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">
                   R$ {form.indemnityValue.toFixed(2)} / kg
                 </span>
+                {formTotalBoxes > 0 && (
+                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                    📦 {formTotalBoxes} caixa{formTotalBoxes > 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
 
               <div className="space-y-1 mb-3">
@@ -314,6 +379,7 @@ export default function ColheitaSolidariaPage() {
                     <div key={idx} className="flex justify-between text-sm gap-2">
                       <span className="text-gray-600 truncate">
                         {prod ? prod.name : 'Produto ' + (idx + 1)} — {item.quantity} kg
+                        {item.boxes ? ` · ${item.boxes}cx` : ''}
                       </span>
                       <span className="font-medium text-amber-700 shrink-0">
                         R$ {(item.quantity * form.indemnityValue).toFixed(2)}
@@ -392,6 +458,11 @@ export default function ColheitaSolidariaPage() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.color}`}>
                         {statusStyle.label}
                       </span>
+                      {ind.totalBoxes > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                          📦 {ind.totalBoxes} cx
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {new Date(harvest.date).toLocaleDateString('pt-BR')}
@@ -432,6 +503,12 @@ export default function ColheitaSolidariaPage() {
                         <span className="text-green-700 font-medium">{item.product.name}</span>
                         <span className="text-gray-500 mx-1">•</span>
                         <span className="text-gray-700">{item.quantity} {item.product.unit}</span>
+                        {item.boxes ? (
+                          <>
+                            <span className="text-gray-500 mx-1">•</span>
+                            <span className="text-blue-600 font-medium">{item.boxes}cx</span>
+                          </>
+                        ) : null}
                         <span className="text-gray-500 mx-1">•</span>
                         <span className="text-amber-700 font-semibold">R$ {(item.quantity * ind.rate).toFixed(2)}</span>
                       </div>
@@ -444,7 +521,10 @@ export default function ColheitaSolidariaPage() {
                       <div key={item.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm">
                         <div className="min-w-0">
                           <span className="text-green-700 font-medium">{item.product.name}</span>
-                          <span className="text-gray-500 ml-1">({item.quantity} {item.product.unit})</span>
+                          <span className="text-gray-500 ml-1">
+                            ({item.quantity} {item.product.unit}
+                            {item.boxes ? ` · ${item.boxes}cx` : ''})
+                          </span>
                         </div>
                         <span className="text-amber-700 font-semibold shrink-0 ml-2">
                           R$ {(item.quantity * ind.rate).toFixed(2)}
@@ -462,6 +542,12 @@ export default function ColheitaSolidariaPage() {
                       <span className="text-xs text-gray-500">Peso Total:</span>
                       <span className="text-sm font-bold text-gray-900">{ind.totalKg.toFixed(1)} kg</span>
                     </div>
+                    {ind.totalBoxes > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Caixas:</span>
+                        <span className="text-sm font-bold text-blue-600">📦 {ind.totalBoxes}</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">Valor/kg:</span>
                       <span className="text-sm font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>
@@ -480,6 +566,12 @@ export default function ColheitaSolidariaPage() {
                       <span className="text-gray-500">Peso Total</span>
                       <span className="font-bold text-gray-900">{ind.totalKg.toFixed(1)} kg</span>
                     </div>
+                    {ind.totalBoxes > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Caixas</span>
+                        <span className="font-bold text-blue-600">📦 {ind.totalBoxes}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Valor/kg</span>
                       <span className="font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>

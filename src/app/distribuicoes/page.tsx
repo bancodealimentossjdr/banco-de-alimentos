@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
+import CalculadoraPeso from '@/components/CalculadoraPeso'
 
 interface Product { id: string; name: string; unit: string }
 interface Beneficiary { id: string; name: string; type: string }
@@ -10,6 +11,7 @@ interface Employee { id: string; name: string }
 interface DistributionItem {
   id: string
   quantity: number
+  boxes: number | null
   product: { name: string; unit: string }
 }
 
@@ -25,6 +27,7 @@ interface Distribution {
 interface FormItem {
   productId: string
   quantity: number
+  boxes?: number
 }
 
 export default function DistribuicoesPage() {
@@ -43,6 +46,8 @@ export default function DistribuicoesPage() {
     beneficiaryId: '', employeeId: '', date: new Date().toISOString().split('T')[0], notes: '',
   })
   const [formItems, setFormItems] = useState<FormItem[]>([{ productId: '', quantity: 0 }])
+
+  const [calcOpen, setCalcOpen] = useState<number | null>(null)
 
   const fetchAll = async () => {
     try {
@@ -73,6 +78,7 @@ export default function DistribuicoesPage() {
     setFormItems([{ productId: '', quantity: 0 }])
     setEditingId(null)
     setShowForm(false)
+    setCalcOpen(null)
   }
 
   const startEdit = (dist: Distribution) => {
@@ -86,10 +92,12 @@ export default function DistribuicoesPage() {
       dist.items.map(item => ({
         productId: products.find(p => p.name === item.product.name)?.id || '',
         quantity: item.quantity,
+        boxes: item.boxes ?? undefined,
       }))
     )
     setEditingId(dist.id)
     setShowForm(true)
+    setCalcOpen(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -99,6 +107,7 @@ export default function DistribuicoesPage() {
     if (formItems.length > 1) {
       setFormItems(formItems.filter((_, i) => i !== index))
     }
+    if (calcOpen === index) setCalcOpen(null)
   }
 
   const updateItem = (index: number, field: string, value: string | number) => {
@@ -106,6 +115,9 @@ export default function DistribuicoesPage() {
     updated[index] = { ...updated[index], [field]: value }
     setFormItems(updated)
   }
+
+  const openCalc = (index: number) => setCalcOpen(index)
+  const closeCalc = () => setCalcOpen(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -247,8 +259,9 @@ export default function DistribuicoesPage() {
                       {index === 0 && <label className="block text-xs text-gray-500 mb-1 hidden sm:block">Quantidade</label>}
                       <input
                         type="number"
-                        step="0.1"
-                        min="0.1"
+                        inputMode="decimal"
+                        step="0.01"
+                        min="0.01"
                         value={item.quantity || ''}
                         onChange={e => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
                         className="w-full border rounded-lg px-3 py-2.5 text-sm"
@@ -256,6 +269,18 @@ export default function DistribuicoesPage() {
                         required
                       />
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => calcOpen === index ? closeCalc() : openCalc(index)}
+                      className={`shrink-0 p-2.5 rounded-lg border text-lg ${
+                        calcOpen === index
+                          ? 'bg-blue-100 border-blue-300'
+                          : 'bg-gray-50 border-gray-200 hover:bg-blue-50'
+                      }`}
+                      title="Calculadora de peso"
+                    >
+                      🧮
+                    </button>
                     {formItems.length > 1 && (
                       <button
                         type="button"
@@ -267,6 +292,30 @@ export default function DistribuicoesPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Indicador de caixas (quando vier da calculadora) */}
+                {item.boxes !== undefined && item.boxes > 0 && (
+                  <p className="text-xs text-blue-600 mt-1 ml-1">
+                    📦 {item.boxes} caixa{item.boxes > 1 ? 's' : ''} · peso líquido (tara descontada)
+                  </p>
+                )}
+
+                {/* Calculadora (componente reutilizável) */}
+                {calcOpen === index && (
+                  <CalculadoraPeso
+                    onApply={(pesoLiquido, totalCaixas) => {
+                      const updated = [...formItems]
+                      updated[index] = {
+                        ...updated[index],
+                        quantity: pesoLiquido,
+                        boxes: totalCaixas,
+                      }
+                      setFormItems(updated)
+                      setCalcOpen(null)
+                    }}
+                    onClose={closeCalc}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -318,65 +367,74 @@ export default function DistribuicoesPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {distributions.map(dist => (
-            <div key={dist.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
-              {/* Cabeçalho do card */}
-              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
-                <div className="min-w-0">
-                  <h3 className="font-bold text-gray-900 truncate">{dist.beneficiary.name}</h3>
-                  <p className="text-sm text-gray-500">
-                    {formatDate(dist.date)}
-                    {dist.employee && (
+          {distributions.map(dist => {
+            const totalBoxes = dist.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
+            return (
+              <div key={dist.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
+                {/* Cabeçalho do card */}
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-gray-900 truncate">{dist.beneficiary.name}</h3>
+                    <p className="text-sm text-gray-500">
+                      {formatDate(dist.date)}
+                      {dist.employee && (
+                        <>
+                          <span className="hidden sm:inline"> • Entrega: {dist.employee.name}</span>
+                          <span className="block sm:hidden">Entrega: {dist.employee.name}</span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Ações */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-sm font-medium text-red-600">
+                      {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
+                    </span>
+                    {totalBoxes > 0 && (
+                      <span className="text-sm font-medium text-blue-600">
+                        📦 {totalBoxes} cx
+                      </span>
+                    )}
+                    {podeEditar && (
                       <>
-                        <span className="hidden sm:inline"> • Entrega: {dist.employee.name}</span>
-                        <span className="block sm:hidden">Entrega: {dist.employee.name}</span>
+                        <button
+                          onClick={() => startEdit(dist)}
+                          className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleDelete(dist.id)}
+                          className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                        >
+                          Excluir
+                        </button>
                       </>
                     )}
-                  </p>
+                  </div>
                 </div>
 
-                {/* Ações */}
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-sm font-medium text-red-600">
-                    {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
-                  </span>
-                  {podeEditar && (
-                    <>
-                      <button
-                        onClick={() => startEdit(dist)}
-                        className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => handleDelete(dist.id)}
-                        className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                      >
-                        Excluir
-                      </button>
-                    </>
-                  )}
+                {/* Tags dos itens */}
+                <div className="flex flex-wrap gap-2">
+                  {dist.items.map(item => (
+                    <span
+                      key={item.id}
+                      className="px-3 py-1 bg-red-50 text-red-700 rounded-full text-xs sm:text-sm"
+                    >
+                      {item.product.name}: {item.quantity} {item.product.unit}
+                      {item.boxes ? ` · ${item.boxes}cx` : ''}
+                    </span>
+                  ))}
                 </div>
-              </div>
 
-              {/* Tags dos itens */}
-              <div className="flex flex-wrap gap-2">
-                {dist.items.map(item => (
-                  <span
-                    key={item.id}
-                    className="px-3 py-1 bg-red-50 text-red-700 rounded-full text-xs sm:text-sm"
-                  >
-                    {item.product.name}: {item.quantity} {item.product.unit}
-                  </span>
-                ))}
+                {/* Observações */}
+                {dist.notes && (
+                  <p className="text-sm text-gray-400 mt-2 italic">📝 {dist.notes}</p>
+                )}
               </div>
-
-              {/* Observações */}
-              {dist.notes && (
-                <p className="text-sm text-gray-400 mt-2 italic">📝 {dist.notes}</p>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

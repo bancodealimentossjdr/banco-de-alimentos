@@ -42,7 +42,6 @@ export async function GET() {
   }
 }
 
-// POST continua exatamente igual, não mexe
 export async function POST(request: NextRequest) {
   const authResult = await requireEdit('colheita-solidaria')
   if (authResult instanceof NextResponse) return authResult
@@ -70,9 +69,10 @@ export async function POST(request: NextRequest) {
         notes: notes || null,
         indemnityValue: indemnityValue ? parseFloat(String(indemnityValue)) : null,
         items: {
-          create: items.map((item: { productId: string; quantity: number }) => ({
+          create: items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
             productId: item.productId,
             quantity: item.quantity,
+            boxes: item.boxes ?? null,
           })),
         },
       },
