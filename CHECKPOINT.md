@@ -1,19 +1,20 @@
 # 📋 CHECKPOINT — Banco de Alimentos
-**Última atualização:** 24/04/2026 (sexta-feira, ~12h45)
-**Próxima sessão:** Início da Onda 6
+**Última atualização:** 25/04/2026 (sábado)
+**Próxima sessão:** Início da Onda 8
 
 ---
 
 ## 🎯 ONDE PARAMOS
 
-**Onda 5 CONCLUÍDA ✅ — Deploy em produção validado**
+**Onda 7 CONCLUÍDA ✅ — Múltiplos funcionários implementados**
 
-Hotfix: endpoints POST de doações e distribuições estavam retornando 
-405 (Method Not Allowed). Handlers restaurados via Git, credenciais 
-do Supabase rotacionadas, infra local organizada. Tudo testado em 
-local e produção.
+Schema Prisma ajustado para suportar até 3 funcionários por 
+movimentação (doação, distribuição e colheita). APIs, UI e 
+relações atualizadas. Bug do `_count.distributions` corrigido 
+em `/api/funcionarios/route.ts`. Tudo testado e funcionando 
+em produção.
 
-**Próximo passo:** Iniciar **Onda 6 — Desconto automático de caixas**.
+**Próximo passo:** Iniciar **Onda 8 — Aba Impróprios**.
 
 ---
 
@@ -29,31 +30,18 @@ local e produção.
 - [x] Onda 4.2 — Proteção de APIs (requireView / requireEdit)
 - [x] Onda 4.3 — Proteção de UI por role + Mascaramento LGPD
 - [x] Onda 5 — Restauração de handlers POST + rotação de credenciais
+- [x] Onda 6 — Desconto automático de caixas (CalculadoraPeso)
+- [x] Onda 7 — Múltiplos funcionários (até 3) em movimentações
 
 ### Commits relevantes
-- `311281a` — fix(api): restaura handlers POST de doacoes e distribuicoes (Onda 5)
+- `311281a` — fix(api): restaura handlers POST (Onda 5)
+- `<novo>`  — feat(onda-7): múltiplos funcionários
 
 ---
 
 ## 🗺️ ROADMAP — PRÓXIMAS ONDAS
 
-### 📦 Onda 6 — Desconto automático de caixas (PRÓXIMA)
-Unifica item 2 da lista original + Onda 5 planejada.
-- [ ] Cadastro de doações → desconto automático quando `boxes > 0`
-- [ ] Cadastro de distribuições → mesma calculadora
-- [ ] Cadastro de colheita solidária → mesma calculadora
-- [ ] Suporte a pesagem única (peso bruto total menos caixas)
-- [ ] UI reutilizável (componente único `<CalculadoraPeso />`)
-
-### 👥 Onda 7 — Múltiplos funcionários na coleta
-- [ ] Ajustar schema Prisma: Donation → de 1 para até 3 funcionários
-- [ ] Migration no banco
-- [ ] Ajustar UI do cadastro/edição
-- [ ] Ajustar exibição nos detalhes
-- [ ] Retrocompatibilidade com doações antigas
-- ❓ **Dúvida pendente:** 3 obrigatórios ou apenas 1º obrigatório?
-
-### 🗑️ Onda 8 — Aba Impróprios
+### 🗑️ Onda 8 — Aba Impróprios (PRÓXIMA)
 - [ ] Nova página `/improprios`
 - [ ] Cálculo: total recebido (doações) − total distribuído + colheita do dia
 - [ ] Registro diário (automático ou manual?)
@@ -87,31 +75,23 @@ Unifica item 2 da lista original + Onda 5 planejada.
 
 ---
 
-## 🧩 APRENDIZADOS OPERACIONAIS DA ONDA 5
+## 🧩 APRENDIZADOS OPERACIONAIS
 
-### .env — Padrão Next.js
+### Onda 5 — Infra
 - Usar **um único** `.env.local` na raiz
-- `.env*.local` já está no `.gitignore`
-- Evitar múltiplos `.env`, `.env.teste`, etc.
-
-### Prisma — Cuidados
-- ⚠️ `prisma db pull` **reescreve** o schema (perde comentários/ordem)
-- ✅ `prisma generate` é seguro (só regenera o client)
-- 🛟 Recuperação: `git checkout prisma/schema.prisma`
-
-### Git — Fluxo seguro
-- Sempre `git pull` antes de começar
-- `git pull --rebase origin main` pra sincronizar sem merge commit
+- `prisma db pull` reescreve o schema (cuidado!)
+- `prisma generate` é seguro
 - ❌ **NUNCA** `git push --force`
-- 🕰️ `git show <hash>:<arquivo>` recupera versão antiga
 
-### Rotação de credenciais
-- Trocar senha Supabase → atualizar **local + Vercel**
-- Testar local antes de push/deploy
+### Onda 7 — Prisma + TS
+- ⚠️ Após mudar schema: rodar `npx prisma generate`
+- 💡 Reiniciar TS Server no VS Code (`Ctrl+Shift+P → Restart TS Server`)
+- 🧹 Em último caso: limpar `node_modules/.prisma` e reinstalar
+- 🔍 Atenção a `_count` em rotas — campos antigos quebram o Prisma
 
 ---
 
 ## 🔄 Migração Next.js 16 (preservado)
-- [x] `src/middleware.ts` → renomeado para `src/proxy.ts`
+- [x] `src/middleware.ts` → `src/proxy.ts`
 - [x] `export { auth as middleware }` → `export { auth as proxy }`
-- [x] Proteção de rotas continua funcionando normalmente
+- [x] Proteção de rotas funcionando
