@@ -6,14 +6,12 @@
     "seed": "npx tsx prisma/seed.ts"
   },
   "scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "start": "next start",
-  "lint": "next lint",
-  "db:migrate": "dotenv -e .env.local -- npx prisma migrate dev",
-  "db:generate": "dotenv -e .env.local -- npx prisma generate",
-  "db:studio": "dotenv -e .env.local -- npx prisma studio"
-},
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma generate"
+  },
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
