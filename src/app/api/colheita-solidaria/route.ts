@@ -14,6 +14,8 @@ export async function GET() {
       include: {
         producer: true,
         employee: true,
+        employee2: true,
+        employee3: true,
         items: {
           include: { product: true },
         },
@@ -48,7 +50,17 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { producerId, employeeId, date, status, notes, items, indemnityValue } = body
+    const {
+      producerId,
+      employeeId,
+      employee2Id,
+      employee3Id,
+      date,
+      status,
+      notes,
+      items,
+      indemnityValue,
+    } = body
 
     if (!producerId) {
       return NextResponse.json({ error: 'Produtor é obrigatório' }, { status: 400 })
@@ -58,12 +70,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Adicione pelo menos um item' }, { status: 400 })
     }
 
+    // 🔍 Validação: funcionários não podem se repetir
+    const employeeIds = [employeeId, employee2Id, employee3Id].filter(Boolean)
+    const uniqueIds = new Set(employeeIds)
+    if (employeeIds.length !== uniqueIds.size) {
+      return NextResponse.json(
+        { error: 'Não é possível selecionar o mesmo funcionário mais de uma vez' },
+        { status: 400 }
+      )
+    }
+
     const dateValue = date ? new Date(date + 'T12:00:00') : new Date()
 
     const colheita = await prisma.solidarityHarvest.create({
       data: {
         producerId,
         employeeId: employeeId || null,
+        employee2Id: employee2Id || null,
+        employee3Id: employee3Id || null,
         date: dateValue,
         status: status || 'agendada',
         notes: notes || null,
@@ -79,6 +103,8 @@ export async function POST(request: NextRequest) {
       include: {
         producer: true,
         employee: true,
+        employee2: true,
+        employee3: true,
         items: { include: { product: true } },
       },
     })

@@ -13,6 +13,8 @@ export async function GET() {
       include: {
         beneficiary: { select: { id: true, name: true, type: true } },
         employee: { select: { id: true, name: true } },
+        employee2: { select: { id: true, name: true } },
+        employee3: { select: { id: true, name: true } },
         items: {
           include: { product: { select: { name: true, unit: true } } },
         },
@@ -39,12 +41,23 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
 
+    // 🔍 Validação: funcionários não podem se repetir
+    const empIds = [body.employeeId, body.employee2Id, body.employee3Id].filter(Boolean)
+    if (empIds.length !== new Set(empIds).size) {
+      return NextResponse.json(
+        { error: 'Não é possível adicionar o mesmo funcionário mais de uma vez' },
+        { status: 400 }
+      )
+    }
+
     const dateValue = new Date(body.date + 'T12:00:00')
 
     const distribution = await prisma.distribution.create({
       data: {
         beneficiaryId: body.beneficiaryId,
         employeeId: body.employeeId || null,
+        employee2Id: body.employee2Id || null,
+        employee3Id: body.employee3Id || null,
         date: dateValue,
         notes: body.notes || null,
         items: {
@@ -58,6 +71,8 @@ export async function POST(request: Request) {
       include: {
         beneficiary: { select: { id: true, name: true, type: true } },
         employee: { select: { id: true, name: true } },
+        employee2: { select: { id: true, name: true } },
+        employee3: { select: { id: true, name: true } },
         items: {
           include: { product: { select: { name: true, unit: true } } },
         },

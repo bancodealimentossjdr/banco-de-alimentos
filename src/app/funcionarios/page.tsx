@@ -10,8 +10,30 @@ interface Employee {
   role: string | null
   phone: string | null
   active: boolean
-  _count: { donations: number; distributions: number }
+  _count: {
+    donationsAsEmployee1: number
+    donationsAsEmployee2: number
+    donationsAsEmployee3: number
+    distributions: number
+    harvestsAsEmployee1: number
+    harvestsAsEmployee2: number
+    harvestsAsEmployee3: number
+  }
 }
+
+// Helper: soma as 3 relações de coletas (doações)
+const getColetas = (emp: Employee) =>
+  (emp._count?.donationsAsEmployee1 || 0) +
+  (emp._count?.donationsAsEmployee2 || 0) +
+  (emp._count?.donationsAsEmployee3 || 0)
+
+const getEntregas = (emp: Employee) => emp._count?.distributions || 0
+
+// 🌾 Helper: soma as 3 relações de colheitas
+const getColheitas = (emp: Employee) =>
+  (emp._count?.harvestsAsEmployee1 || 0) +
+  (emp._count?.harvestsAsEmployee2 || 0) +
+  (emp._count?.harvestsAsEmployee3 || 0)
 
 export default function FuncionariosPage() {
   const { canEdit } = usePermissions()
@@ -192,6 +214,7 @@ export default function FuncionariosPage() {
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Telefone</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Coletas</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Entregas</th>
+                    <th className="px-6 py-3 text-sm font-semibold text-gray-600">Colheitas</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Status</th>
                     {podeEditar && (
                       <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
@@ -206,8 +229,9 @@ export default function FuncionariosPage() {
                       <td className="px-6 py-4 text-gray-600">
                         <PhoneLink phone={emp.phone} />
                       </td>
-                      <td className="px-6 py-4 text-gray-600">{emp._count.donations}</td>
-                      <td className="px-6 py-4 text-gray-600">{emp._count.distributions}</td>
+                      <td className="px-6 py-4 text-gray-600">{getColetas(emp)}</td>
+                      <td className="px-6 py-4 text-gray-600">{getEntregas(emp)}</td>
+                      <td className="px-6 py-4 text-gray-600">{getColheitas(emp)}</td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${emp.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                           {emp.active ? 'Ativo' : 'Inativo'}
@@ -241,7 +265,10 @@ export default function FuncionariosPage() {
           {/* ====== CARDS - só aparece no mobile (< md) ====== */}
           <div className="md:hidden space-y-3">
             {employees.map(emp => {
-              const totalAtividades = emp._count.donations + emp._count.distributions
+              const coletas = getColetas(emp)
+              const entregas = getEntregas(emp)
+              const colheitas = getColheitas(emp)
+              const totalAtividades = coletas + entregas + colheitas
               return (
                 <div key={emp.id} className="bg-white rounded-xl shadow-sm border p-4">
                   {/* Topo: nome + status */}
@@ -265,19 +292,23 @@ export default function FuncionariosPage() {
                     </div>
                   )}
 
-                  {/* Contadores: coletas + entregas */}
-                  <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                  {/* Contadores: coletas + entregas + colheitas + total */}
+                  <div className="grid grid-cols-4 gap-2 text-center mb-3">
                     <div className="bg-blue-50 rounded-lg py-2">
-                      <p className="text-xs text-blue-600 font-medium">Coletas</p>
-                      <p className="text-lg font-bold text-blue-700">{emp._count.donations}</p>
+                      <p className="text-[10px] text-blue-600 font-medium">Coletas</p>
+                      <p className="text-base font-bold text-blue-700">{coletas}</p>
                     </div>
                     <div className="bg-orange-50 rounded-lg py-2">
-                      <p className="text-xs text-orange-600 font-medium">Entregas</p>
-                      <p className="text-lg font-bold text-orange-700">{emp._count.distributions}</p>
+                      <p className="text-[10px] text-orange-600 font-medium">Entregas</p>
+                      <p className="text-base font-bold text-orange-700">{entregas}</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg py-2">
+                      <p className="text-[10px] text-green-600 font-medium">Colheitas</p>
+                      <p className="text-base font-bold text-green-700">{colheitas}</p>
                     </div>
                     <div className="bg-gray-50 rounded-lg py-2">
-                      <p className="text-xs text-gray-500 font-medium">Total</p>
-                      <p className="text-lg font-bold text-gray-700">{totalAtividades}</p>
+                      <p className="text-[10px] text-gray-500 font-medium">Total</p>
+                      <p className="text-base font-bold text-gray-700">{totalAtividades}</p>
                     </div>
                   </div>
 

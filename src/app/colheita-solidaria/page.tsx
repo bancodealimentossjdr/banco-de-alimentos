@@ -15,6 +15,8 @@ interface Harvest {
   indemnityValue: number | null
   producer: { id: string; name: string }
   employee: { id: string; name: string } | null
+  employee2: { id: string; name: string } | null
+  employee3: { id: string; name: string } | null
   items: HarvestItem[]
 }
 
@@ -43,8 +45,14 @@ export default function ColheitaSolidariaPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
-    producerId: '', employeeId: '', date: new Date().toISOString().split('T')[0],
-    status: 'agendada', notes: '', indemnityValue: 1.5,
+    producerId: '',
+    employeeId: '',
+    employee2Id: '',
+    employee3Id: '',
+    date: new Date().toISOString().split('T')[0],
+    status: 'agendada',
+    notes: '',
+    indemnityValue: 1.5,
     items: [{ productId: '', quantity: 0 }] as FormItem[],
   })
 
@@ -71,8 +79,14 @@ export default function ColheitaSolidariaPage() {
 
   const resetForm = () => {
     setForm({
-      producerId: '', employeeId: '', date: new Date().toISOString().split('T')[0],
-      status: 'agendada', notes: '', indemnityValue: 1.5,
+      producerId: '',
+      employeeId: '',
+      employee2Id: '',
+      employee3Id: '',
+      date: new Date().toISOString().split('T')[0],
+      status: 'agendada',
+      notes: '',
+      indemnityValue: 1.5,
       items: [{ productId: '', quantity: 0 }],
     })
     setEditingId(null)
@@ -84,8 +98,11 @@ export default function ColheitaSolidariaPage() {
     setForm({
       producerId: harvest.producer.id,
       employeeId: harvest.employee?.id || '',
+      employee2Id: harvest.employee2?.id || '',
+      employee3Id: harvest.employee3?.id || '',
       date: harvest.date.split('T')[0],
-      status: harvest.status, notes: harvest.notes || '',
+      status: harvest.status,
+      notes: harvest.notes || '',
       indemnityValue: harvest.indemnityValue || 1.5,
       items: harvest.items.length > 0
         ? harvest.items.map(i => ({
@@ -120,12 +137,27 @@ export default function ColheitaSolidariaPage() {
     e.preventDefault()
     const validItems = form.items.filter(i => i.productId !== '' && i.quantity > 0)
     if (validItems.length === 0) { alert('Adicione pelo menos um item com produto e quantidade.'); return }
+
+    // 🔍 Validação local: funcionários não podem se repetir
+    const empIds = [form.employeeId, form.employee2Id, form.employee3Id].filter(Boolean)
+    if (empIds.length !== new Set(empIds).size) {
+      alert('Não é possível selecionar o mesmo funcionário mais de uma vez.')
+      return
+    }
+
     try {
       const url = editingId ? '/api/colheita-solidaria/' + editingId : '/api/colheita-solidaria'
       const method = editingId ? 'PUT' : 'POST'
       const res = await fetch(url, {
-        method, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, employeeId: form.employeeId || null, items: validItems }),
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          employeeId: form.employeeId || null,
+          employee2Id: form.employee2Id || null,
+          employee3Id: form.employee3Id || null,
+          items: validItems,
+        }),
       })
       if (res.ok) { resetForm(); fetchAll() }
       else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
@@ -152,6 +184,11 @@ export default function ColheitaSolidariaPage() {
     const totalBoxes = harvest.items.reduce((sum, item) => sum + (item.boxes || 0), 0)
     const rate = harvest.indemnityValue || 1.5
     return { totalKg: total, totalBoxes, rate, totalValue: total * rate }
+  }
+
+  // 🧑‍🤝‍🧑 Lista de funcionários da colheita (filtra os nulos)
+  const getHarvestEmployees = (harvest: Harvest) => {
+    return [harvest.employee, harvest.employee2, harvest.employee3].filter(Boolean) as { id: string; name: string }[]
   }
 
   return (
@@ -190,17 +227,6 @@ export default function ColheitaSolidariaPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Funcionário</label>
-              <select
-                value={form.employeeId}
-                onChange={e => setForm({ ...form, employeeId: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-              >
-                <option value="">Selecione...</option>
-                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-              </select>
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Data *</label>
               <input
                 type="date"
@@ -231,7 +257,7 @@ export default function ColheitaSolidariaPage() {
                 <option value={1.0}>R$ 1,00 / kg</option>
               </select>
             </div>
-            <div>
+            <div className="md:col-span-2 lg:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
               <textarea
                 value={form.notes}
@@ -240,6 +266,57 @@ export default function ColheitaSolidariaPage() {
                 rows={1}
               />
             </div>
+          </div>
+
+          {/* 🧑‍🤝‍🧑 Funcionários (até 3) */}
+          <div className="mt-6">
+            <h3 className="text-md font-semibold text-gray-800 mb-3">🧑‍🤝‍🧑 Funcionários da Colheita</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Funcionário 1</label>
+                <select
+                  value={form.employeeId}
+                  onChange={e => setForm({ ...form, employeeId: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                >
+                  <option value="">Selecione...</option>
+                  {employees
+                    .filter(emp => emp.id !== form.employee2Id && emp.id !== form.employee3Id)
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Funcionário 2 <span className="text-gray-400 text-xs">(opcional)</span></label>
+                <select
+                  value={form.employee2Id}
+                  onChange={e => setForm({ ...form, employee2Id: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                  disabled={!form.employeeId}
+                >
+                  <option value="">Selecione...</option>
+                  {employees
+                    .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee3Id)
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Funcionário 3 <span className="text-gray-400 text-xs">(opcional)</span></label>
+                <select
+                  value={form.employee3Id}
+                  onChange={e => setForm({ ...form, employee3Id: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                  disabled={!form.employee2Id}
+                >
+                  <option value="">Selecione...</option>
+                  {employees
+                    .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee2Id)
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                </select>
+              </div>
+            </div>
+            {!form.employeeId && (form.employee2Id || form.employee3Id) && (
+              <p className="text-xs text-amber-600 mt-2">⚠️ Selecione o Funcionário 1 antes dos demais.</p>
+            )}
           </div>
 
           {/* Itens da Colheita */}
@@ -448,6 +525,7 @@ export default function ColheitaSolidariaPage() {
           {harvests.map(harvest => {
             const statusStyle = getStatusStyle(harvest.status)
             const ind = getHarvestIndemnity(harvest)
+            const harvestEmployees = getHarvestEmployees(harvest)
             return (
               <div key={harvest.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
                 {/* Cabeçalho do card */}
@@ -466,13 +544,20 @@ export default function ColheitaSolidariaPage() {
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {new Date(harvest.date).toLocaleDateString('pt-BR')}
-                      {harvest.employee && (
-                        <>
-                          <span className="hidden sm:inline"> • {harvest.employee.name}</span>
-                          <span className="block sm:hidden">{harvest.employee.name}</span>
-                        </>
-                      )}
                     </p>
+                    {/* 🧑‍🤝‍🧑 Funcionários */}
+                    {harvestEmployees.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {harvestEmployees.map(emp => (
+                          <span
+                            key={emp.id}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-100"
+                          >
+                            👤 {emp.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Ações — só aparecem pra quem pode editar */}
@@ -593,8 +678,7 @@ export default function ColheitaSolidariaPage() {
             )
           })}
         </div>
-      )
-      }
-    </div >
+      )}
+    </div>
   )
 }

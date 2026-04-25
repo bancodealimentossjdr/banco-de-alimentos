@@ -16,6 +16,8 @@ export async function GET(
       include: {
         beneficiary: { select: { id: true, name: true } },
         employee: { select: { id: true, name: true } },
+        employee2: { select: { id: true, name: true } },
+        employee3: { select: { id: true, name: true } },
         items: { include: { product: { select: { name: true, unit: true } } } },
       },
     })
@@ -49,7 +51,16 @@ export async function PUT(
     if (authResult instanceof NextResponse) return authResult
 
     const body = await request.json()
-    const { beneficiaryId, employeeId, date, notes, items } = body
+    const { beneficiaryId, employeeId, employee2Id, employee3Id, date, notes, items } = body
+
+    // 🔍 Validação: funcionários não podem se repetir
+    const empIds = [employeeId, employee2Id, employee3Id].filter(Boolean)
+    if (empIds.length !== new Set(empIds).size) {
+      return NextResponse.json(
+        { error: 'Não é possível adicionar o mesmo funcionário mais de uma vez' },
+        { status: 400 }
+      )
+    }
 
     await prisma.distributionItem.deleteMany({
       where: { distributionId: id },
@@ -60,6 +71,8 @@ export async function PUT(
       data: {
         beneficiaryId,
         employeeId: employeeId || null,
+        employee2Id: employee2Id || null,
+        employee3Id: employee3Id || null,
         date: date ? new Date(date + 'T12:00:00') : undefined,
         notes: notes || null,
         items: {
@@ -73,6 +86,8 @@ export async function PUT(
       include: {
         beneficiary: { select: { id: true, name: true } },
         employee: { select: { id: true, name: true } },
+        employee2: { select: { id: true, name: true } },
+        employee3: { select: { id: true, name: true } },
         items: { include: { product: { select: { name: true, unit: true } } } },
       },
     })
@@ -91,7 +106,6 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    // Busca o registro ANTES pra checar a trava temporal
     const existing = await prisma.distribution.findUnique({
       where: { id },
       select: { createdAt: true },

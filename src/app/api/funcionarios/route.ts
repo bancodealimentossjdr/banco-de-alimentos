@@ -11,7 +11,17 @@ export async function GET() {
       orderBy: { name: 'asc' },
       include: {
         _count: {
-          select: { donations: true, distributions: true },
+          select: {
+            donationsAsEmployee1: true,
+            donationsAsEmployee2: true,
+            donationsAsEmployee3: true,
+            distributionsAsEmployee1: true,
+            distributionsAsEmployee2: true,
+            distributionsAsEmployee3: true,
+            harvestsAsEmployee1: true,
+            harvestsAsEmployee2: true,
+            harvestsAsEmployee3: true,
+          },
         },
       },
     })

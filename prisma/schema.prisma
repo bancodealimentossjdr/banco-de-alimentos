@@ -89,9 +89,20 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  donations     Donation[]
-  distributions Distribution[]
-  harvests      SolidarityHarvest[]
+  // Doações - até 3 funcionários por coleta
+  donationsAsEmployee1 Donation[] @relation("DonationEmployee1")
+  donationsAsEmployee2 Donation[] @relation("DonationEmployee2")
+  donationsAsEmployee3 Donation[] @relation("DonationEmployee3")
+
+  // Distribuições - até 3 funcionários por entrega
+  distributionsAsEmployee1 Distribution[] @relation("DistributionEmployee1")
+  distributionsAsEmployee2 Distribution[] @relation("DistributionEmployee2")
+  distributionsAsEmployee3 Distribution[] @relation("DistributionEmployee3")
+
+  // Colheitas - até 3 funcionários por colheita
+  harvestsAsEmployee1 SolidarityHarvest[] @relation("HarvestEmployee1")
+  harvestsAsEmployee2 SolidarityHarvest[] @relation("HarvestEmployee2")
+  harvestsAsEmployee3 SolidarityHarvest[] @relation("HarvestEmployee3")
 }
 
 // ==========================================
@@ -100,16 +111,24 @@ model Employee {
 model Donation {
   id         String   @id @default(cuid())
   donorId    String
-  employeeId String?
   date       DateTime @default(now())
   origin     String   @default("coleta")
   notes      String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  donor    Donor     @relation(fields: [donorId], references: [id])
-  employee Employee? @relation(fields: [employeeId], references: [id])
-  items    DonationItem[]
+  // Funcionários da coleta (1 obrigatório, 2 opcionais)
+  employeeId   String?
+  employee     Employee? @relation("DonationEmployee1", fields: [employeeId], references: [id])
+
+  employee2Id  String?
+  employee2    Employee? @relation("DonationEmployee2", fields: [employee2Id], references: [id])
+
+  employee3Id  String?
+  employee3    Employee? @relation("DonationEmployee3", fields: [employee3Id], references: [id])
+
+  donor Donor          @relation(fields: [donorId], references: [id])
+  items DonationItem[]
 }
 
 // ==========================================
@@ -133,14 +152,22 @@ model DonationItem {
 model Distribution {
   id            String   @id @default(cuid())
   beneficiaryId String
-  employeeId    String?
   date          DateTime @default(now())
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  beneficiary Beneficiary @relation(fields: [beneficiaryId], references: [id])
-  employee    Employee?   @relation(fields: [employeeId], references: [id])
+  // Funcionários da entrega (1 obrigatório, 2 opcionais)
+  employeeId   String?
+  employee     Employee? @relation("DistributionEmployee1", fields: [employeeId], references: [id])
+
+  employee2Id  String?
+  employee2    Employee? @relation("DistributionEmployee2", fields: [employee2Id], references: [id])
+
+  employee3Id  String?
+  employee3    Employee? @relation("DistributionEmployee3", fields: [employee3Id], references: [id])
+
+  beneficiary Beneficiary        @relation(fields: [beneficiaryId], references: [id])
   items       DistributionItem[]
 }
 
@@ -180,7 +207,6 @@ model Producer {
 model SolidarityHarvest {
   id             String   @id @default(cuid())
   producerId     String
-  employeeId     String?
   date           DateTime @default(now())
   status         String   @default("agendada")
   notes          String?
@@ -188,8 +214,17 @@ model SolidarityHarvest {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  producer Producer  @relation(fields: [producerId], references: [id])
-  employee Employee? @relation(fields: [employeeId], references: [id])
+  // Funcionários da colheita (1 obrigatório, 2 opcionais)
+  employeeId  String?
+  employee    Employee? @relation("HarvestEmployee1", fields: [employeeId], references: [id])
+
+  employee2Id String?
+  employee2   Employee? @relation("HarvestEmployee2", fields: [employee2Id], references: [id])
+
+  employee3Id String?
+  employee3   Employee? @relation("HarvestEmployee3", fields: [employee3Id], references: [id])
+
+  producer Producer      @relation(fields: [producerId], references: [id])
   items    HarvestItem[]
 }
 
@@ -201,7 +236,7 @@ model HarvestItem {
   harvestId String
   productId String
   quantity  Float
-  boxes     Int?   // 👈 ADICIONAR ESTA LINHA
+  boxes     Int?
 
   harvest SolidarityHarvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   product Product           @relation(fields: [productId], references: [id])

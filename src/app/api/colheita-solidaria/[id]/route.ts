@@ -16,6 +16,8 @@ export async function GET(
       include: {
         producer: true,
         employee: true,
+        employee2: true,
+        employee3: true,
         items: { include: { product: true } },
       },
     })
@@ -49,7 +51,27 @@ export async function PUT(
     if (authResult instanceof NextResponse) return authResult
 
     const body = await request.json()
-    const { producerId, employeeId, date, status, notes, indemnityValue, items } = body
+    const {
+      producerId,
+      employeeId,
+      employee2Id,
+      employee3Id,
+      date,
+      status,
+      notes,
+      indemnityValue,
+      items,
+    } = body
+
+    // 🔍 Validação: funcionários não podem se repetir
+    const employeeIds = [employeeId, employee2Id, employee3Id].filter(Boolean)
+    const uniqueIds = new Set(employeeIds)
+    if (employeeIds.length !== uniqueIds.size) {
+      return NextResponse.json(
+        { error: 'Não é possível selecionar o mesmo funcionário mais de uma vez' },
+        { status: 400 }
+      )
+    }
 
     await prisma.harvestItem.deleteMany({
       where: { harvestId: id },
@@ -60,6 +82,8 @@ export async function PUT(
       data: {
         producerId,
         employeeId: employeeId || null,
+        employee2Id: employee2Id || null,
+        employee3Id: employee3Id || null,
         date: date ? new Date(date + 'T12:00:00') : undefined,
         status: status || 'agendada',
         notes: notes || null,
@@ -75,6 +99,8 @@ export async function PUT(
       include: {
         producer: true,
         employee: true,
+        employee2: true,
+        employee3: true,
         items: { include: { product: true } },
       },
     })
