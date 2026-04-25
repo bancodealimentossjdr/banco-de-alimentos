@@ -47,7 +47,19 @@ export async function DELETE(
     const employee = await prisma.employee.findUnique({
       where: { id },
       include: {
-        _count: { select: { donations: true, distributions: true } },
+        _count: {
+          select: {
+            donationsAsEmployee1: true,
+            donationsAsEmployee2: true,
+            donationsAsEmployee3: true,
+            distributionsAsEmployee1: true,
+            distributionsAsEmployee2: true,
+            distributionsAsEmployee3: true,
+            harvestsAsEmployee1: true,
+            harvestsAsEmployee2: true,
+            harvestsAsEmployee3: true,
+          },
+        },
       },
     })
 
@@ -55,10 +67,29 @@ export async function DELETE(
       return NextResponse.json({ error: 'Funcionário não encontrado' }, { status: 404 })
     }
 
-    const total = employee._count.donations + employee._count.distributions
+    // Soma todas as participações em coletas, entregas e colheitas
+    const totalDonations =
+      employee._count.donationsAsEmployee1 +
+      employee._count.donationsAsEmployee2 +
+      employee._count.donationsAsEmployee3
+
+    const totalDistributions =
+      employee._count.distributionsAsEmployee1 +
+      employee._count.distributionsAsEmployee2 +
+      employee._count.distributionsAsEmployee3
+
+    const totalHarvests =
+      employee._count.harvestsAsEmployee1 +
+      employee._count.harvestsAsEmployee2 +
+      employee._count.harvestsAsEmployee3
+
+    const total = totalDonations + totalDistributions + totalHarvests
+
     if (total > 0) {
       return NextResponse.json(
-        { error: `Não é possível excluir: este funcionário possui ${employee._count.donations} coleta(s) e ${employee._count.distributions} entrega(s) vinculada(s).` },
+        {
+          error: `Não é possível excluir: este funcionário possui ${totalDonations} coleta(s), ${totalDistributions} entrega(s) e ${totalHarvests} colheita(s) vinculada(s).`,
+        },
         { status: 400 }
       )
     }
