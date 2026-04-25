@@ -20,6 +20,10 @@ model User {
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relações com DailyApproval (aproveitamentos diários)
+  dailyApprovalsCreated DailyApproval[] @relation("DailyApprovalCreatedBy")
+  dailyApprovalsUpdated DailyApproval[] @relation("DailyApprovalUpdatedBy")
 }
 
 // ==========================================
@@ -240,4 +244,28 @@ model HarvestItem {
 
   harvest SolidarityHarvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   product Product           @relation(fields: [productId], references: [id])
+}
+
+// ==========================================
+// 🆕 APROVEITAMENTO DIÁRIO (2ª triagem)
+// Registra quanto das doações foi efetivamente
+// aproveitado após a triagem do dia
+// ==========================================
+model DailyApproval {
+  id          String   @id @default(cuid())
+  date        DateTime @unique @db.Date
+  approvedQty Float    // peso líquido aproveitado em kg
+  notes       String?
+
+  createdById String
+  createdBy   User     @relation("DailyApprovalCreatedBy", fields: [createdById], references: [id])
+
+  updatedById String?
+  updatedBy   User?    @relation("DailyApprovalUpdatedBy", fields: [updatedById], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@map("daily_approvals")
 }
