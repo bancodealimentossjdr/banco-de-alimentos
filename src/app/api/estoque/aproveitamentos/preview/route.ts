@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView } from '@/lib/auth-helpers'
-import { startOfDay, endOfDay, parseISO } from 'date-fns'
 
 export async function GET(req: NextRequest) {
   const authResult = await requireView('estoque')
@@ -18,11 +17,17 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const date = parseISO(dateParam)
-    const dayStart = startOfDay(date)
-    const dayEnd = endOfDay(date)
+    // ✅ FIX: Construir intervalo do dia em UTC manualmente
+    // dateParam vem como "YYYY-MM-DD" e queremos cobrir o dia inteiro em UTC
+    const [yearStr, monthStr, dayStr] = dateParam.split('-')
+    const year = parseInt(yearStr)
+    const month = parseInt(monthStr) - 1 // JS month é 0-indexed
+    const day = parseInt(dayStr)
 
-    // 🏪 Buscar doações do dia (com itens e doador)
+    const dayStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0))
+    const dayEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999))
+
+    // 🏪 Buscar doações do dia
     const donations = await prisma.donation.findMany({
       where: {
         date: { gte: dayStart, lte: dayEnd },
@@ -34,7 +39,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'asc' },
     })
 
-    // 🌾 Buscar colheita solidária do dia (com itens)
+    // 🌾 Buscar colheita solidária do dia
     const harvests = await prisma.solidarityHarvest.findMany({
       where: {
         date: { gte: dayStart, lte: dayEnd },
@@ -44,12 +49,14 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    // ✅ Verificar se já existe aproveitamento registrado
-    const existingApproval = await prisma.dailyApproval.findUnique({
-      where: { date: dayStart },
+    // ✅ Buscar aproveitamento existente (busca por intervalo, não findUnique)
+    const existingApproval = await prisma.dailyApproval.findFirst({
+      where: {
+        date: { gte: dayStart, lte: dayEnd },
+      },
     })
 
-    // 📊 Agrupar doações por doador (somando quantidades dos itens)
+    // 📊 Agrupar doações por doador
     const donationsByDonor: Record<
       string,
       { donorId: string; donorName: string; quantity: number }
@@ -81,7 +88,7 @@ export async function GET(req: NextRequest) {
       donations: donationsList,
       donationsTotal,
       harvestTotal,
-      totalReceived: donationsTotal, // base para o aproveitamento
+      totalReceived: donationsTotal + harvestTotal, // ✅ FIX: incluir colheita
       existingApproval: existingApproval || null,
     })
   } catch (error) {

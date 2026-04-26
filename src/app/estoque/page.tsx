@@ -1,188 +1,472 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import { usePermissions } from '@/hooks/usePermissions'
+import CalculadoraPeso from '@/components/CalculadoraPeso'
 
-interface StockItem {
-  id: string
-  name: string
-  category: string
-  unit: string
-  minStock: number
-  donated: number
+interface EstoqueResumo {
+  donations: number
+  solidarityHarvest: number
+  approved: number
   distributed: number
-  stock: number
+  inStock: number
 }
 
+interface PreviewDonation {
+  donorId: string
+  donorName: string
+  quantity: number
+}
+
+interface PreviewData {
+  date: string
+  donations: PreviewDonation[]
+  donationsTotal: number
+  harvestTotal: number
+  totalReceived: number
+  existingApproval: {
+    id: string
+    approvedQuantity: number
+    notes: string | null
+  } | null
+}
+
+interface CardConfig {
+  key: keyof EstoqueResumo
+  label: string
+  emoji: string
+  description: string
+  bgColor: string
+  borderColor: string
+  textColor: string
+  iconBg: string
+}
+
+const CARDS: CardConfig[] = [
+  { key: 'donations', label: 'Doações', emoji: '🏪', description: 'Total recebido em doações', bgColor: 'bg-green-50', borderColor: 'border-green-200', textColor: 'text-green-700', iconBg: 'bg-green-100' },
+  { key: 'solidarityHarvest', label: 'Colheita Solidária', emoji: '🌾', description: 'Total da colheita solidária', bgColor: 'bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-700', iconBg: 'bg-amber-100' },
+  { key: 'approved', label: 'Aproveitado', emoji: '✅', description: 'Total aproveitado das doações', bgColor: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700', iconBg: 'bg-blue-100' },
+  { key: 'distributed', label: 'Distribuído', emoji: '📤', description: 'Total distribuído aos beneficiários', bgColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700', iconBg: 'bg-purple-100' },
+  { key: 'inStock', label: 'Em Estoque', emoji: '📦', description: 'Saldo atual disponível', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-300', textColor: 'text-emerald-700', iconBg: 'bg-emerald-100' },
+]
+
+const getHojeLocal = () => {
+  const hoje = new Date()
+  const ano = hoje.getFullYear()
+  const mes = String(hoje.getMonth() + 1).padStart(2, '0')
+  const dia = String(hoje.getDate()).padStart(2, '0')
+  return `${ano}-${mes}-${dia}`
+}
+
+const formatDate = (date: string) => {
+  const raw = date.includes('T') ? date.split('T')[0] : date
+  const [y, m, d] = raw.split('-')
+  return `${d}/${m}/${y}`
+}
+
+const formatKg = (valor: number) =>
+  valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+
 export default function EstoquePage() {
-  const [items, setItems] = useState<StockItem[]>([])
+  const { canEdit } = usePermissions()
+  const podeRegistrar = canEdit('doacoes')
+
+  const [resumo, setResumo] = useState<EstoqueResumo | null>(null)
   const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState<string | null>(null)
 
-  useEffect(() => {
-    const fetchStock = async () => {
-      try {
-        const res = await fetch('/api/estoque')
-        const data = await res.json()
-        setItems(Array.isArray(data) ? data : [])
-      } catch (error) {
-        console.error('Erro ao buscar estoque:', error)
-        setItems([])
-      } finally {
-        setLoading(false)
-      }
+  // Modal state
+  const [showModal, setShowModal] = useState(false)
+  const [preview, setPreview] = useState<PreviewData | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewErro, setPreviewErro] = useState<string | null>(null)
+  const [approvedQty, setApprovedQty] = useState<string>('')
+  const [notes, setNotes] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [showCalculadora, setShowCalculadora] = useState(false)
+
+  const fetchResumo = async () => {
+    try {
+      setLoading(true)
+      setErro(null)
+      const res = await fetch('/api/estoque/resumo')
+      if (!res.ok) throw new Error('Falha ao carregar resumo do estoque')
+      const data: EstoqueResumo = await res.json()
+      setResumo(data)
+    } catch (err) {
+      console.error('Erro ao buscar resumo:', err)
+      setErro(err instanceof Error ? err.message : 'Erro desconhecido')
+    } finally {
+      setLoading(false)
     }
-    fetchStock()
-  }, [])
-
-  const getStockStatus = (item: StockItem) => {
-    if (item.stock <= 0) return { label: 'Zerado', style: 'bg-red-100 text-red-700', barColor: 'bg-red-500' }
-    if (item.stock <= item.minStock) return { label: 'Baixo', style: 'bg-yellow-100 text-yellow-700', barColor: 'bg-yellow-500' }
-    return { label: 'OK', style: 'bg-green-100 text-green-700', barColor: 'bg-green-500' }
   }
 
-  const totalStock = items.reduce((acc, i) => acc + i.stock, 0)
-  const totalDonated = items.reduce((acc, i) => acc + i.donated, 0)
-  const totalDistributed = items.reduce((acc, i) => acc + i.distributed, 0)
+  const fetchPreview = async () => {
+    try {
+      setPreviewLoading(true)
+      setPreviewErro(null)
+      const hoje = getHojeLocal()
+      const res = await fetch(`/api/estoque/aproveitamentos/preview?date=${hoje}`)
+      if (!res.ok) throw new Error('Falha ao carregar preview')
+      const data: PreviewData = await res.json()
+      setPreview(data)
+
+      if (data.existingApproval) {
+        setApprovedQty(String(data.existingApproval.approvedQuantity))
+        setNotes(data.existingApproval.notes || '')
+      } else {
+        setApprovedQty(data.totalReceived > 0 ? String(data.totalReceived) : '')
+        setNotes('')
+      }
+    } catch (err) {
+      console.error('Erro ao buscar preview:', err)
+      setPreviewErro(err instanceof Error ? err.message : 'Erro desconhecido')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchResumo()
+  }, [])
+
+  const abrirModal = () => {
+    setShowModal(true)
+    setShowCalculadora(false)
+    fetchPreview()
+  }
+
+  const fecharModal = () => {
+    if (salvando) return
+    setShowModal(false)
+    setPreview(null)
+    setApprovedQty('')
+    setNotes('')
+    setPreviewErro(null)
+    setShowCalculadora(false)
+  }
+
+  const handleApplyCalc = (pesoLiquido: number) => {
+    setApprovedQty(String(pesoLiquido))
+    setShowCalculadora(false)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!preview) return
+
+    const qty = parseFloat(approvedQty.replace(',', '.'))
+    if (isNaN(qty) || qty < 0) {
+      alert('Informe uma quantidade válida.')
+      return
+    }
+    if (qty > preview.totalReceived) {
+      alert(`O aproveitado (${formatKg(qty)} kg) não pode ser maior que o total recebido (${formatKg(preview.totalReceived)} kg).`)
+      return
+    }
+
+    try {
+      setSalvando(true)
+      const res = await fetch('/api/estoque/aproveitamentos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: preview.date,
+          approvedQuantity: qty,
+          notes: notes.trim() || null,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Erro ao salvar aproveitamento')
+      }
+
+      fecharModal()
+      fetchResumo()
+    } catch (err) {
+      console.error('Erro ao salvar:', err)
+      alert(err instanceof Error ? err.message : 'Erro ao salvar')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const totalReceived = preview?.totalReceived ?? 0
+  const semDados = preview !== null && totalReceived === 0
 
   return (
     <div>
-      {/* Header da página */}
-      <div className="mb-6">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-900">📊 Estoque</h2>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900">📊 Estoque</h2>
+          <p className="text-sm text-gray-500 mt-1">Resumo de movimentações e saldo atual</p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            onClick={fetchResumo}
+            disabled={loading}
+            className="bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition text-sm disabled:opacity-50"
+          >
+            🔄 Atualizar
+          </button>
+          {podeRegistrar && (
+            <button
+              onClick={abrirModal}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium transition text-sm"
+            >
+              ✅ Registrar Aproveitamento
+            </button>
+          )}
+        </div>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
+      {/* Erro */}
+      {erro && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+          <p className="text-red-700 font-medium">⚠️ {erro}</p>
+          <button onClick={fetchResumo} className="text-red-600 hover:text-red-800 text-sm mt-2 font-medium underline">
+            Tentar novamente
+          </button>
         </div>
-      ) : (
+      )}
+
+      {/* Loading skeleton */}
+      {loading && !resumo && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl shadow-sm border p-5 animate-pulse">
+              <div className="h-10 w-10 bg-gray-200 rounded-lg mb-3"></div>
+              <div className="h-4 bg-gray-200 rounded w-2/3 mb-3"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Cards */}
+      {resumo && (
         <>
-          {/* Cards de resumo */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6">
-            <div className="bg-white rounded-xl shadow-sm border p-3 sm:p-6 text-center">
-              <p className="text-xs sm:text-sm text-gray-500">Recebido</p>
-              <p className="text-lg sm:text-3xl font-bold text-green-600">{totalDonated.toFixed(1)}</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-3 sm:p-6 text-center">
-              <p className="text-xs sm:text-sm text-gray-500">Distribuído</p>
-              <p className="text-lg sm:text-3xl font-bold text-red-600">{totalDistributed.toFixed(1)}</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-3 sm:p-6 text-center">
-              <p className="text-xs sm:text-sm text-gray-500">Em Estoque</p>
-              <p className="text-lg sm:text-3xl font-bold text-teal-600">{totalStock.toFixed(1)}</p>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            {CARDS.map((card) => (
+              <div key={card.key} className={`${card.bgColor} ${card.borderColor} border-2 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow`}>
+                <div className={`${card.iconBg} w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3`}>
+                  {card.emoji}
+                </div>
+                <p className={`text-sm font-semibold ${card.textColor} mb-1`}>{card.label}</p>
+                <p className="text-2xl md:text-3xl font-bold text-gray-900">
+                  {formatKg(resumo[card.key])}
+                  <span className="text-sm font-medium text-gray-500 ml-1">kg</span>
+                </p>
+                <p className="text-xs text-gray-500 mt-2">{card.description}</p>
+              </div>
+            ))}
           </div>
 
-          {items.length === 0 ? (
-            <div className="text-center py-16 text-gray-500">
-              <p className="text-6xl mb-4">📊</p>
-              <p className="text-xl">Nenhum produto no estoque</p>
-              <p className="text-sm mt-2">Cadastre produtos e registre doações para ver o estoque</p>
+          {/* Fórmula */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">🧮 Como o estoque é calculado</h3>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
+                📦 Em Estoque ({formatKg(resumo.inStock)} kg)
+              </span>
+              <span className="text-gray-400 font-bold">=</span>
+              <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
+                ✅ Aproveitado ({formatKg(resumo.approved)})
+              </span>
+              <span className="text-gray-400 font-bold">+</span>
+              <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
+              </span>
+              <span className="text-gray-400 font-bold">−</span>
+              <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
+                📤 Distribuído ({formatKg(resumo.distributed)})
+              </span>
             </div>
-          ) : (
-            <>
-              {/* ====== TABELA - só aparece em telas md+ ====== */}
-              <div className="hidden md:block bg-white rounded-xl shadow-sm border">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b bg-gray-50">
-                        <th className="px-6 py-3 text-sm font-semibold text-gray-600">Produto</th>
-                        <th className="px-6 py-3 text-sm font-semibold text-gray-600">Categoria</th>
-                        <th className="px-6 py-3 text-sm font-semibold text-gray-600">Recebido</th>
-                        <th className="px-6 py-3 text-sm font-semibold text-gray-600">Distribuído</th>
-                        <th className="px-6 py-3 text-sm font-semibold text-gray-600">Estoque</th>
-                        <th className="px-6 py-3 text-sm font-semibold text-gray-600">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map(item => {
-                        const status = getStockStatus(item)
-                        return (
-                          <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
-                            <td className="px-6 py-4 font-medium text-gray-900">{item.name}</td>
-                            <td className="px-6 py-4 text-gray-600">{item.category}</td>
-                            <td className="px-6 py-4 text-green-600">{item.donated.toFixed(1)} {item.unit}</td>
-                            <td className="px-6 py-4 text-red-600">{item.distributed.toFixed(1)} {item.unit}</td>
-                            <td className="px-6 py-4 font-bold text-gray-900">{item.stock.toFixed(1)} {item.unit}</td>
-                            <td className="px-6 py-4">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${status.style}`}>
-                                {status.label}
-                              </span>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+            <p className="text-xs text-gray-500 mt-3">
+              💡 Doações entram no estoque apenas após serem <strong>aproveitadas</strong>.
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* MODAL */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <form onSubmit={handleSubmit}>
+              {/* Header */}
+              <div className="flex justify-between items-center border-b px-5 py-4 sticky top-0 bg-white rounded-t-xl z-10">
+                <h3 className="text-lg font-bold text-gray-900">
+                  ✅ Registrar Aproveitamento
+                </h3>
+                <button
+                  type="button"
+                  onClick={fecharModal}
+                  disabled={salvando}
+                  className="text-gray-400 hover:text-gray-600 text-2xl leading-none disabled:opacity-50"
+                >
+                  ×
+                </button>
               </div>
 
-              {/* ====== CARDS - só aparece no mobile (< md) ====== */}
-              <div className="md:hidden space-y-3">
-                {items.map(item => {
-                  const status = getStockStatus(item)
-                  const usagePercent = item.donated > 0
-                    ? Math.min(100, Math.round((item.distributed / item.donated) * 100))
-                    : 0
+              {/* Body */}
+              <div className="p-5 space-y-4">
+                {/* Data fixa */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-2">
+                  <span className="text-gray-500 text-sm">📅 Data:</span>
+                  <span className="font-bold text-gray-900">
+                    {preview ? formatDate(preview.date) : formatDate(getHojeLocal())}
+                  </span>
+                  <span className="text-xs text-gray-500 ml-auto">(hoje)</span>
+                </div>
 
-                  return (
-                    <div key={item.id} className="bg-white rounded-xl shadow-sm border p-4">
-                      {/* Topo: nome + status */}
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="min-w-0">
-                          <h3 className="font-bold text-gray-900 truncate">{item.name}</h3>
-                          <span className="text-xs text-gray-500">{item.category}</span>
-                        </div>
-                        <span className={`shrink-0 px-2 py-1 rounded-full text-xs font-medium ${status.style}`}>
-                          {status.label}
-                        </span>
+                {previewLoading && (
+                  <div className="flex justify-center items-center py-12">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                  </div>
+                )}
+
+                {previewErro && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <p className="text-red-700 text-sm">⚠️ {previewErro}</p>
+                  </div>
+                )}
+
+                {preview && !previewLoading && (
+                  <>
+                    {preview.existingApproval && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <p className="text-amber-800 text-sm">
+                          ⚠️ Já existe um aproveitamento registrado para hoje
+                          (<strong>{formatKg(preview.existingApproval.approvedQuantity)} kg</strong>).
+                          Salvar irá <strong>atualizar</strong> o registro existente.
+                        </p>
                       </div>
+                    )}
 
-                      {/* Barra de uso visual */}
-                      <div className="mb-3">
-                        <div className="flex justify-between text-xs text-gray-500 mb-1">
-                          <span>Uso: {usagePercent}%</span>
-                          <span>Mín: {item.minStock} {item.unit}</span>
+                    {/* Doações */}
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                        🏪 Doações de hoje ({preview.donations.length})
+                      </h4>
+                      {preview.donations.length === 0 ? (
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center text-gray-500 text-sm">
+                          Nenhuma doação registrada hoje
                         </div>
-                        <div className="w-full bg-gray-100 rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full transition-all ${status.barColor}`}
-                            style={{ width: `${usagePercent}%` }}
-                          />
+                      ) : (
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                          {preview.donations.map((d, idx) => (
+                            <div key={`${d.donorId}-${idx}`} className="flex justify-between items-center bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm">
+                              <span className="text-green-700 font-medium truncate">{d.donorName}</span>
+                              <span className="text-gray-700 font-semibold shrink-0 ml-2">{formatKg(d.quantity)} kg</span>
+                            </div>
+                          ))}
                         </div>
+                      )}
+                    </div>
+
+                    {/* Resumo */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-1.5">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">🏪 Doações:</span>
+                        <span className="font-semibold text-gray-900">{formatKg(preview.donationsTotal)} kg</span>
                       </div>
-
-                      {/* Números: entrada / saída / saldo */}
-                      <div className="grid grid-cols-3 gap-2 text-center">
-                        <div className="bg-green-50 rounded-lg py-2 px-1">
-                          <p className="text-xs text-green-600 font-medium">Recebido</p>
-                          <p className="text-sm font-bold text-green-700">
-                            {item.donated.toFixed(1)}
-                          </p>
-                          <p className="text-xs text-green-500">{item.unit}</p>
-                        </div>
-                        <div className="bg-red-50 rounded-lg py-2 px-1">
-                          <p className="text-xs text-red-600 font-medium">Distribuído</p>
-                          <p className="text-sm font-bold text-red-700">
-                            {item.distributed.toFixed(1)}
-                          </p>
-                          <p className="text-xs text-red-500">{item.unit}</p>
-                        </div>
-                        <div className="bg-teal-50 rounded-lg py-2 px-1">
-                          <p className="text-xs text-teal-600 font-medium">Estoque</p>
-                          <p className="text-sm font-bold text-teal-700">
-                            {item.stock.toFixed(1)}
-                          </p>
-                          <p className="text-xs text-teal-500">{item.unit}</p>
-                        </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">🌾 Colheita Solidária:</span>
+                        <span className="font-semibold text-gray-900">{formatKg(preview.harvestTotal)} kg</span>
+                      </div>
+                      <div className="flex justify-between text-base border-t border-blue-300 pt-1.5 mt-1.5">
+                        <span className="text-blue-900 font-bold">📥 Total Recebido:</span>
+                        <span className="font-bold text-blue-900">{formatKg(preview.totalReceived)} kg</span>
                       </div>
                     </div>
-                  )
-                })}
+
+                    {/* Quantidade aproveitada */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-sm font-semibold text-gray-700">
+                          ✅ Quantidade Aproveitada (kg) *
+                        </label>
+                        {!showCalculadora && (
+                          <button
+                            type="button"
+                            onClick={() => setShowCalculadora(true)}
+                            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                          >
+                            🧮 Usar calculadora
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        min="0"
+                        max={preview.totalReceived || undefined}
+                        value={approvedQty}
+                        onChange={(e) => setApprovedQty(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm disabled:bg-gray-100"
+                        placeholder="Ex: 95.5"
+                        required
+                        disabled={semDados}
+                      />
+                      {semDados ? (
+                        <p className="text-xs text-amber-600 mt-1">
+                          ⚠️ Não há nada para aproveitar hoje (sem doações ou colheita)
+                        </p>
+                      ) : (
+                        <p className="text-xs text-gray-500 mt-1">
+                          💡 O valor aproveitado deve ser menor ou igual a {formatKg(preview.totalReceived)} kg
+                        </p>
+                      )}
+
+                      {/* Calculadora */}
+                      {showCalculadora && (
+                        <CalculadoraPeso
+                          onApply={handleApplyCalc}
+                          onClose={() => setShowCalculadora(false)}
+                        />
+                      )}
+                    </div>
+
+                    {/* Observações */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+                      <textarea
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        rows={2}
+                        placeholder="Ex: 5kg de frutas descartadas por estarem estragadas..."
+                      />
+                    </div>
+                  </>
+                )}
               </div>
-            </>
-          )}
-        </>
+
+              {/* Footer */}
+              <div className="border-t px-5 py-4 flex flex-col sm:flex-row gap-2 sm:justify-end sticky bottom-0 bg-white rounded-b-xl">
+                <button
+                  type="button"
+                  onClick={fecharModal}
+                  disabled={salvando}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={salvando || !preview || semDados}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {salvando ? 'Salvando...' : preview?.existingApproval ? 'Atualizar Aproveitamento' : 'Registrar Aproveitamento'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   )
