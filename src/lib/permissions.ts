@@ -18,8 +18,13 @@ export type Module =
   | 'usuarios'
 
 /**
+ * Re-exporta UserRole como Role pra manter compatibilidade com o hook.
+ */
+export type Role = UserRole
+
+/**
  * Módulos que tem trava temporal para operador
- * (só pode editar/criar/excluir no mesmo dia da criação).
+ * (só pode editar/excluir registros cuja DATA seja hoje).
  */
 export const TIME_LOCKED_MODULES: Module[] = [
   'doacoes',
@@ -78,35 +83,67 @@ export function canEdit(role: UserRole, module: Module): boolean {
 }
 
 /**
- * Verifica se dois timestamps pertencem ao mesmo dia (data local do servidor).
+ * Extrai a string YYYY-MM-DD de uma data, lidando com fuso horário.
+ *
+ * - String ISO do Prisma ("2026-04-26T00:00:00.000Z") → "2026-04-26"
+ *   (pega os 10 primeiros chars, que são a data em UTC — exatamente o
+ *   dia que o usuário escolheu no <input type="date">).
+ * - Date local (ex: new Date() = "agora") → YYYY-MM-DD no fuso local.
+ *
+ * Isso garante comparação correta entre a data do registro (salva como
+ * UTC midnight pelo Prisma) e "hoje" (Date local), sem o bug clássico
+ * de fuso "voltar um dia" no Brasil (UTC-3).
+ */
+function getDateString(value: Date | string): string {
+  if (typeof value === 'string') {
+    return value.slice(0, 10)
+  }
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
+ * Verifica se dois timestamps representam o mesmo dia do calendário.
+ * Tolerante a fuso horário (vide getDateString).
  */
 export function isSameDay(a: Date | string, b: Date | string): boolean {
-  const da = new Date(a)
-  const db = new Date(b)
-  return (
-    da.getFullYear() === db.getFullYear() &&
-    da.getMonth() === db.getMonth() &&
-    da.getDate() === db.getDate()
-  )
+  return getDateString(a) === getDateString(b)
 }
 
 /**
  * Verifica se um operador pode editar/excluir um registro específico
  * em módulos com trava temporal (doações, distribuições, colheita).
  *
- * Regra: só pode modificar se o registro foi criado no dia de HOJE.
+ * Regra: só pode modificar se a DATA DO REGISTRO (campo `date`) for HOJE.
+ * Mesmo se for retroativo, se a `date` não for hoje, NÃO pode editar.
  * Admin passa sempre. Visualizador nunca passa.
+ *
+ * @param recordDate - O campo `date` do registro (data da doação/distribuição/colheita)
  */
 export function canEditRecord(
   role: UserRole,
   module: Module,
-  recordCreatedAt: Date | string,
+  recordDate: Date | string,
 ): boolean {
   if (!canEdit(role, module)) return false
   if (role === 'admin') return true
   if (TIME_LOCKED_MODULES.includes(module)) {
-    return isSameDay(recordCreatedAt, new Date())
+    return isSameDay(recordDate, new Date())
   }
+  return true
+}
+
+/**
+ * Verifica se um role pode EXCLUIR registros em módulos time-locked.
+ * Apenas admin pode excluir doações, distribuições e colheitas.
+ */
+export function canDeleteRecord(role: UserRole, module: Module): boolean {
+  if (!canEdit(role, module)) return false
+  if (role === 'admin') return true
+  // Operador NUNCA exclui registros de módulos time-locked
+  if (TIME_LOCKED_MODULES.includes(module)) return false
   return true
 }
 
@@ -116,6 +153,7 @@ export function canEditRecord(
 export function getVisibleModules(role: UserRole): Module[] {
   return VIEW_PERMISSIONS[role]
 }
+
 /**
  * Mapeia pathname → Module.
  * Usado pelo middleware (auth.config.ts) pra decidir acesso por URL.
@@ -124,10 +162,8 @@ export function getVisibleModules(role: UserRole): Module[] {
  * (ex: /, /login, /api/auth/*, /register) → acesso liberado por padrão.
  */
 export function getModuleFromPath(pathname: string): Module | null {
-  // Dashboard = raiz
   if (pathname === '/' || pathname === '/dashboard') return 'dashboard'
 
-  // Mapeamento direto: prefixo da URL → módulo
   const routeMap: Array<[string, Module]> = [
     ['/produtos', 'produtos'],
     ['/doadores', 'doadores'],
@@ -161,13 +197,7 @@ export function canAccessRoute(
   pathname: string,
 ): boolean {
   const module = getModuleFromPath(pathname)
-
-  // Rota não mapeada (ex: APIs diversas, assets) → deixa passar,
-  // a proteção específica fica nas próprias APIs via requireAuth/requireRole.
   if (module === null) return true
-
-  // Rota mapeada mas sem role → bloqueia
   if (!role) return false
-
   return canView(role, module)
 }

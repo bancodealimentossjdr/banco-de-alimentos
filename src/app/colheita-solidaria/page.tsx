@@ -33,8 +33,10 @@ const STATUS_OPTIONS = [
 ]
 
 export default function ColheitaSolidariaPage() {
-  const { canEdit } = usePermissions()
-  const podeEditar = canEdit('colheita-solidaria')
+  // 🔐 Pega também canEditRecord (trava temporal) e canDeleteRecord (só admin)
+  const { canEdit, canEditRecord, canDelete } = usePermissions()
+const podeEditar = canEdit('colheita-solidaria')
+const podeExcluir = canDelete('colheita-solidaria')
 
   const [harvests, setHarvests] = useState<Harvest[]>([])
   const [producers, setProducers] = useState<Producer[]>([])
@@ -526,6 +528,12 @@ export default function ColheitaSolidariaPage() {
             const statusStyle = getStatusStyle(harvest.status)
             const ind = getHarvestIndemnity(harvest)
             const harvestEmployees = getHarvestEmployees(harvest)
+
+            // 🔐 Por registro: pode editar (admin sempre, operador só se date=hoje)
+            // Excluir: só admin (regra global do módulo time-locked)
+            const canEditThis = canEditRecord('colheita-solidaria', harvest.date)
+            const canDeleteThis = podeExcluir
+
             return (
               <div key={harvest.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
                 {/* Cabeçalho do card */}
@@ -560,21 +568,25 @@ export default function ColheitaSolidariaPage() {
                     )}
                   </div>
 
-                  {/* Ações — só aparecem pra quem pode editar */}
-                  {podeEditar && (
+                  {/* 🔐 Ações — Editar só se canEditThis; Excluir só admin */}
+                  {(canEditThis || canDeleteThis) && (
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => startEdit(harvest)}
-                        className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => handleDelete(harvest.id)}
-                        className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                      >
-                        Excluir
-                      </button>
+                      {canEditThis && (
+                        <button
+                          onClick={() => startEdit(harvest)}
+                          className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                        >
+                          Editar
+                        </button>
+                      )}
+                      {canDeleteThis && (
+                        <button
+                          onClick={() => handleDelete(harvest.id)}
+                          className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                        >
+                          Excluir
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

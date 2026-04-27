@@ -64,8 +64,10 @@ const formatDate = (date: string) => {
   return `${d}/${m}/${y}`
 }
 
-const formatKg = (valor: number) =>
-  valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+const formatKg = (valor: number | null | undefined) => {
+  const n = typeof valor === 'number' && !isNaN(valor) ? valor : 0
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
 
 export default function EstoquePage() {
   const { canEdit } = usePermissions()

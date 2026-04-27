@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
+import { auth } from "@/lib/auth";
+import { canView, canEdit, canEditRecord, canDeleteRecord } from "@/lib/permissions";
 
 const prisma = new PrismaClient();
 
@@ -9,6 +11,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // 🔐 Autenticação
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+    if (!canView(session.user.role, "doacoes")) {
+      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+    }
+
     const { id } = await params;
 
     const donation = await prisma.donation.findUnique({
@@ -49,7 +60,43 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // 🔐 1. Autenticação
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
+    // 🔐 2. Permissão básica de edição no módulo
+    if (!canEdit(session.user.role, "doacoes")) {
+      return NextResponse.json(
+        { error: "Sem permissão para editar doações" },
+        { status: 403 }
+      );
+    }
+
     const { id } = await params;
+
+    // 🔐 3. Busca o registro existente pra checar trava temporal
+    const existing = await prisma.donation.findUnique({
+      where: { id },
+      select: { date: true },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Doação não encontrada" },
+        { status: 404 }
+      );
+    }
+
+    // 🔐 4. Trava temporal: operador só edita doações com data = hoje
+    if (!canEditRecord(session.user.role, "doacoes", existing.date)) {
+      return NextResponse.json(
+        { error: "Apenas administradores podem editar doações de outras datas" },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const {
       donorId,
@@ -141,12 +188,26 @@ export async function PUT(
   }
 }
 
-// DELETE - Excluir doação
+// DELETE - Excluir doação (APENAS ADMIN)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // 🔐 1. Autenticação
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
+    // 🔐 2. Apenas admin pode excluir doações
+    if (!canDeleteRecord(session.user.role, "doacoes")) {
+      return NextResponse.json(
+        { error: "Apenas administradores podem excluir doações" },
+        { status: 403 }
+      );
+    }
+
     const { id } = await params;
 
     await prisma.donation.delete({

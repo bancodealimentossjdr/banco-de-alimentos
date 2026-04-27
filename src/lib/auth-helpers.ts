@@ -1,6 +1,12 @@
 import { auth } from '@/lib/auth'
 import { NextResponse } from 'next/server'
-import { canEdit, canEditRecord, canView, type Module } from './permissions'
+import {
+  canEdit,
+  canEditRecord,
+  canView,
+  canDeleteRecord,
+  type Module,
+} from './permissions'
 import type { UserRole } from '@/types/next-auth'
 
 export type AuthSession = {
@@ -14,7 +20,7 @@ export type AuthSession = {
 
 /**
  * Garante que há uma sessão válida. Retorna a sessão ou uma Response 401.
- * 
+ *
  * Uso:
  *   const auth = await requireAuth()
  *   if (auth instanceof NextResponse) return auth
@@ -82,6 +88,27 @@ export async function requireEditRecord(
         error:
           'Registros de dias anteriores não podem ser modificados. Contate um administrador.',
       },
+      { status: 403 },
+    )
+  }
+  return result
+}
+
+/**
+ * 🚫 Garante que o usuário pode EXCLUIR registros do módulo.
+ *
+ * Em módulos time-locked (doações, distribuições, colheita), apenas admin
+ * pode excluir — operador é sempre bloqueado, mesmo no mesmo dia.
+ * Em módulos comuns, segue a regra de canEdit.
+ */
+export async function requireDeleteRecord(
+  module: Module,
+): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (!canDeleteRecord(result.user.role, module)) {
+    return NextResponse.json(
+      { error: 'Você não tem permissão para excluir este registro' },
       { status: 403 },
     )
   }

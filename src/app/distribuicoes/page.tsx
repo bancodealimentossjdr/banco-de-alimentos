@@ -33,8 +33,10 @@ interface FormItem {
 }
 
 export default function DistribuicoesPage() {
-  const { canEdit } = usePermissions()
-  const podeEditar = canEdit('distribuicoes')
+  // 🔐 Permissões: editar (geral), por registro (trava temporal) e excluir (só admin)
+  const { canEdit, canEditRecord, canDelete } = usePermissions()
+const podeEditar = canEdit('distribuicoes')
+const podeExcluir = canDelete('distribuicoes')
 
   const [distributions, setDistributions] = useState<Distribution[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -446,6 +448,12 @@ export default function DistribuicoesPage() {
           {distributions.map(dist => {
             const totalBoxes = dist.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
             const distEmployees = getDistributionEmployees(dist)
+
+            // 🔐 Por registro: pode editar (admin sempre, operador só se date=hoje)
+            // Excluir: só admin
+            const canEditThis = canEditRecord('distribuicoes', dist.date)
+            const canDeleteThis = podeExcluir
+
             return (
               <div key={dist.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
                 {/* Cabeçalho do card */}
@@ -462,7 +470,7 @@ export default function DistribuicoesPage() {
                     <p className="text-sm text-gray-500 mt-0.5">
                       {formatDate(dist.date)}
                     </p>
-                    {/* 🧑‍🤝‍🧑 Funcionários — badges roxos (igual colheita/doações) */}
+                    {/* 🧑‍🤝‍🧑 Funcionários — badges roxos */}
                     {distEmployees.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {distEmployees.map(emp => (
@@ -482,26 +490,26 @@ export default function DistribuicoesPage() {
                     <span className="text-sm font-medium text-red-600">
                       {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
                     </span>
-                    {podeEditar && (
-                      <>
-                        <button
-                          onClick={() => startEdit(dist)}
-                          className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => handleDelete(dist.id)}
-                          className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                        >
-                          Excluir
-                        </button>
-                      </>
+                    {canEditThis && (
+                      <button
+                        onClick={() => startEdit(dist)}
+                        className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                      >
+                        Editar
+                      </button>
+                    )}
+                    {canDeleteThis && (
+                      <button
+                        onClick={() => handleDelete(dist.id)}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                      >
+                        Excluir
+                      </button>
                     )}
                   </div>
                 </div>
 
-                {/* Tags dos itens — desktop em linha, mobile vertical (igual colheita/doações) */}
+                {/* Tags dos itens — desktop em linha, mobile vertical */}
                 <div className="mb-3">
                   {/* Desktop */}
                   <div className="hidden sm:flex flex-wrap gap-2">

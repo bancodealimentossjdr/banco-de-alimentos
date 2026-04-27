@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireView, requireEditRecord } from '@/lib/auth-helpers'
+import { requireView, requireEditRecord, requireDeleteRecord } from '@/lib/auth-helpers'
 
 export async function GET(
   request: NextRequest,
@@ -38,16 +38,18 @@ export async function PUT(
   try {
     const { id } = await params
 
-    // Busca o registro ANTES pra checar a trava temporal
+    // 🔒 Busca o registro ANTES — pega o `date` (dia da colheita) pra checar trava temporal.
+    // IMPORTANTE: usamos `date`, NÃO `createdAt`. Operador só pode editar se a data
+    // da colheita for hoje. Colheitas retroativas ficam bloqueadas mesmo recém-criadas.
     const existing = await prisma.solidarityHarvest.findUnique({
       where: { id },
-      select: { createdAt: true },
+      select: { date: true },
     })
     if (!existing) {
       return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
     }
 
-    const authResult = await requireEditRecord('colheita-solidaria', existing.createdAt)
+    const authResult = await requireEditRecord('colheita-solidaria', existing.date)
     if (authResult instanceof NextResponse) return authResult
 
     const body = await request.json()
@@ -119,16 +121,18 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    // Busca o registro ANTES pra checar a trava temporal
+    // 🔒 Confirma que o registro existe (mesmo que só admin possa excluir,
+    // mantemos a checagem pra retornar 404 correto).
     const existing = await prisma.solidarityHarvest.findUnique({
       where: { id },
-      select: { createdAt: true },
+      select: { id: true },
     })
     if (!existing) {
       return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
     }
 
-    const authResult = await requireEditRecord('colheita-solidaria', existing.createdAt)
+    // 🚫 Apenas admin pode excluir (módulo time-locked). Operador é bloqueado.
+    const authResult = await requireDeleteRecord('colheita-solidaria')
     if (authResult instanceof NextResponse) return authResult
 
     await prisma.solidarityHarvest.delete({

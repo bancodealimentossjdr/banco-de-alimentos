@@ -23,8 +23,9 @@ interface Donation {
 }
 
 export default function DoacoesPage() {
-  const { canEdit } = usePermissions()
-  const podeEditar = canEdit('doacoes')
+  const { canEdit, canEditRecord, canDelete } = usePermissions()
+  const podeCriar = canEdit('doacoes')
+  const podeExcluir = canDelete('doacoes')
 
   const [donations, setDonations] = useState<Donation[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -174,7 +175,7 @@ export default function DoacoesPage() {
       {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">📥 Doações / Coletas</h2>
-        {podeEditar && (
+        {podeCriar && (
           <button
             onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
             className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
@@ -185,7 +186,7 @@ export default function DoacoesPage() {
       </div>
 
       {/* Formulário */}
-      {showForm && podeEditar && (
+      {showForm && podeCriar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
             {editingId ? '✏️ Editar Doação' : 'Registrar Doação'}
@@ -217,7 +218,7 @@ export default function DoacoesPage() {
             </div>
           </div>
 
-          {/* 🧑‍🤝‍🧑 Funcionários da coleta (até 3) — padrão da colheita */}
+          {/* 🧑‍🤝‍🧑 Funcionários da coleta (até 3) */}
           <div className="mt-2 mb-6">
             <h3 className="text-md font-semibold text-gray-800 mb-3">🧑‍🤝‍🧑 Funcionários da Coleta</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -284,7 +285,6 @@ export default function DoacoesPage() {
 
             {formItems.map((item, index) => (
               <div key={index} className="mb-3">
-                {/* Layout dos itens - empilha no mobile */}
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-end">
                   <div className="flex-1">
                     {index === 0 && <label className="block text-xs text-gray-500 mb-1">Produto</label>}
@@ -338,14 +338,12 @@ export default function DoacoesPage() {
                   </div>
                 </div>
 
-                {/* Indicador de caixas (quando vier da calculadora) */}
                 {item.boxes !== undefined && item.boxes > 0 && (
                   <p className="text-xs text-blue-600 mt-1 ml-1">
                     📦 {item.boxes} caixa{item.boxes > 1 ? 's' : ''} · peso líquido (tara descontada)
                   </p>
                 )}
 
-                {/* Calculadora (componente reutilizável) */}
                 {calcOpen === index && (
                   <CalculadoraPeso
                     onApply={(pesoLiquido, totalCaixas) => {
@@ -406,7 +404,7 @@ export default function DoacoesPage() {
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">📥</p>
           <p className="text-xl">Nenhuma doação registrada</p>
-          {podeEditar && (
+          {podeCriar && (
             <p className="text-sm mt-2">Clique em &quot;+ Nova Doação&quot; para começar</p>
           )}
         </div>
@@ -415,6 +413,8 @@ export default function DoacoesPage() {
           {donations.map(donation => {
             const totalBoxes = donation.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
             const donationEmployees = getDonationEmployees(donation)
+            const podeEditarEsse = canEditRecord('doacoes', donation.date)
+
             return (
               <div key={donation.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
                 {/* Cabeçalho do card */}
@@ -431,7 +431,6 @@ export default function DoacoesPage() {
                     <p className="text-sm text-gray-500 mt-0.5">
                       {formatDate(donation.date)}
                     </p>
-                    {/* 🧑‍🤝‍🧑 Funcionários — badges roxos (igual colheita) */}
                     {donationEmployees.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {donationEmployees.map(emp => (
@@ -451,26 +450,30 @@ export default function DoacoesPage() {
                     <span className="text-sm font-medium text-green-600">
                       {donation.items.length} {donation.items.length === 1 ? 'item' : 'itens'}
                     </span>
-                    {podeEditar && (
-                      <>
-                        <button
-                          onClick={() => startEdit(donation)}
-                          className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => handleDelete(donation.id)}
-                          className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                        >
-                          Excluir
-                        </button>
-                      </>
+
+                    {/* ✏️ Editar: admin sempre / operador só se data = hoje */}
+                    {podeEditarEsse && (
+                      <button
+                        onClick={() => startEdit(donation)}
+                        className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                      >
+                        Editar
+                      </button>
+                    )}
+
+                    {/* 🗑️ Excluir: apenas admin */}
+                    {podeExcluir && (
+                      <button
+                        onClick={() => handleDelete(donation.id)}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                      >
+                        Excluir
+                      </button>
                     )}
                   </div>
                 </div>
 
-                {/* Tags dos itens — desktop em linha, mobile vertical (igual colheita) */}
+                {/* Tags dos itens */}
                 <div className="mb-3">
                   {/* Desktop */}
                   <div className="hidden sm:flex flex-wrap gap-2">

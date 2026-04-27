@@ -50,11 +50,21 @@ export async function GET(req: NextRequest) {
     })
 
     // ✅ Buscar aproveitamento existente (busca por intervalo, não findUnique)
-    const existingApproval = await prisma.dailyApproval.findFirst({
-      where: {
-        date: { gte: dayStart, lte: dayEnd },
-      },
-    })
+const existingApprovalRaw = await prisma.dailyApproval.findFirst({
+  where: {
+    date: { gte: dayStart, lte: dayEnd },
+  },
+})
+
+// 🔄 Normaliza o nome do campo pra resposta (approvedQty → approvedQuantity)
+const existingApproval = existingApprovalRaw
+  ? {
+      id: existingApprovalRaw.id,
+      date: existingApprovalRaw.date,
+      approvedQuantity: existingApprovalRaw.approvedQty,
+      notes: existingApprovalRaw.notes ?? null,
+    }
+  : null
 
     // 📊 Agrupar doações por doador
     const donationsByDonor: Record<

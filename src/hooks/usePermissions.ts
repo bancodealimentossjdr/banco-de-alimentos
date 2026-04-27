@@ -1,25 +1,17 @@
 'use client'
 
 import { useSession } from 'next-auth/react'
+import {
+  canView as libCanView,
+  canEdit as libCanEdit,
+  canEditRecord as libCanEditRecord,
+  canDeleteRecord as libCanDeleteRecord,
+  type Module,
+  type Role,
+} from '@/lib/permissions'
 
-export type Role = 'admin' | 'operador' | 'visualizador'
-
-// Módulos que admin + operador podem editar (operação diária)
-const OPERATIONAL_MODULES = ['doacoes', 'distribuicoes', 'colheita-solidaria'] as const
-
-// Módulos que SÓ admin pode editar (cadastros estruturais)
-const ADMIN_ONLY_MODULES = [
-  'produtos',
-  'doadores',
-  'beneficiarios',
-  'funcionarios',
-  'produtores',
-  'usuarios',
-] as const
-
-export type Module =
-  | (typeof OPERATIONAL_MODULES)[number]
-  | (typeof ADMIN_ONLY_MODULES)[number]
+// Re-exporta os tipos pra manter compatibilidade
+export type { Module, Role }
 
 export function usePermissions() {
   const { data: session, status } = useSession()
@@ -31,23 +23,43 @@ export function usePermissions() {
   const isLoading = status === 'loading'
 
   /**
-   * Verifica se o usuário pode CRIAR/EDITAR/EXCLUIR em um módulo.
-   * - admin: todos os módulos
+   * Pode CRIAR no módulo? (não considera registro específico)
+   * - admin: todos os módulos editáveis
    * - operador: apenas módulos operacionais
    * - visualizador: nenhum
    */
   const canEdit = (module: Module): boolean => {
-    if (isVisualizador) return false
-    if (isAdmin) return true
-    // operador
-    return (OPERATIONAL_MODULES as readonly string[]).includes(module)
+    if (!session) return false
+    return libCanEdit(role, module)
   }
 
   /**
-   * Visualizar é liberado para todos os roles autenticados.
+   * Pode EDITAR um registro específico?
+   * Admin: sempre. Operador: só se a data do registro for hoje (módulos time-locked).
+   *
+   * @param module - módulo do sistema
+   * @param recordDate - campo `date` do registro
    */
-  const canView = (_module: Module): boolean => {
-    return !!session
+  const canEditRecord = (module: Module, recordDate: Date | string): boolean => {
+    if (!session) return false
+    return libCanEditRecord(role, module, recordDate)
+  }
+
+  /**
+   * Pode EXCLUIR registros desse módulo?
+   * Para módulos time-locked: apenas admin.
+   */
+  const canDelete = (module: Module): boolean => {
+    if (!session) return false
+    return libCanDeleteRecord(role, module)
+  }
+
+  /**
+   * Pode visualizar o módulo?
+   */
+  const canView = (module: Module): boolean => {
+    if (!session) return false
+    return libCanView(role, module)
   }
 
   return {
@@ -57,6 +69,8 @@ export function usePermissions() {
     isVisualizador,
     isLoading,
     canEdit,
+    canEditRecord,
+    canDelete,
     canView,
   }
 }
