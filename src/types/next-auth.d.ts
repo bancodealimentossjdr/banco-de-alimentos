@@ -12,13 +12,13 @@ declare module 'next-auth' {
   }
 
   interface User extends DefaultUser {
-    role: UserRole
+    role?: UserRole
   }
 }
 
 declare module 'next-auth/jwt' {
   interface JWT extends DefaultJWT {
-    id: string
-    role: UserRole
+    id?: string
+    role?: UserRole
   }
 }
