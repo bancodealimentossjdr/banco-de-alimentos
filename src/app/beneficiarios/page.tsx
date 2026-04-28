@@ -320,75 +320,75 @@ export default function BeneficiariosPage() {
           </div>
 
           {/* ====== CARDS - só aparece no mobile (< md) ====== */}
-          <div className="md:hidden space-y-3">
-            {beneficiaries.map(b => (
-              <div key={b.id} className="bg-white rounded-xl shadow-sm border p-4">
-                {/* Topo: nome + status */}
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div className="min-w-0">
-                    <h3 className="font-bold text-gray-900 truncate">{b.name}</h3>
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                      {getTypeLabel(b.type)}
-                    </span>
-                  </div>
-                  <span className={`shrink-0 px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
-                    {b.status}
-                  </span>
-                </div>
+<div className="md:hidden space-y-3">
+  {beneficiaries.map(b => (
+    <div key={b.id} className="bg-white rounded-xl shadow-sm border p-4 overflow-hidden">
+      {/* Topo: nome + status */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-bold text-gray-900 break-words">{b.name}</h3>
+          <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+            {getTypeLabel(b.type)}
+          </span>
+        </div>
+        <span className={`shrink-0 px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
+          {b.status}
+        </span>
+      </div>
 
-                {/* Informações */}
-                <div className="space-y-1.5 text-sm text-gray-600 mb-3">
-                  {b.contact && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 w-5 text-center">👤</span>
-                      <span>{b.contact}</span>
-                    </div>
-                  )}
-                  {b.phone && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 w-5 text-center">📞</span>
-                      <PhoneLink phone={b.phone} />
-                    </div>
-                  )}
-                  {b.address && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 w-5 text-center">📍</span>
-                      <span className="truncate">{b.address}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-5 text-center">📦</span>
-                    <span>{b._count.distributions} {b._count.distributions === 1 ? 'entrega' : 'entregas'}</span>
-                  </div>
-                </div>
-
-                {/* Observações */}
-                {b.notes && (
-                  <p className="text-xs text-gray-400 italic mb-3">📝 {b.notes}</p>
-                )}
-
-                {/* Ações — só aparecem pra quem pode editar */}
-                {podeEditar && (
-                  <div className="flex gap-2 pt-2 border-t border-gray-100">
-                    <button
-                      onClick={() => startEdit(b)}
-                      className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
-                    >
-                      ✏️ Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(b.id, b.name)}
-                      className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
-                    >
-                      🗑️ Excluir
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+      {/* Informações */}
+      <div className="space-y-1.5 text-sm text-gray-600 mb-3">
+        {b.contact && (
+          <div className="flex items-start gap-2 min-w-0">
+            <span className="text-gray-400 w-5 text-center shrink-0">👤</span>
+            <span className="min-w-0 break-words">{b.contact}</span>
           </div>
-        </>
+        )}
+        {b.phone && (
+          <div className="flex items-start gap-2 min-w-0">
+            <span className="text-gray-400 w-5 text-center shrink-0">📞</span>
+            <div className="min-w-0 break-words">
+              <PhoneLink phone={b.phone} />
+            </div>
+          </div>
+        )}
+        {b.address && (
+          <div className="flex items-start gap-2 min-w-0">
+            <span className="text-gray-400 w-5 text-center shrink-0">📍</span>
+            <span className="min-w-0 break-words">{b.address}</span>
+          </div>
+        )}
+        <div className="flex items-start gap-2 min-w-0">
+          <span className="text-gray-400 w-5 text-center shrink-0">📦</span>
+          <span className="min-w-0">{b._count.distributions} {b._count.distributions === 1 ? 'entrega' : 'entregas'}</span>
+        </div>
+      </div>
+
+      {/* Observações */}
+      {b.notes && (
+        <p className="text-xs text-gray-400 italic mb-3 break-words">📝 {b.notes}</p>
+      )}
+
+      {/* Ações — só aparecem pra quem pode editar */}
+      {podeEditar && (
+        <div className="flex gap-2 pt-2 border-t border-gray-100">
+          <button
+            onClick={() => startEdit(b)}
+            className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
+          >
+            ✏️ Editar
+          </button>
+          <button
+            onClick={() => handleDelete(b.id, b.name)}
+            className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
+          >
+            🗑️ Excluir
+          </button>
+        </div>
       )}
     </div>
+  ))}
+</div>
+
   )
 }

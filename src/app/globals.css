@@ -4,8 +4,7 @@
    🔧 CORREÇÕES PARA MOBILE (iOS + Android)
    ============================================ */
 
-/* Correção 1: Evita zoom automático no iOS ao focar inputs/selects/textareas
-   Força 16px no mobile, sobrescrevendo classes text-sm/text-xs do Tailwind */
+/* Correção 1: Evita zoom automático no iOS ao focar inputs/selects/textareas */
 @media screen and (max-width: 768px) {
   input,
   select,
@@ -24,14 +23,14 @@
   }
 }
 
-/* Correção 2: Evita estouro horizontal que causa "zoom out" automático */
-html,
-body {
-  overflow-x: hidden;
-  max-width: 100vw;
-}
-
-/* Correção 3: Scroll suave em containers com overflow no iOS */
+/* Correção 2: Scroll suave em containers com overflow no iOS */
 .overflow-x-auto {
   -webkit-overflow-scrolling: touch;
+}
+
+/* Correção 3: Quebra palavras longas que poderiam estourar largura
+   (URLs, emails, endereços longos sem espaço) */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
