@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
+import { useDraft } from '@/hooks/useDraft'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
+import DraftBanner from '@/components/DraftBanner'
+import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
 interface Producer { id: string; name: string }
 interface ProductOption { id: string; name: string; unit: string }
@@ -25,6 +28,18 @@ interface FormItem {
   productId: string
   quantity: number
   boxes?: number
+}
+
+interface ColheitaForm {
+  producerId: string
+  employeeId: string
+  employee2Id: string
+  employee3Id: string
+  date: string
+  status: string
+  notes: string
+  indemnityValue: number
+  items: FormItem[]
 }
 
 const STATUS_OPTIONS = [
@@ -50,7 +65,7 @@ export default function ColheitaSolidariaPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<ColheitaForm>({
     producerId: '',
     employeeId: '',
     employee2Id: '',
@@ -59,10 +74,28 @@ export default function ColheitaSolidariaPage() {
     status: 'agendada',
     notes: '',
     indemnityValue: 1.5,
-    items: [{ productId: '', quantity: 0 }] as FormItem[],
+    items: [{ productId: '', quantity: 0 }],
   })
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
+
+  // 💾 Rascunho local (só para criação nova)
+  const {
+    showSavedIndicator,
+    hasDraft,
+    draftSavedAt,
+    restoreDraft,
+    discardDraft,
+    clearDraft,
+  } = useDraft<ColheitaForm>({
+    key: 'colheita-nova',
+    state: form,
+    onRestore: (data) => {
+      setForm(data)
+      setShowForm(true)
+    },
+    disabled: editingId !== null,
+  })
 
   const fetchAll = async () => {
     try {
@@ -167,7 +200,11 @@ export default function ColheitaSolidariaPage() {
             items: validItems,
           }),
         })
-        if (res.ok) { resetForm(); fetchAll() }
+        if (res.ok) {
+          clearDraft() // 🧹 Limpa o rascunho ao salvar com sucesso
+          resetForm()
+          fetchAll()
+        }
         else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
       } catch (error) { console.error('Erro ao salvar colheita:', error) }
     })
@@ -214,6 +251,15 @@ export default function ColheitaSolidariaPage() {
           </button>
         )}
       </div>
+
+      {/* 💾 Banner de rascunho (aparece quando há rascunho válido) */}
+      {hasDraft && podeEditar && !editingId && (
+        <DraftBanner
+          savedAt={draftSavedAt}
+          onRestore={restoreDraft}
+          onDiscard={discardDraft}
+        />
+      )}
 
       {/* Formulário */}
       {showForm && podeEditar && (
@@ -702,6 +748,9 @@ export default function ColheitaSolidariaPage() {
           })}
         </div>
       )}
+
+      {/* 💾 Indicador discreto "Rascunho salvo" */}
+      <DraftSavedIndicator show={showSavedIndicator} />
     </div>
   )
 }

@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
+import { useDraft } from '@/hooks/useDraft'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
+import DraftBanner from '@/components/DraftBanner'
+import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
 interface Product { id: string; name: string; unit: string }
 interface Beneficiary { id: string; name: string; type: string }
@@ -33,6 +36,15 @@ interface FormItem {
   boxes?: number
 }
 
+interface DistribuicaoForm {
+  beneficiaryId: string
+  employeeId: string
+  employee2Id: string
+  employee3Id: string
+  date: string
+  notes: string
+}
+
 export default function DistribuicoesPage() {
   // 🔐 Permissões: editar (geral), por registro (trava temporal) e excluir (só admin)
   const { canEdit, canEditRecord, canDelete } = usePermissions()
@@ -50,7 +62,7 @@ export default function DistribuicoesPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<DistribuicaoForm>({
     beneficiaryId: '',
     employeeId: '',
     employee2Id: '',
@@ -61,6 +73,25 @@ export default function DistribuicoesPage() {
   const [formItems, setFormItems] = useState<FormItem[]>([{ productId: '', quantity: 0 }])
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
+
+  // 💾 Rascunho local (só para criação nova)
+  const {
+    showSavedIndicator,
+    hasDraft,
+    draftSavedAt,
+    restoreDraft,
+    discardDraft,
+    clearDraft,
+  } = useDraft<{ form: DistribuicaoForm; formItems: FormItem[] }>({
+    key: 'distribuicao-nova',
+    state: { form, formItems },
+    onRestore: (data) => {
+      setForm(data.form)
+      setFormItems(data.formItems)
+      setShowForm(true)
+    },
+    disabled: editingId !== null,
+  })
 
   const fetchAll = async () => {
     try {
@@ -172,6 +203,7 @@ export default function DistribuicoesPage() {
           }),
         })
         if (res.ok) {
+          clearDraft() // 🧹 Limpa o rascunho ao salvar com sucesso
           resetForm()
           fetchAll()
         } else {
@@ -225,6 +257,15 @@ export default function DistribuicoesPage() {
           </button>
         )}
       </div>
+
+      {/* 💾 Banner de rascunho (aparece quando há rascunho válido) */}
+      {hasDraft && podeEditar && !editingId && (
+        <DraftBanner
+          savedAt={draftSavedAt}
+          onRestore={restoreDraft}
+          onDiscard={discardDraft}
+        />
+      )}
 
       {/* Formulário */}
       {showForm && podeEditar && (
@@ -564,6 +605,9 @@ export default function DistribuicoesPage() {
           })}
         </div>
       )}
+
+      {/* 💾 Indicador discreto "Rascunho salvo" */}
+      <DraftSavedIndicator show={showSavedIndicator} />
     </div>
   )
 }

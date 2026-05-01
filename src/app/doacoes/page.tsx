@@ -1,8 +1,11 @@
 'use client'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
+import { useDraft } from '@/hooks/useDraft'
 import { useEffect, useState } from 'react'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
+import DraftBanner from '@/components/DraftBanner'
+import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
 interface Product { id: string; name: string; unit: string }
 interface Donor { id: string; name: string }
@@ -23,6 +26,15 @@ interface Donation {
   items: DonationItem[]
 }
 
+interface DoacaoForm {
+  donorId: string
+  employeeId: string
+  employee2Id: string
+  employee3Id: string
+  date: string
+  notes: string
+}
+
 export default function DoacoesPage() {
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeCriar = canEdit('doacoes')
@@ -39,7 +51,7 @@ export default function DoacoesPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<DoacaoForm>({
     donorId: '',
     employeeId: '',
     employee2Id: '',
@@ -50,6 +62,25 @@ export default function DoacoesPage() {
   const [formItems, setFormItems] = useState<FormItem[]>([{ productId: '', quantity: 0 }])
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
+
+  // 💾 Rascunho local (só para criação nova)
+  const {
+    showSavedIndicator,
+    hasDraft,
+    draftSavedAt,
+    restoreDraft,
+    discardDraft,
+    clearDraft,
+  } = useDraft<{ form: DoacaoForm; formItems: FormItem[] }>({
+    key: 'doacao-nova',
+    state: { form, formItems },
+    onRestore: (data) => {
+      setForm(data.form)
+      setFormItems(data.formItems)
+      setShowForm(true)
+    },
+    disabled: editingId !== null,
+  })
 
   const fetchAll = async () => {
     try {
@@ -151,7 +182,11 @@ export default function DoacoesPage() {
             items: validItems,
           }),
         })
-        if (res.ok) { resetForm(); fetchAll() }
+        if (res.ok) {
+          clearDraft() // 🧹 Limpa o rascunho ao salvar com sucesso
+          resetForm()
+          fetchAll()
+        }
         else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
       } catch (error) { console.error('Erro ao salvar:', error) }
     })
@@ -191,6 +226,15 @@ export default function DoacoesPage() {
           </button>
         )}
       </div>
+
+      {/* 💾 Banner de rascunho (aparece quando há rascunho válido) */}
+      {hasDraft && podeCriar && !editingId && (
+        <DraftBanner
+          savedAt={draftSavedAt}
+          onRestore={restoreDraft}
+          onDiscard={discardDraft}
+        />
+      )}
 
       {/* Formulário */}
       {showForm && podeCriar && (
@@ -528,6 +572,9 @@ export default function DoacoesPage() {
           })}
         </div>
       )}
+
+      {/* 💾 Indicador discreto "Rascunho salvo" */}
+      <DraftSavedIndicator show={showSavedIndicator} />
     </div>
   )
 }
