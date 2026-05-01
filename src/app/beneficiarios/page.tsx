@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import PhoneLink from '@/components/PhoneLink'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useFormSubmit } from '@/hooks/useFormSubmit'
 
 interface Beneficiary {
   id: string
@@ -33,6 +34,9 @@ const INSTITUTION_TYPES = [
 export default function BeneficiariosPage() {
   const { canEdit } = usePermissions()
   const podeEditar = canEdit('beneficiarios')
+
+  // 🔒 Trava de duplo clique
+  const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([])
   const [loading, setLoading] = useState(true)
@@ -80,24 +84,28 @@ export default function BeneficiariosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      const url = editingId ? `/api/beneficiarios/${editingId}` : '/api/beneficiarios'
-      const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      if (res.ok) {
-        resetForm()
-        fetchBeneficiaries()
-      } else {
-        const data = await res.json()
-        alert(data.error || 'Erro ao salvar')
+
+    // 🔒 Envolve a chamada de salvar na trava de duplo clique
+    await runSubmit(async () => {
+      try {
+        const url = editingId ? `/api/beneficiarios/${editingId}` : '/api/beneficiarios'
+        const method = editingId ? 'PUT' : 'POST'
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        })
+        if (res.ok) {
+          resetForm()
+          fetchBeneficiaries()
+        } else {
+          const data = await res.json()
+          alert(data.error || 'Erro ao salvar')
+        }
+      } catch (error) {
+        console.error('Erro ao salvar instituição:', error)
       }
-    } catch (error) {
-      console.error('Erro ao salvar instituição:', error)
-    }
+    })
   }
 
   const handleDelete = async (id: string, name: string) => {
@@ -226,15 +234,19 @@ export default function BeneficiariosPage() {
           <div className="flex flex-col sm:flex-row gap-3 mt-4">
             <button
               type="submit"
-              className="bg-purple-500 hover:bg-purple-600 text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+              disabled={isSubmitting}
+              className="bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
             >
-              {editingId ? 'Atualizar Instituição' : 'Salvar Instituição'}
+              {isSubmitting
+                ? 'Salvando...'
+                : editingId ? 'Atualizar Instituição' : 'Salvar Instituição'}
             </button>
             {editingId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+                disabled={isSubmitting}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
               >
                 Cancelar Edição
               </button>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useFormSubmit } from '@/hooks/useFormSubmit'
 
 interface Product {
   id: string
@@ -64,6 +65,9 @@ export default function ProdutosPage() {
   const { canEdit } = usePermissions()
   const podeEditar = canEdit('produtos')
 
+  // 🔒 Trava de duplo clique
+  const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
+
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -106,24 +110,28 @@ export default function ProdutosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      const url = editingId ? `/api/produtos/${editingId}` : '/api/produtos'
-      const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      if (res.ok) {
-        resetForm()
-        fetchProducts()
-      } else {
-        const data = await res.json()
-        alert(data.error || 'Erro ao salvar')
+
+    // 🔒 Envolve a chamada de salvar na trava de duplo clique
+    await runSubmit(async () => {
+      try {
+        const url = editingId ? `/api/produtos/${editingId}` : '/api/produtos'
+        const method = editingId ? 'PUT' : 'POST'
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        })
+        if (res.ok) {
+          resetForm()
+          fetchProducts()
+        } else {
+          const data = await res.json()
+          alert(data.error || 'Erro ao salvar')
+        }
+      } catch (error) {
+        console.error('Erro ao salvar produto:', error)
       }
-    } catch (error) {
-      console.error('Erro ao salvar produto:', error)
-    }
+    })
   }
 
   const handleDelete = async (id: string, name: string) => {
@@ -219,15 +227,19 @@ export default function ProdutosPage() {
           <div className="flex flex-col sm:flex-row gap-3 mt-4">
             <button
               type="submit"
-              className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+              disabled={isSubmitting}
+              className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
             >
-              {editingId ? 'Atualizar Produto' : 'Salvar Produto'}
+              {isSubmitting
+                ? 'Salvando...'
+                : editingId ? 'Atualizar Produto' : 'Salvar Produto'}
             </button>
             {editingId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+                disabled={isSubmitting}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
               >
                 Cancelar Edição
               </button>

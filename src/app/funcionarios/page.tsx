@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import PhoneLink from '@/components/PhoneLink'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useFormSubmit } from '@/hooks/useFormSubmit'
 
 interface Employee {
   id: string
@@ -38,6 +39,9 @@ const getColheitas = (emp: Employee) =>
 export default function FuncionariosPage() {
   const { canEdit } = usePermissions()
   const podeEditar = canEdit('funcionarios')
+
+  // 🔒 Trava de duplo clique
+  const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
@@ -79,24 +83,28 @@ export default function FuncionariosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      const url = editingId ? `/api/funcionarios/${editingId}` : '/api/funcionarios'
-      const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      if (res.ok) {
-        resetForm()
-        fetchEmployees()
-      } else {
-        const data = await res.json()
-        alert(data.error || 'Erro ao salvar')
+
+    // 🔒 Envolve a chamada de salvar na trava de duplo clique
+    await runSubmit(async () => {
+      try {
+        const url = editingId ? `/api/funcionarios/${editingId}` : '/api/funcionarios'
+        const method = editingId ? 'PUT' : 'POST'
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        })
+        if (res.ok) {
+          resetForm()
+          fetchEmployees()
+        } else {
+          const data = await res.json()
+          alert(data.error || 'Erro ao salvar')
+        }
+      } catch (error) {
+        console.error('Erro ao salvar funcionário:', error)
       }
-    } catch (error) {
-      console.error('Erro ao salvar funcionário:', error)
-    }
+    })
   }
 
   const handleDelete = async (id: string, name: string) => {
@@ -171,15 +179,19 @@ export default function FuncionariosPage() {
           <div className="flex flex-col sm:flex-row gap-3 mt-4">
             <button
               type="submit"
-              className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+              disabled={isSubmitting}
+              className="bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
             >
-              {editingId ? 'Atualizar Funcionário' : 'Salvar Funcionário'}
+              {isSubmitting
+                ? 'Salvando...'
+                : editingId ? 'Atualizar Funcionário' : 'Salvar Funcionário'}
             </button>
             {editingId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+                disabled={isSubmitting}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
               >
                 Cancelar Edição
               </button>

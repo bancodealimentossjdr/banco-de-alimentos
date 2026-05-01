@@ -1,5 +1,6 @@
 'use client'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useEffect, useState } from 'react'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 
@@ -26,6 +27,9 @@ export default function DoacoesPage() {
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeCriar = canEdit('doacoes')
   const podeExcluir = canDelete('doacoes')
+
+  // 🔒 Trava de duplo clique
+  const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
   const [donations, setDonations] = useState<Donation[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -132,22 +136,25 @@ export default function DoacoesPage() {
     const validItems = formItems.filter(i => i.productId && i.quantity > 0)
     if (validItems.length === 0) return alert('Adicione pelo menos um produto!')
 
-    try {
-      const url = editingId ? '/api/doacoes/' + editingId : '/api/doacoes'
-      const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch(url, {
-        method, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          employeeId: form.employeeId,
-          employee2Id: form.employee2Id || null,
-          employee3Id: form.employee3Id || null,
-          items: validItems,
-        }),
-      })
-      if (res.ok) { resetForm(); fetchAll() }
-      else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
-    } catch (error) { console.error('Erro ao salvar:', error) }
+    // 🔒 Envolve a chamada de salvar na trava de duplo clique
+    await runSubmit(async () => {
+      try {
+        const url = editingId ? '/api/doacoes/' + editingId : '/api/doacoes'
+        const method = editingId ? 'PUT' : 'POST'
+        const res = await fetch(url, {
+          method, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...form,
+            employeeId: form.employeeId,
+            employee2Id: form.employee2Id || null,
+            employee3Id: form.employee3Id || null,
+            items: validItems,
+          }),
+        })
+        if (res.ok) { resetForm(); fetchAll() }
+        else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
+      } catch (error) { console.error('Erro ao salvar:', error) }
+    })
   }
 
   const handleDelete = async (id: string) => {
@@ -378,15 +385,19 @@ export default function DoacoesPage() {
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="submit"
-              className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+              disabled={isSubmitting}
+              className="bg-green-500 hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
             >
-              {editingId ? 'Atualizar Doação' : 'Registrar Doação'}
+              {isSubmitting
+                ? 'Salvando...'
+                : editingId ? 'Atualizar Doação' : 'Registrar Doação'}
             </button>
             {editingId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+                disabled={isSubmitting}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
               >
                 Cancelar Edição
               </button>
