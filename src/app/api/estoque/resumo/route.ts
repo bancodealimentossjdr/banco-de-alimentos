@@ -8,28 +8,26 @@ export const dynamic = "force-dynamic";
  *
  * Retorna o resumo consolidado do estoque do Banco de Alimentos.
  *
- * 📐 Fórmulas (alinhadas ao processo real da operação):
+ * 📐 Modelo (alinhado à operação real):
  *
- *   🏪 Doações Brutas    = Σ DonationItem.quantity
- *   🌾 Colheita Solidária = Σ HarvestItem.quantity
- *   📤 Distribuído        = Σ DistributionItem.quantity
- *   🧊 Câmara Fria        = Σ DailyApproval.approvedQty (sobra triada do dia)
+ *   🏪 Doações           = Σ DonationItem.quantity         (bruto recebido de doadores)
+ *   🌾 Colheita Solidária = Σ HarvestItem.quantity         (informativo, calculada à parte)
+ *   📤 Distribuído        = Σ DistributionItem.quantity    (saiu pros beneficiários)
+ *   🧊 Câmara Fria        = Σ DailyApproval.approvedQty    (físico guardado AGORA)
  *
- *   ✅ Aproveitado TOTAL = Distribuído + Câmara Fria
- *      (ambos são alimento bom: ou já saiu pra beneficiário, ou foi guardado)
+ *   ✅ Aproveitado = Câmara Fria + Distribuído
+ *      → todo alimento BOM que passou pela triagem das doações:
+ *        parte ainda está guardada (câmara) + parte já saiu (distribuído)
  *
- *   📦 Em Estoque (físico AGORA) =
- *        Câmara Fria + Colheita − max(0, Distribuído − Doações Brutas)
+ *   📦 Em Estoque = Câmara Fria
+ *      → literalmente o que está dentro da câmara agora.
+ *      → Colheita NÃO entra aqui (é cadastrada à parte e não passa pela câmara fria).
  *
- *      O termo max(0, Distribuído − Doações) representa quanto da câmara fria
- *      foi consumido pelas distribuições (só desconta quando se distribuiu
- *      MAIS do que chegou em doações brutas).
- *
- *   📈 Taxa de Aproveitamento = Aproveitado / (Doações + Colheita) × 100%
+ *   📈 Taxa de Aproveitamento das Doações = Aproveitado / Doações × 100%
  */
 export async function GET() {
   try {
-    // 🔢 Agregações em paralelo pra performance
+    // 🔢 Agregações em paralelo
     const [
       donationAgg,
       harvestAgg,
@@ -51,45 +49,50 @@ export async function GET() {
     ]);
 
     // 📊 Totais brutos
-    const totalDonations = donationAgg._sum.quantity ?? 0;
-    const totalHarvest = harvestAgg._sum.quantity ?? 0;
-    const totalDistributed = distributionAgg._sum.quantity ?? 0;
-    const totalColdRoom = approvalAgg._sum.approvedQty ?? 0;
+    const donations = donationAgg._sum.quantity ?? 0;
+    const solidarityHarvest = harvestAgg._sum.quantity ?? 0;
+    const distributed = distributionAgg._sum.quantity ?? 0;
+    const coldRoom = approvalAgg._sum.approvedQty ?? 0;
 
-    // ✅ Aproveitado = Distribuído + Câmara Fria
-    const totalApproved = totalDistributed + totalColdRoom;
+    // ✅ Aproveitado = Câmara Fria + Distribuído
+    const approved = coldRoom + distributed;
 
-    // 📦 Em Estoque = Câmara Fria + Colheita − consumo do estoque
-    const stockConsumption = Math.max(0, totalDistributed - totalDonations);
-    const inStock = totalColdRoom + totalHarvest - stockConsumption;
+    // 📦 Em Estoque = Câmara Fria (físico guardado agora)
+    const inStock = coldRoom;
 
-    // 📈 Taxa de aproveitamento (%)
-    const totalReceived = totalDonations + totalHarvest;
+    // 📈 Taxa de aproveitamento das doações (%)
     const utilizationRate =
-      totalReceived > 0 ? (totalApproved / totalReceived) * 100 : 0;
+      donations > 0 ? (approved / donations) * 100 : 0;
 
     return NextResponse.json({
-      // Totais principais
-      donations: totalDonations,
-      harvest: totalHarvest,
-      distributed: totalDistributed,
-      approved: totalApproved,
+      // Totais principais (chaves que a UI consome)
+      donations,
+      solidarityHarvest,
+      approved,
+      distributed,
       inStock,
 
-      // 🔍 Breakdown do aproveitado (pra UI mostrar "quebrado em 2 linhas")
+      // 🔍 Breakdown opcional do aproveitado
       approvedBreakdown: {
-        distributed: totalDistributed,
-        coldRoom: totalColdRoom,
+        coldRoom,
+        distributed,
       },
 
       // 📈 Métrica adicional
       utilizationRate: Number(utilizationRate.toFixed(1)),
 
-      // 🐛 Debug info (útil pra conferir cálculos)
+      // 🐛 Debug (útil pra conferir cálculos)
       debug: {
-        stockConsumption,
-        formula:
-          "inStock = coldRoom + harvest - max(0, distributed - donations)",
+        formula: {
+          approved: "approved = coldRoom + distributed",
+          inStock: "inStock = coldRoom",
+        },
+        raw: {
+          donations,
+          solidarityHarvest,
+          distributed,
+          coldRoom,
+        },
       },
     });
   } catch (error) {

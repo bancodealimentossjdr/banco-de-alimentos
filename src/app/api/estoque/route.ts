@@ -2,74 +2,44 @@
 import { prisma } from '@/lib/prisma'
 import { requireView } from '@/lib/auth-helpers'
 
-// Nome do produto que deve sempre aparecer primeiro nas listagens
-const PRIORITY_PRODUCT = 'hortifruti'
-
 export async function GET() {
   const authResult = await requireView('estoque')
   if (authResult instanceof NextResponse) return authResult
 
   try {
-    // 4 queries em paralelo — independente da quantidade de produtos
-    const [products, donatedByProduct, harvestedByProduct, distributedByProduct] =
+    // 4 agregações simples em paralelo
+    const [donatedAgg, harvestedAgg, distributedAgg, approvedAgg] =
       await Promise.all([
-        prisma.product.findMany({
-          where: { active: true },
-          orderBy: { name: 'asc' },
-        }),
-        prisma.donationItem.groupBy({
-          by: ['productId'],
-          _sum: { quantity: true },
-        }),
-        prisma.harvestItem.groupBy({
-          by: ['productId'],
-          _sum: { quantity: true },
-        }),
-        prisma.distributionItem.groupBy({
-          by: ['productId'],
-          _sum: { quantity: true },
-        }),
+        prisma.donationItem.aggregate({ _sum: { quantity: true } }),
+        prisma.harvestItem.aggregate({ _sum: { quantity: true } }),
+        prisma.distributionItem.aggregate({ _sum: { quantity: true } }),
+        prisma.dailyApproval.aggregate({ _sum: { approvedQty: true } }),
       ])
 
-    // Mapas para lookup O(1)
-    const donatedMap = new Map(
-      donatedByProduct.map(d => [d.productId, d._sum.quantity || 0])
-    )
-    const harvestedMap = new Map(
-      harvestedByProduct.map(h => [h.productId, h._sum.quantity || 0])
-    )
-    const distributedMap = new Map(
-      distributedByProduct.map(d => [d.productId, d._sum.quantity || 0])
-    )
+    const totalDonated = donatedAgg._sum.quantity || 0
+    const totalHarvested = harvestedAgg._sum.quantity || 0
+    const totalDistributed = distributedAgg._sum.quantity || 0
+    const totalInColdRoom = approvedAgg._sum.approvedQty || 0
 
-    const stockItems = products.map(product => {
-      const totalDonated = donatedMap.get(product.id) || 0
-      const totalHarvested = harvestedMap.get(product.id) || 0
-      const totalDistributed = distributedMap.get(product.id) || 0
+    // ✅ Aproveitado = câmara fria atual + tudo que já saiu pros beneficiários
+    const totalApproved = totalInColdRoom + totalDistributed
 
-      return {
-        id: product.id,
-        name: product.name,
-        category: product.category,
-        unit: product.unit,
-        minStock: product.minStock,
-        donated: totalDonated,
-        harvested: totalHarvested,
-        distributed: totalDistributed,
-        stock: totalDonated + totalHarvested - totalDistributed,
-      }
+    // ✅ Estoque = só o que está fisicamente na câmara fria
+    const totalStock = totalInColdRoom
+
+    // Descartado = entrou e não virou aproveitamento (foi pro lixo na triagem)
+    const totalEntered = totalDonated + totalHarvested
+    const totalDiscarded = Math.max(0, totalEntered - totalApproved)
+
+    return NextResponse.json({
+      totalDonated,
+      totalHarvested,
+      totalEntered,
+      totalApproved,
+      totalDistributed,
+      totalStock,
+      totalDiscarded,
     })
-
-    // Ordena com Hortifruti no topo, depois alfabético
-    const sorted = stockItems.sort((a, b) => {
-      const aIsPriority = a.name.trim().toLowerCase() === PRIORITY_PRODUCT
-      const bIsPriority = b.name.trim().toLowerCase() === PRIORITY_PRODUCT
-      if (aIsPriority && !bIsPriority) return -1
-      if (!aIsPriority && bIsPriority) return 1
-      return a.name.localeCompare(b.name, 'pt-BR')
-    })
-
-    return NextResponse.json(sorted)
   } catch (error) {
     console.error('Erro GET estoque:', error)
     return NextResponse.json({ error: 'Erro ao buscar estoque' }, { status: 500 })

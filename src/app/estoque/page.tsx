@@ -277,17 +277,14 @@ export default function EstoquePage() {
               <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
                 ✅ Aproveitado ({formatKg(resumo.approved)})
               </span>
-              <span className="text-gray-400 font-bold">+</span>
-              <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
-                🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
-              </span>
               <span className="text-gray-400 font-bold">−</span>
               <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
                 📤 Distribuído ({formatKg(resumo.distributed)})
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-3">
-              💡 Doações entram no estoque apenas após serem <strong>aproveitadas</strong>.
+              💡 O <strong>Aproveitado</strong> representa o que passou na triagem das doações (parte ainda em câmara fria + parte já distribuída).
+              A <strong>Colheita Solidária</strong> é controlada à parte e não interfere nesta fórmula.
             </p>
           </div>
         </>

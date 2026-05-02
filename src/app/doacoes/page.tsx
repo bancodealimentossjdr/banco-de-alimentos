@@ -2,14 +2,13 @@
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
-import { useEffect, useState } from 'react'
+import { useApi, invalidate } from '@/hooks/useApi'
+import { useProdutos, useDoadores, useFuncionarios } from '@/hooks/useCadastros'
+import { useState } from 'react'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
-interface Product { id: string; name: string; unit: string }
-interface Donor { id: string; name: string }
-interface Employee { id: string; name: string }
 interface FormItem { productId: string; quantity: number; boxes?: number }
 interface DonationItem {
   id: string
@@ -43,11 +42,24 @@ export default function DoacoesPage() {
   // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  const [donations, setDonations] = useState<Donation[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [donors, setDonors] = useState<Donor[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [loading, setLoading] = useState(true)
+  // 🚀 Cache global de cadastros (carrega 1x, compartilha entre páginas)
+  const { produtos: products } = useProdutos()
+  const { doadores: donors } = useDoadores()
+  const { funcionarios: employees } = useFuncionarios()
+
+  // 📋 Lista de doações — cache local, revalida quando muda
+  const {
+    data: donationsData,
+    isLoading: loadingDonations,
+    mutate: mutateDonations,
+  } = useApi<Donation[]>('/api/doacoes', {
+    dedupingInterval: 10_000, // 10s — movimentações mudam mais que cadastros
+  })
+  const donations = donationsData ?? []
+
+  // 🔄 Loading: só mostra spinner se for o PRIMEIRO load (sem cache)
+  const loading = loadingDonations && !donationsData
+
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -81,27 +93,6 @@ export default function DoacoesPage() {
     },
     disabled: editingId !== null,
   })
-
-  const fetchAll = async () => {
-    try {
-      const [donRes, prodRes, donorRes, empRes] = await Promise.all([
-        fetch('/api/doacoes'), fetch('/api/produtos'), fetch('/api/doadores'), fetch('/api/funcionarios'),
-      ])
-      const [don, prod, donor, emp] = await Promise.all([
-        donRes.json(), prodRes.json(), donorRes.json(), empRes.json(),
-      ])
-      setDonations(Array.isArray(don) ? don : [])
-      setProducts(Array.isArray(prod) ? prod : [])
-      setDonors(Array.isArray(donor) ? donor : [])
-      setEmployees(Array.isArray(emp) ? emp : [])
-    } catch (error) {
-      console.error('Erro ao buscar dados:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchAll() }, [])
 
   const resetForm = () => {
     setForm({
@@ -185,7 +176,9 @@ export default function DoacoesPage() {
         if (res.ok) {
           clearDraft() // 🧹 Limpa o rascunho ao salvar com sucesso
           resetForm()
-          fetchAll()
+          // 🔄 Revalida a lista de doações + invalida o resumo do estoque
+          mutateDonations()
+          invalidate('/api/estoque/resumo')
         }
         else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
       } catch (error) { console.error('Erro ao salvar:', error) }
@@ -196,7 +189,10 @@ export default function DoacoesPage() {
     if (!confirm('Tem certeza que deseja excluir esta doação? O estoque será ajustado automaticamente.')) return
     try {
       const res = await fetch('/api/doacoes/' + id, { method: 'DELETE' })
-      if (res.ok) fetchAll()
+      if (res.ok) {
+        mutateDonations()
+        invalidate('/api/estoque/resumo')
+      }
       else { const data = await res.json(); alert(data.error || 'Erro ao excluir') }
     } catch (error) { console.error('Erro ao excluir:', error); alert('Erro ao excluir doação') }
   }
