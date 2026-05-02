@@ -1,15 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
+import { useApi, invalidate } from '@/hooks/useApi'
+import { useProdutos, useProdutores, useFuncionarios } from '@/hooks/useCadastros'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
-interface Producer { id: string; name: string }
-interface ProductOption { id: string; name: string; unit: string }
 interface HarvestItem {
   id: string; productId: string; quantity: number; boxes: number | null
   product: { id: string; name: string; unit: string }
@@ -49,19 +49,28 @@ const STATUS_OPTIONS = [
 ]
 
 export default function ColheitaSolidariaPage() {
-  // 🔐 Pega também canEditRecord (trava temporal) e canDeleteRecord (só admin)
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeEditar = canEdit('colheita-solidaria')
   const podeExcluir = canDelete('colheita-solidaria')
 
-  // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  const [harvests, setHarvests] = useState<Harvest[]>([])
-  const [producers, setProducers] = useState<Producer[]>([])
-  const [products, setProducts] = useState<ProductOption[]>([])
-  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([])
-  const [loading, setLoading] = useState(true)
+  // 🚀 Cache global de cadastros
+  const { produtos: products } = useProdutos()
+  const { produtores: producers } = useProdutores()
+  const { funcionarios: employees } = useFuncionarios()
+
+  // 📋 Lista de colheitas
+  const {
+    data: harvestsData,
+    isLoading: loadingHarvests,
+    mutate: mutateHarvests,
+  } = useApi<Harvest[]>('/api/colheita-solidaria', {
+    dedupingInterval: 10_000,
+  })
+  const harvests = harvestsData ?? []
+  const loading = loadingHarvests && !harvestsData
+
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -79,7 +88,6 @@ export default function ColheitaSolidariaPage() {
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
 
-  // 💾 Rascunho local (só para criação nova)
   const {
     showSavedIndicator,
     hasDraft,
@@ -96,25 +104,6 @@ export default function ColheitaSolidariaPage() {
     },
     disabled: editingId !== null,
   })
-
-  const fetchAll = async () => {
-    try {
-      const [hRes, pRes, prRes, eRes] = await Promise.all([
-        fetch('/api/colheita-solidaria'), fetch('/api/produtores'), fetch('/api/produtos'), fetch('/api/funcionarios'),
-      ])
-      const [h, p, pr, e] = await Promise.all([hRes.json(), pRes.json(), prRes.json(), eRes.json()])
-      setHarvests(Array.isArray(h) ? h : [])
-      setProducers(Array.isArray(p) ? p : [])
-      setProducts(Array.isArray(pr) ? pr : [])
-      setEmployees(Array.isArray(e) ? e : [])
-    } catch (err) {
-      console.error('Erro ao buscar dados:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchAll() }, [])
 
   const resetForm = () => {
     setForm({
@@ -177,14 +166,12 @@ export default function ColheitaSolidariaPage() {
     const validItems = form.items.filter(i => i.productId !== '' && i.quantity > 0)
     if (validItems.length === 0) { alert('Adicione pelo menos um item com produto e quantidade.'); return }
 
-    // 🔍 Validação local: funcionários não podem se repetir
     const empIds = [form.employeeId, form.employee2Id, form.employee3Id].filter(Boolean)
     if (empIds.length !== new Set(empIds).size) {
       alert('Não é possível selecionar o mesmo funcionário mais de uma vez.')
       return
     }
 
-    // 🔒 Envolve a chamada de salvar na trava de duplo clique
     await runSubmit(async () => {
       try {
         const url = editingId ? '/api/colheita-solidaria/' + editingId : '/api/colheita-solidaria'
@@ -201,9 +188,11 @@ export default function ColheitaSolidariaPage() {
           }),
         })
         if (res.ok) {
-          clearDraft() // 🧹 Limpa o rascunho ao salvar com sucesso
+          clearDraft()
           resetForm()
-          fetchAll()
+          mutateHarvests()
+          // 🔄 Colheita não entra no estoque (Cenário A), mas invalida por garantia
+          invalidate('/api/estoque/resumo')
         }
         else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
       } catch (error) { console.error('Erro ao salvar colheita:', error) }
@@ -214,7 +203,10 @@ export default function ColheitaSolidariaPage() {
     if (!confirm('Tem certeza que deseja excluir esta colheita?')) return
     try {
       const res = await fetch('/api/colheita-solidaria/' + id, { method: 'DELETE' })
-      if (res.ok) fetchAll()
+      if (res.ok) {
+        mutateHarvests()
+        invalidate('/api/estoque/resumo')
+      }
       else { const data = await res.json(); alert(data.error || 'Erro ao excluir') }
     } catch (error) { console.error('Erro ao excluir:', error); alert('Erro ao excluir colheita') }
   }
@@ -232,14 +224,12 @@ export default function ColheitaSolidariaPage() {
     return { totalKg: total, totalBoxes, rate, totalValue: total * rate }
   }
 
-  // 🧑‍🤝‍🧑 Lista de funcionários da colheita (filtra os nulos)
   const getHarvestEmployees = (harvest: Harvest) => {
     return [harvest.employee, harvest.employee2, harvest.employee3].filter(Boolean) as { id: string; name: string }[]
   }
 
   return (
     <div>
-      {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">🌿 Colheita Solidária</h2>
         {podeEditar && (
@@ -252,7 +242,6 @@ export default function ColheitaSolidariaPage() {
         )}
       </div>
 
-      {/* 💾 Banner de rascunho (aparece quando há rascunho válido) */}
       {hasDraft && podeEditar && !editingId && (
         <DraftBanner
           savedAt={draftSavedAt}
@@ -261,7 +250,6 @@ export default function ColheitaSolidariaPage() {
         />
       )}
 
-      {/* Formulário */}
       {showForm && podeEditar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
@@ -323,7 +311,6 @@ export default function ColheitaSolidariaPage() {
             </div>
           </div>
 
-          {/* 🧑‍🤝‍🧑 Funcionários (até 3) */}
           <div className="mt-6">
             <h3 className="text-md font-semibold text-gray-800 mb-3">🧑‍🤝‍🧑 Funcionários da Colheita</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -374,7 +361,6 @@ export default function ColheitaSolidariaPage() {
             )}
           </div>
 
-          {/* Itens da Colheita */}
           <div className="mt-6">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-md font-semibold text-gray-800">📦 Itens da Colheita</h3>
@@ -383,7 +369,6 @@ export default function ColheitaSolidariaPage() {
               </button>
             </div>
 
-            {/* Cabeçalho - só desktop */}
             <div className="hidden lg:flex gap-3 items-end mb-1 px-1">
               <div className="flex-1"><span className="text-xs text-gray-500">Produto *</span></div>
               <div className="w-32"><span className="text-xs text-gray-500">Quantidade *</span></div>
@@ -395,7 +380,6 @@ export default function ColheitaSolidariaPage() {
               {form.items.map((item, index) => (
                 <div key={index}>
                   <div className="flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 bg-gray-50 lg:bg-transparent rounded-lg lg:rounded-none">
-                    {/* Produto */}
                     <div className="flex-1">
                       <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
                       <select
@@ -408,7 +392,6 @@ export default function ColheitaSolidariaPage() {
                       </select>
                     </div>
 
-                    {/* Quantidade + Calculadora + Indenização + Remover */}
                     <div className="flex gap-2 items-center">
                       <div className="flex-1 lg:w-32 lg:flex-none">
                         <label className="block text-xs text-gray-500 mb-1 lg:hidden">Quantidade *</label>
@@ -424,7 +407,6 @@ export default function ColheitaSolidariaPage() {
                         />
                       </div>
 
-                      {/* 🧮 Botão calculadora */}
                       <button
                         type="button"
                         onClick={() => calcOpen === index ? closeCalc() : openCalc(index)}
@@ -438,7 +420,6 @@ export default function ColheitaSolidariaPage() {
                         🧮
                       </button>
 
-                      {/* Indenização calculada */}
                       <div className="w-24 lg:w-28 text-right shrink-0">
                         <span className="block text-xs text-gray-500 mb-1 lg:hidden">Indenização</span>
                         <span className={`text-sm font-semibold ${item.quantity > 0 ? 'text-amber-700' : 'text-gray-300'}`}>
@@ -446,7 +427,6 @@ export default function ColheitaSolidariaPage() {
                         </span>
                       </div>
 
-                      {/* Remover */}
                       {form.items.length > 1 && (
                         <button
                           type="button"
@@ -459,14 +439,12 @@ export default function ColheitaSolidariaPage() {
                     </div>
                   </div>
 
-                  {/* Indicador de caixas */}
                   {item.boxes !== undefined && item.boxes > 0 && (
                     <p className="text-xs text-blue-600 mt-1 ml-1">
                       📦 {item.boxes} caixa{item.boxes > 1 ? 's' : ''} · peso líquido (tara descontada)
                     </p>
                   )}
 
-                  {/* Calculadora */}
                   {calcOpen === index && (
                     <div className="mt-2">
                       <CalculadoraPeso
@@ -489,7 +467,6 @@ export default function ColheitaSolidariaPage() {
             </div>
           </div>
 
-          {/* Resumo de Indenização */}
           {form.items.some(i => i.quantity > 0) && (
             <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4">
               <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -541,7 +518,6 @@ export default function ColheitaSolidariaPage() {
             </div>
           )}
 
-          {/* Botões */}
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
             <button
               type="submit"
@@ -566,7 +542,6 @@ export default function ColheitaSolidariaPage() {
         </form>
       )}
 
-      {/* Listagem */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
@@ -585,15 +560,11 @@ export default function ColheitaSolidariaPage() {
             const statusStyle = getStatusStyle(harvest.status)
             const ind = getHarvestIndemnity(harvest)
             const harvestEmployees = getHarvestEmployees(harvest)
-
-            // 🔐 Por registro: pode editar (admin sempre, operador só se date=hoje)
-            // Excluir: só admin (regra global do módulo time-locked)
             const canEditThis = canEditRecord('colheita-solidaria', harvest.date)
             const canDeleteThis = podeExcluir
 
             return (
               <div key={harvest.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
-                {/* Cabeçalho do card */}
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -610,7 +581,6 @@ export default function ColheitaSolidariaPage() {
                     <p className="text-sm text-gray-500 mt-0.5">
                       {new Date(harvest.date).toLocaleDateString('pt-BR')}
                     </p>
-                    {/* 🧑‍🤝‍🧑 Funcionários */}
                     {harvestEmployees.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {harvestEmployees.map(emp => (
@@ -625,7 +595,6 @@ export default function ColheitaSolidariaPage() {
                     )}
                   </div>
 
-                  {/* 🔐 Ações — Editar só se canEditThis; Excluir só admin */}
                   {(canEditThis || canDeleteThis) && (
                     <div className="flex items-center gap-2 shrink-0">
                       {canEditThis && (
@@ -648,9 +617,7 @@ export default function ColheitaSolidariaPage() {
                   )}
                 </div>
 
-                {/* Itens */}
                 <div className="mb-3">
-                  {/* Desktop: tags em linha */}
                   <div className="hidden sm:flex flex-wrap gap-2">
                     {harvest.items.map(item => (
                       <div key={item.id} className="px-3 py-1.5 bg-green-50 border border-green-100 rounded-lg text-sm">
@@ -669,7 +636,6 @@ export default function ColheitaSolidariaPage() {
                     ))}
                   </div>
 
-                  {/* Mobile: lista vertical compacta */}
                   <div className="sm:hidden space-y-1.5">
                     {harvest.items.map(item => (
                       <div key={item.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm">
@@ -688,9 +654,7 @@ export default function ColheitaSolidariaPage() {
                   </div>
                 </div>
 
-                {/* Totais */}
                 <div className="pt-3 border-t border-gray-100">
-                  {/* Desktop: tudo em linha */}
                   <div className="hidden sm:flex flex-wrap gap-4 items-center">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">Peso Total:</span>
@@ -714,7 +678,6 @@ export default function ColheitaSolidariaPage() {
                     </div>
                   </div>
 
-                  {/* Mobile: empilhado com destaque no total */}
                   <div className="sm:hidden space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Peso Total</span>
@@ -739,7 +702,6 @@ export default function ColheitaSolidariaPage() {
                   </div>
                 </div>
 
-                {/* Observações */}
                 {harvest.notes && (
                   <p className="text-sm text-gray-400 mt-2 italic">📝 {harvest.notes}</p>
                 )}
@@ -749,7 +711,6 @@ export default function ColheitaSolidariaPage() {
         </div>
       )}
 
-      {/* 💾 Indicador discreto "Rascunho salvo" */}
       <DraftSavedIndicator show={showSavedIndicator} />
     </div>
   )

@@ -1,16 +1,14 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
+import { useApi, invalidate } from '@/hooks/useApi'
+import { useProdutos, useBeneficiarios, useFuncionarios } from '@/hooks/useCadastros'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
-
-interface Product { id: string; name: string; unit: string }
-interface Beneficiary { id: string; name: string; type: string }
-interface Employee { id: string; name: string }
 
 interface DistributionItem {
   id: string
@@ -46,7 +44,7 @@ interface DistribuicaoForm {
 }
 
 export default function DistribuicoesPage() {
-  // 🔐 Permissões: editar (geral), por registro (trava temporal) e excluir (só admin)
+  // 🔐 Permissões
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeEditar = canEdit('distribuicoes')
   const podeExcluir = canDelete('distribuicoes')
@@ -54,11 +52,22 @@ export default function DistribuicoesPage() {
   // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  const [distributions, setDistributions] = useState<Distribution[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [loading, setLoading] = useState(true)
+  // 🚀 Cache global de cadastros (compartilhado com outras páginas)
+  const { produtos: products } = useProdutos()
+  const { beneficiarios: beneficiaries } = useBeneficiarios()
+  const { funcionarios: employees } = useFuncionarios()
+
+  // 📋 Lista de distribuições — cache local
+  const {
+    data: distributionsData,
+    isLoading: loadingDistributions,
+    mutate: mutateDistributions,
+  } = useApi<Distribution[]>('/api/distribuicoes', {
+    dedupingInterval: 10_000,
+  })
+  const distributions = distributionsData ?? []
+  const loading = loadingDistributions && !distributionsData
+
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -74,7 +83,7 @@ export default function DistribuicoesPage() {
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
 
-  // 💾 Rascunho local (só para criação nova)
+  // 💾 Rascunho local
   const {
     showSavedIndicator,
     hasDraft,
@@ -92,30 +101,6 @@ export default function DistribuicoesPage() {
     },
     disabled: editingId !== null,
   })
-
-  const fetchAll = async () => {
-    try {
-      const [distRes, prodRes, benefRes, empRes] = await Promise.all([
-        fetch('/api/distribuicoes'),
-        fetch('/api/produtos'),
-        fetch('/api/beneficiarios'),
-        fetch('/api/funcionarios'),
-      ])
-      const [dist, prod, benef, emp] = await Promise.all([
-        distRes.json(), prodRes.json(), benefRes.json(), empRes.json(),
-      ])
-      setDistributions(Array.isArray(dist) ? dist : [])
-      setProducts(Array.isArray(prod) ? prod : [])
-      setBeneficiaries(Array.isArray(benef) ? benef : [])
-      setEmployees(Array.isArray(emp) ? emp : [])
-    } catch (error) {
-      console.error('Erro ao buscar dados:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchAll() }, [])
 
   const resetForm = () => {
     setForm({
@@ -175,7 +160,6 @@ export default function DistribuicoesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // 🔍 Validação local: funcionários não podem se repetir
     const empIds = [form.employeeId, form.employee2Id, form.employee3Id].filter(Boolean)
     if (empIds.length !== new Set(empIds).size) {
       alert('Não é possível selecionar o mesmo funcionário mais de uma vez.')
@@ -185,7 +169,6 @@ export default function DistribuicoesPage() {
     const validItems = formItems.filter(i => i.productId && i.quantity > 0)
     if (validItems.length === 0) return alert('Adicione pelo menos um produto!')
 
-    // 🔒 Envolve a chamada de salvar na trava de duplo clique
     await runSubmit(async () => {
       try {
         const url = editingId ? `/api/distribuicoes/${editingId}` : '/api/distribuicoes'
@@ -203,9 +186,11 @@ export default function DistribuicoesPage() {
           }),
         })
         if (res.ok) {
-          clearDraft() // 🧹 Limpa o rascunho ao salvar com sucesso
+          clearDraft()
           resetForm()
-          fetchAll()
+          mutateDistributions()
+          // 🔄 Distribuição mexe no estoque, então invalida o resumo
+          invalidate('/api/estoque/resumo')
         } else {
           const data = await res.json()
           alert(data.error || 'Erro ao salvar')
@@ -221,7 +206,8 @@ export default function DistribuicoesPage() {
     try {
       const res = await fetch(`/api/distribuicoes/${id}`, { method: 'DELETE' })
       if (res.ok) {
-        fetchAll()
+        mutateDistributions()
+        invalidate('/api/estoque/resumo')
       } else {
         const data = await res.json()
         alert(data.error || 'Erro ao excluir')
@@ -238,7 +224,6 @@ export default function DistribuicoesPage() {
     return `${day}/${month}/${year}`
   }
 
-  // 🧑‍🤝‍🧑 Lista de funcionários da distribuição (filtra os nulos)
   const getDistributionEmployees = (dist: Distribution) => {
     return [dist.employee, dist.employee2, dist.employee3].filter(Boolean) as { id: string; name: string }[]
   }
@@ -258,7 +243,6 @@ export default function DistribuicoesPage() {
         )}
       </div>
 
-      {/* 💾 Banner de rascunho (aparece quando há rascunho válido) */}
       {hasDraft && podeEditar && !editingId && (
         <DraftBanner
           savedAt={draftSavedAt}
@@ -274,7 +258,6 @@ export default function DistribuicoesPage() {
             {editingId ? '✏️ Editar Distribuição' : 'Registrar Distribuição'}
           </h2>
 
-          {/* Instituição e Data */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Instituição *</label>
@@ -300,7 +283,6 @@ export default function DistribuicoesPage() {
             </div>
           </div>
 
-          {/* 🧑‍🤝‍🧑 Funcionários da entrega (até 3) — padrão da colheita */}
           <div className="mt-2 mb-6">
             <h3 className="text-md font-semibold text-gray-800 mb-3">🧑‍🤝‍🧑 Funcionários da Entrega</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -355,7 +337,6 @@ export default function DistribuicoesPage() {
             )}
           </div>
 
-          {/* Produtos entregues */}
           <div className="mb-4">
             <div className="flex justify-between items-center mb-3">
               <label className="text-sm font-semibold text-gray-700">Produtos entregues *</label>
@@ -419,14 +400,12 @@ export default function DistribuicoesPage() {
                   </div>
                 </div>
 
-                {/* Indicador de caixas */}
                 {item.boxes !== undefined && item.boxes > 0 && (
                   <p className="text-xs text-blue-600 mt-1 ml-1">
                     📦 {item.boxes} caixa{item.boxes > 1 ? 's' : ''} · peso líquido (tara descontada)
                   </p>
                 )}
 
-                {/* Calculadora */}
                 {calcOpen === index && (
                   <CalculadoraPeso
                     onApply={(pesoLiquido, totalCaixas) => {
@@ -446,7 +425,6 @@ export default function DistribuicoesPage() {
             ))}
           </div>
 
-          {/* Observações */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
             <textarea
@@ -457,7 +435,6 @@ export default function DistribuicoesPage() {
             />
           </div>
 
-          {/* Botões */}
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="submit"
@@ -500,15 +477,11 @@ export default function DistribuicoesPage() {
           {distributions.map(dist => {
             const totalBoxes = dist.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
             const distEmployees = getDistributionEmployees(dist)
-
-            // 🔐 Por registro: pode editar (admin sempre, operador só se date=hoje)
-            // Excluir: só admin
             const canEditThis = canEditRecord('distribuicoes', dist.date)
             const canDeleteThis = podeExcluir
 
             return (
               <div key={dist.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
-                {/* Cabeçalho do card */}
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -522,7 +495,6 @@ export default function DistribuicoesPage() {
                     <p className="text-sm text-gray-500 mt-0.5">
                       {formatDate(dist.date)}
                     </p>
-                    {/* 🧑‍🤝‍🧑 Funcionários — badges roxos */}
                     {distEmployees.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {distEmployees.map(emp => (
@@ -537,7 +509,6 @@ export default function DistribuicoesPage() {
                     )}
                   </div>
 
-                  {/* Ações */}
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-sm font-medium text-red-600">
                       {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
@@ -561,9 +532,7 @@ export default function DistribuicoesPage() {
                   </div>
                 </div>
 
-                {/* Tags dos itens — desktop em linha, mobile vertical */}
                 <div className="mb-3">
-                  {/* Desktop */}
                   <div className="hidden sm:flex flex-wrap gap-2">
                     {dist.items.map(item => (
                       <div key={item.id} className="px-3 py-1.5 bg-red-50 border border-red-100 rounded-lg text-sm">
@@ -580,7 +549,6 @@ export default function DistribuicoesPage() {
                     ))}
                   </div>
 
-                  {/* Mobile */}
                   <div className="sm:hidden space-y-1.5">
                     {dist.items.map(item => (
                       <div key={item.id} className="flex items-center justify-between bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-sm">
@@ -596,7 +564,6 @@ export default function DistribuicoesPage() {
                   </div>
                 </div>
 
-                {/* Observações */}
                 {dist.notes && (
                   <p className="text-sm text-gray-400 mt-2 italic">📝 {dist.notes}</p>
                 )}
@@ -606,7 +573,6 @@ export default function DistribuicoesPage() {
         </div>
       )}
 
-      {/* 💾 Indicador discreto "Rascunho salvo" */}
       <DraftSavedIndicator show={showSavedIndicator} />
     </div>
   )

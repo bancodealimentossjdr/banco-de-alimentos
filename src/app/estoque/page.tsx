@@ -1,7 +1,8 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useApi } from '@/hooks/useApi'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 
 interface EstoqueResumo {
@@ -73,79 +74,68 @@ export default function EstoquePage() {
   const { canEdit } = usePermissions()
   const podeRegistrar = canEdit('doacoes')
 
-  const [resumo, setResumo] = useState<EstoqueResumo | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [erro, setErro] = useState<string | null>(null)
+  // 📊 Resumo do estoque (cache global)
+  const {
+    data: resumo,
+    error: erroResumo,
+    isLoading: loading,
+    mutate: mutateResumo,
+  } = useApi<EstoqueResumo>('/api/estoque/resumo', {
+    dedupingInterval: 5_000, // 5s — estoque muda mais que cadastros
+  })
 
-  // Modal state
+  const erro = erroResumo ? 'Falha ao carregar resumo do estoque' : null
+
+  // Modal state (controlado localmente — só carrega o preview quando abre)
   const [showModal, setShowModal] = useState(false)
-  const [preview, setPreview] = useState<PreviewData | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewErro, setPreviewErro] = useState<string | null>(null)
+  const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [approvedQty, setApprovedQty] = useState<string>('')
   const [notes, setNotes] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [showCalculadora, setShowCalculadora] = useState(false)
+  const [hydrated, setHydrated] = useState(false)
 
-  const fetchResumo = async () => {
-    try {
-      setLoading(true)
-      setErro(null)
-      const res = await fetch('/api/estoque/resumo')
-      if (!res.ok) throw new Error('Falha ao carregar resumo do estoque')
-      const data: EstoqueResumo = await res.json()
-      setResumo(data)
-    } catch (err) {
-      console.error('Erro ao buscar resumo:', err)
-      setErro(err instanceof Error ? err.message : 'Erro desconhecido')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchPreview = async () => {
-    try {
-      setPreviewLoading(true)
-      setPreviewErro(null)
-      const hoje = getHojeLocal()
-      const res = await fetch(`/api/estoque/aproveitamentos/preview?date=${hoje}`)
-      if (!res.ok) throw new Error('Falha ao carregar preview')
-      const data: PreviewData = await res.json()
-      setPreview(data)
-
-      if (data.existingApproval) {
-        setApprovedQty(String(data.existingApproval.approvedQuantity))
-        setNotes(data.existingApproval.notes || '')
-      } else {
-        setApprovedQty(data.totalReceived > 0 ? String(data.totalReceived) : '')
-        setNotes('')
+  // 🔍 Preview SÓ é buscado quando modal está aberto (previewKey != null)
+  const {
+    data: preview,
+    error: erroPreview,
+    isLoading: previewLoading,
+  } = useApi<PreviewData>(previewKey, {
+    dedupingInterval: 0, // sempre revalida ao abrir modal
+    revalidateOnFocus: false,
+    onSuccess: (data) => {
+      // hidrata os campos do form ao carregar o preview pela 1ª vez
+      if (!hydrated && data) {
+        if (data.existingApproval) {
+          setApprovedQty(String(data.existingApproval.approvedQuantity))
+          setNotes(data.existingApproval.notes || '')
+        } else {
+          setApprovedQty(data.totalReceived > 0 ? String(data.totalReceived) : '')
+          setNotes('')
+        }
+        setHydrated(true)
       }
-    } catch (err) {
-      console.error('Erro ao buscar preview:', err)
-      setPreviewErro(err instanceof Error ? err.message : 'Erro desconhecido')
-    } finally {
-      setPreviewLoading(false)
-    }
-  }
+    },
+  })
 
-  useEffect(() => {
-    fetchResumo()
-  }, [])
+  const previewErro = erroPreview ? 'Falha ao carregar preview' : null
 
   const abrirModal = () => {
+    const hoje = getHojeLocal()
     setShowModal(true)
     setShowCalculadora(false)
-    fetchPreview()
+    setHydrated(false)
+    setPreviewKey(`/api/estoque/aproveitamentos/preview?date=${hoje}`)
   }
 
   const fecharModal = () => {
     if (salvando) return
     setShowModal(false)
-    setPreview(null)
+    setPreviewKey(null)
     setApprovedQty('')
     setNotes('')
-    setPreviewErro(null)
     setShowCalculadora(false)
+    setHydrated(false)
   }
 
   const handleApplyCalc = (pesoLiquido: number) => {
@@ -185,7 +175,7 @@ export default function EstoquePage() {
       }
 
       fecharModal()
-      fetchResumo()
+      mutateResumo() // 🔄 atualiza o resumo
     } catch (err) {
       console.error('Erro ao salvar:', err)
       alert(err instanceof Error ? err.message : 'Erro ao salvar')
@@ -195,11 +185,10 @@ export default function EstoquePage() {
   }
 
   const totalReceived = preview?.totalReceived ?? 0
-  const semDados = preview !== null && totalReceived === 0
+  const semDados = preview !== undefined && preview !== null && totalReceived === 0
 
   return (
     <div>
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h2 className="text-xl md:text-2xl font-bold text-gray-900">📊 Estoque</h2>
@@ -207,7 +196,7 @@ export default function EstoquePage() {
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
           <button
-            onClick={fetchResumo}
+            onClick={() => mutateResumo()}
             disabled={loading}
             className="bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition text-sm disabled:opacity-50"
           >
@@ -224,17 +213,15 @@ export default function EstoquePage() {
         </div>
       </div>
 
-      {/* Erro */}
       {erro && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
           <p className="text-red-700 font-medium">⚠️ {erro}</p>
-          <button onClick={fetchResumo} className="text-red-600 hover:text-red-800 text-sm mt-2 font-medium underline">
+          <button onClick={() => mutateResumo()} className="text-red-600 hover:text-red-800 text-sm mt-2 font-medium underline">
             Tentar novamente
           </button>
         </div>
       )}
 
-      {/* Loading skeleton */}
       {loading && !resumo && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {[...Array(5)].map((_, i) => (
@@ -247,7 +234,6 @@ export default function EstoquePage() {
         </div>
       )}
 
-      {/* Cards */}
       {resumo && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
@@ -266,7 +252,6 @@ export default function EstoquePage() {
             ))}
           </div>
 
-          {/* Fórmula */}
           <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-2">🧮 Como o estoque é calculado</h3>
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -277,25 +262,26 @@ export default function EstoquePage() {
               <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
                 ✅ Aproveitado ({formatKg(resumo.approved)})
               </span>
+              <span className="text-gray-400 font-bold">+</span>
+              <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
+              </span>
               <span className="text-gray-400 font-bold">−</span>
               <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
                 📤 Distribuído ({formatKg(resumo.distributed)})
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-3">
-              💡 O <strong>Aproveitado</strong> representa o que passou na triagem das doações (parte ainda em câmara fria + parte já distribuída).
-              A <strong>Colheita Solidária</strong> é controlada à parte e não interfere nesta fórmula.
+              💡 Doações entram no estoque apenas após serem <strong>aproveitadas</strong>.
             </p>
           </div>
         </>
       )}
 
-      {/* MODAL */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleSubmit}>
-              {/* Header */}
               <div className="flex justify-between items-center border-b px-5 py-4 sticky top-0 bg-white rounded-t-xl z-10">
                 <h3 className="text-lg font-bold text-gray-900">
                   ✅ Registrar Aproveitamento
@@ -310,9 +296,7 @@ export default function EstoquePage() {
                 </button>
               </div>
 
-              {/* Body */}
               <div className="p-5 space-y-4">
-                {/* Data fixa */}
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-2">
                   <span className="text-gray-500 text-sm">📅 Data:</span>
                   <span className="font-bold text-gray-900">
@@ -321,7 +305,7 @@ export default function EstoquePage() {
                   <span className="text-xs text-gray-500 ml-auto">(hoje)</span>
                 </div>
 
-                {previewLoading && (
+                {previewLoading && !preview && (
                   <div className="flex justify-center items-center py-12">
                     <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
                   </div>
@@ -333,7 +317,7 @@ export default function EstoquePage() {
                   </div>
                 )}
 
-                {preview && !previewLoading && (
+                {preview && (
                   <>
                     {preview.existingApproval && (
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -345,7 +329,6 @@ export default function EstoquePage() {
                       </div>
                     )}
 
-                    {/* Doações */}
                     <div>
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">
                         🏪 Doações de hoje ({preview.donations.length})
@@ -366,7 +349,6 @@ export default function EstoquePage() {
                       )}
                     </div>
 
-                    {/* Resumo */}
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-1.5">
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-600">🏪 Doações:</span>
@@ -382,7 +364,6 @@ export default function EstoquePage() {
                       </div>
                     </div>
 
-                    {/* Quantidade aproveitada */}
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-sm font-semibold text-gray-700">
@@ -421,7 +402,6 @@ export default function EstoquePage() {
                         </p>
                       )}
 
-                      {/* Calculadora */}
                       {showCalculadora && (
                         <CalculadoraPeso
                           onApply={handleApplyCalc}
@@ -430,7 +410,6 @@ export default function EstoquePage() {
                       )}
                     </div>
 
-                    {/* Observações */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
                       <textarea
@@ -445,7 +424,6 @@ export default function EstoquePage() {
                 )}
               </div>
 
-              {/* Footer */}
               <div className="border-t px-5 py-4 flex flex-col sm:flex-row gap-2 sm:justify-end sticky bottom-0 bg-white rounded-b-xl">
                 <button
                   type="button"
