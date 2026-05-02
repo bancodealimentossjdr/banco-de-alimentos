@@ -1,53 +1,102 @@
-import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { requireView } from '@/lib/auth-helpers'
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/estoque/resumo
+ *
+ * Retorna o resumo consolidado do estoque do Banco de Alimentos.
+ *
+ * 📐 Fórmulas (alinhadas ao processo real da operação):
+ *
+ *   🏪 Doações Brutas    = Σ DonationItem.quantity
+ *   🌾 Colheita Solidária = Σ HarvestItem.quantity
+ *   📤 Distribuído        = Σ DistributionItem.quantity
+ *   🧊 Câmara Fria        = Σ DailyApproval.approvedQty (sobra triada do dia)
+ *
+ *   ✅ Aproveitado TOTAL = Distribuído + Câmara Fria
+ *      (ambos são alimento bom: ou já saiu pra beneficiário, ou foi guardado)
+ *
+ *   📦 Em Estoque (físico AGORA) =
+ *        Câmara Fria + Colheita − max(0, Distribuído − Doações Brutas)
+ *
+ *      O termo max(0, Distribuído − Doações) representa quanto da câmara fria
+ *      foi consumido pelas distribuições (só desconta quando se distribuiu
+ *      MAIS do que chegou em doações brutas).
+ *
+ *   📈 Taxa de Aproveitamento = Aproveitado / (Doações + Colheita) × 100%
+ */
 export async function GET() {
-  const authResult = await requireView('estoque')
-  if (authResult instanceof NextResponse) return authResult
-
   try {
-    // 🧮 4 queries em paralelo para somar tudo
-    const [donationsAgg, harvestAgg, approvedAgg, distributedAgg] =
-      await Promise.all([
-        // 🏪 Total recebido das DOAÇÕES (soma DonationItem.quantity)
-        prisma.donationItem.aggregate({
-          _sum: { quantity: true },
-        }),
-        // 🌾 Total recebido da COLHEITA SOLIDÁRIA (soma HarvestItem.quantity)
-        prisma.harvestItem.aggregate({
-          _sum: { quantity: true },
-        }),
-        // ✅ Total APROVEITADO (soma DailyApproval.approvedQty)
-        prisma.dailyApproval.aggregate({
-          _sum: { approvedQty: true },
-        }),
-        // 📤 Total DISTRIBUÍDO (soma DistributionItem.quantity)
-        prisma.distributionItem.aggregate({
-          _sum: { quantity: true },
-        }),
-      ])
+    // 🔢 Agregações em paralelo pra performance
+    const [
+      donationAgg,
+      harvestAgg,
+      distributionAgg,
+      approvalAgg,
+    ] = await Promise.all([
+      prisma.donationItem.aggregate({
+        _sum: { quantity: true },
+      }),
+      prisma.harvestItem.aggregate({
+        _sum: { quantity: true },
+      }),
+      prisma.distributionItem.aggregate({
+        _sum: { quantity: true },
+      }),
+      prisma.dailyApproval.aggregate({
+        _sum: { approvedQty: true },
+      }),
+    ]);
 
-    const donations = donationsAgg._sum.quantity ?? 0
-    const solidarityHarvest = harvestAgg._sum.quantity ?? 0
-    const approved = approvedAgg._sum.approvedQty ?? 0
-    const distributed = distributedAgg._sum.quantity ?? 0
+    // 📊 Totais brutos
+    const totalDonations = donationAgg._sum.quantity ?? 0;
+    const totalHarvest = harvestAgg._sum.quantity ?? 0;
+    const totalDistributed = distributionAgg._sum.quantity ?? 0;
+    const totalColdRoom = approvalAgg._sum.approvedQty ?? 0;
 
-    // 📦 Em Estoque = Aproveitado + Colheita - Distribuído
-    const inStock = Math.max(0, approved + solidarityHarvest - distributed)
+    // ✅ Aproveitado = Distribuído + Câmara Fria
+    const totalApproved = totalDistributed + totalColdRoom;
+
+    // 📦 Em Estoque = Câmara Fria + Colheita − consumo do estoque
+    const stockConsumption = Math.max(0, totalDistributed - totalDonations);
+    const inStock = totalColdRoom + totalHarvest - stockConsumption;
+
+    // 📈 Taxa de aproveitamento (%)
+    const totalReceived = totalDonations + totalHarvest;
+    const utilizationRate =
+      totalReceived > 0 ? (totalApproved / totalReceived) * 100 : 0;
 
     return NextResponse.json({
-      donations,
-      solidarityHarvest,
-      approved,
-      distributed,
+      // Totais principais
+      donations: totalDonations,
+      harvest: totalHarvest,
+      distributed: totalDistributed,
+      approved: totalApproved,
       inStock,
-    })
+
+      // 🔍 Breakdown do aproveitado (pra UI mostrar "quebrado em 2 linhas")
+      approvedBreakdown: {
+        distributed: totalDistributed,
+        coldRoom: totalColdRoom,
+      },
+
+      // 📈 Métrica adicional
+      utilizationRate: Number(utilizationRate.toFixed(1)),
+
+      // 🐛 Debug info (útil pra conferir cálculos)
+      debug: {
+        stockConsumption,
+        formula:
+          "inStock = coldRoom + harvest - max(0, distributed - donations)",
+      },
+    });
   } catch (error) {
-    console.error('[ESTOQUE_RESUMO]', error)
+    console.error("[/api/estoque/resumo] Erro:", error);
     return NextResponse.json(
-      { error: 'Erro ao buscar resumo do estoque' },
+      { error: "Erro ao calcular resumo do estoque" },
       { status: 500 }
-    )
+    );
   }
 }
