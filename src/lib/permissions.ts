@@ -16,6 +16,7 @@ export type Module =
   | 'colheita-solidaria'
   | 'estoque'
   | 'usuarios'
+  | 'indicadores'
 
 /**
  * Re-exporta UserRole como Role pra manter compatibilidade com o hook.
@@ -39,16 +40,17 @@ const VIEW_PERMISSIONS: Record<UserRole, Module[]> = {
   admin: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
-    'estoque', 'usuarios',
+    'estoque', 'usuarios', 'indicadores',
   ],
   operador: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
-    'estoque',
+    'estoque', 'indicadores',
   ],
   visualizador: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios',
     'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque',
+    'indicadores',
   ],
 }
 
@@ -165,17 +167,18 @@ export function getModuleFromPath(pathname: string): Module | null {
   if (pathname === '/' || pathname === '/dashboard') return 'dashboard'
 
   const routeMap: Array<[string, Module]> = [
-    ['/produtos', 'produtos'],
-    ['/doadores', 'doadores'],
-    ['/beneficiarios', 'beneficiarios'],
-    ['/funcionarios', 'funcionarios'],
-    ['/produtores', 'produtores'],
-    ['/doacoes', 'doacoes'],
-    ['/distribuicoes', 'distribuicoes'],
-    ['/colheita-solidaria', 'colheita-solidaria'],
-    ['/estoque', 'estoque'],
-    ['/usuarios', 'usuarios'],
-  ]
+  ['/produtos', 'produtos'],
+  ['/doadores', 'doadores'],
+  ['/beneficiarios', 'beneficiarios'],
+  ['/funcionarios', 'funcionarios'],
+  ['/produtores', 'produtores'],
+  ['/doacoes', 'doacoes'],
+  ['/distribuicoes', 'distribuicoes'],
+  ['/colheita-solidaria', 'colheita-solidaria'],
+  ['/estoque', 'estoque'],
+  ['/usuarios', 'usuarios'],
+  ['/indicadores', 'indicadores'],
+]
 
   for (const [prefix, module] of routeMap) {
     if (pathname.startsWith(prefix)) return module

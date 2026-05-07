@@ -16,6 +16,7 @@ const pageTitles: Record<string, string> = {
   '/distribuicoes': 'Distribuições',
   '/colheita-solidaria': 'Colheita Solidária',
   '/estoque': 'Estoque',
+  '/indicadores': 'Indicadores',
   '/usuarios': 'Usuários',
 }
 

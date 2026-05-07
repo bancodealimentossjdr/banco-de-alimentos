@@ -17,6 +17,7 @@ import {
   Tractor,
   Sprout,
   Shield,
+  BarChart3,
   X,
 } from 'lucide-react'
 
@@ -38,6 +39,7 @@ const menuItems: MenuItem[] = [
   { label: 'Distribuições', href: '/distribuicoes', icon: Truck },
   { label: 'Colheita Solidária', href: '/colheita-solidaria', icon: Sprout },
   { label: 'Estoque', href: '/estoque', icon: Warehouse },
+  { label: 'Indicadores', href: '/indicadores', icon: BarChart3 },
   { label: 'Usuários', href: '/usuarios', icon: Shield, adminOnly: true },
 ]
 
