@@ -4,10 +4,19 @@ import { canEdit, type Module } from './permissions'
 
 /**
  * Retorna true se o role deve ver dados mascarados.
- * Hoje: apenas visualizador. Admin e operador veem tudo.
+ *
+ * Política atual:
+ * - admin    → vê dados crus
+ * - operador → vê dados crus
+ * - visualizador → vê dados mascarados
+ *
+ * 🛡️ Princípio fail-secure: na ausência de role (sessão inválida,
+ * token corrompido, etc.), trata como visualizador e MASCARA.
+ * É mais seguro vazar nada do que vazar tudo.
  */
 export function shouldMaskPersonalData(role: UserRole | undefined | null): boolean {
-  return role === 'visualizador'
+  if (!role) return true
+  return role !== 'admin' && role !== 'operador'
 }
 
 // ---------- DOADOR ----------
@@ -107,6 +116,8 @@ export function maskProdutorList<T extends ProdutorLike>(
  * Usado para mascarar campos de texto livre (ex: notes) em módulos
  * operacionais (doações, distribuições, colheita) onde o visualizador
  * tem acesso de leitura mas não deve ver detalhes sensíveis.
+ *
+ * 🛡️ Fail-secure: sem role = somente leitura.
  */
 export function isReadOnlyInModule(
   role: UserRole | undefined | null,
