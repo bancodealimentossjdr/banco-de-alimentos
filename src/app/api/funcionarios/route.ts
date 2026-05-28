@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskFuncionarioList } from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('funcionarios')
   if (authResult instanceof NextResponse) return authResult
 
   try {
+    const session = await auth()
+    const role = session?.user?.role
+
     const employees = await prisma.employee.findMany({
       orderBy: { name: 'asc' },
       include: {
@@ -25,7 +30,9 @@ export async function GET() {
         },
       },
     })
-    return NextResponse.json(employees)
+
+    const masked = maskFuncionarioList(employees, role)
+    return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro GET funcionários:', error)
     return NextResponse.json({ error: 'Erro ao buscar funcionários' }, { status: 500 })

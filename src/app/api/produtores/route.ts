@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskProdutorList } from '@/lib/mask-by-role'
 
 // GET - Listar todos os produtores
 export async function GET() {
@@ -8,13 +10,18 @@ export async function GET() {
   if (authResult instanceof NextResponse) return authResult
 
   try {
+    const session = await auth()
+    const role = session?.user?.role
+
     const produtores = await prisma.producer.findMany({
       orderBy: { name: 'asc' },
       include: {
         _count: { select: { harvests: true } },
       },
     })
-    return NextResponse.json(produtores)
+
+    const masked = maskProdutorList(produtores, role)
+    return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro ao buscar produtores:', error)
     return NextResponse.json({ error: 'Erro ao buscar produtores' }, { status: 500 })

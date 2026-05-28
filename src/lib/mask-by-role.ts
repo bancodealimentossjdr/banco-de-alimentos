@@ -109,6 +109,45 @@ export function maskProdutorList<T extends ProdutorLike>(
   return list.map((p) => maskProdutor(p, role))
 }
 
+// ---------- FUNCIONÁRIO ----------
+type FuncionarioLike = {
+  name?: string | null
+  phone?: string | null
+  [key: string]: unknown
+}
+
+/**
+ * Mascara dados do funcionário para perfil visualizador.
+ *
+ * 🎭 Política:
+ * - name  → mascarado via maskContactName (ex: "J*** S***")
+ * - phone → mascarado via maskPhone
+ * - role/cargo → permanece visível (informação operacional pública)
+ * - active → permanece visível
+ *
+ * 🛡️ Motivo: o ranking de funcionários não deve ser exposto ao visualizador,
+ * portanto mesmo o nome é considerado dado sensível neste contexto.
+ */
+export function maskFuncionario<T extends FuncionarioLike>(
+  f: T,
+  role: UserRole | undefined | null
+): T {
+  if (!shouldMaskPersonalData(role)) return f
+  return {
+    ...f,
+    name: maskContactName(f.name ?? null),
+    phone: maskPhone(f.phone ?? null),
+  }
+}
+
+export function maskFuncionarioList<T extends FuncionarioLike>(
+  list: T[],
+  role: UserRole | undefined | null
+): T[] {
+  if (!shouldMaskPersonalData(role)) return list
+  return list.map((f) => maskFuncionario(f, role))
+}
+
 // ---------- Helpers por módulo (notes em somente-leitura) ----------
 
 /**

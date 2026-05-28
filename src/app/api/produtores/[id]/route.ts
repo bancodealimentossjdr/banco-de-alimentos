@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { maskProdutor } from '@/lib/mask-by-role'
 
 // GET - Buscar produtor por ID
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -9,6 +11,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const { id } = await params
+    const session = await auth()
+    const role = session?.user?.role
+
     const produtor = await prisma.producer.findUnique({
       where: { id },
       include: {
@@ -24,7 +29,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Produtor não encontrado' }, { status: 404 })
     }
 
-    return NextResponse.json(produtor)
+    const masked = maskProdutor(produtor, role)
+    return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro ao buscar produtor:', error)
     return NextResponse.json({ error: 'Erro ao buscar produtor' }, { status: 500 })
