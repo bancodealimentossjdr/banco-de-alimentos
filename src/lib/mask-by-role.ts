@@ -78,6 +78,7 @@ export function maskBeneficiarioList<T extends BeneficiarioLike>(
 
 // ---------- PRODUTOR RURAL ----------
 type ProdutorLike = {
+  name?: string | null
   phone?: string | null
   email?: string | null
   address?: string | null
@@ -86,6 +87,22 @@ type ProdutorLike = {
   [key: string]: unknown
 }
 
+/**
+ * Mascara dados do produtor rural para perfil visualizador.
+ *
+ * 🎭 Política:
+ * - name    → mascarado via maskContactName (ex: "F*** B*** V***")
+ * - contact → mascarado via maskContactName
+ * - phone   → mascarado via maskPhone
+ * - email   → mascarado via maskEmail
+ * - address → mascarado via maskAddress
+ * - cpf     → mascarado via maskCPF
+ *
+ * 🛡️ Motivo: na colheita solidária, o nome do produtor revela quem
+ * entregou, quando e em que volume — informação sensível que o
+ * visualizador não deve acessar de forma identificável. Política
+ * consistente em todos os endpoints que usam este helper.
+ */
 export function maskProdutor<T extends ProdutorLike>(
   p: T,
   role: UserRole | undefined | null
@@ -93,6 +110,7 @@ export function maskProdutor<T extends ProdutorLike>(
   if (!shouldMaskPersonalData(role)) return p
   return {
     ...p,
+    name: maskContactName(p.name ?? null),
     phone: maskPhone(p.phone ?? null),
     email: maskEmail(p.email ?? null),
     address: maskAddress(p.address ?? null),
