@@ -2,7 +2,12 @@
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
-import { maskNotesListIfReadOnly, maskProdutor, shouldMaskPersonalData } from '@/lib/mask-by-role'
+import {
+  maskNotesListIfReadOnly,
+  maskProdutor,
+  maskFuncionario,
+  shouldMaskPersonalData,
+} from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('colheita-solidaria')
@@ -29,11 +34,14 @@ export async function GET() {
     // 1) Mascara notes se for somente leitura no módulo
     let colheitasSeguras = maskNotesListIfReadOnly(colheitas, role, 'colheita-solidaria')
 
-    // 2) Mascara dados pessoais do produtor se for visualizador
+    // 2) Mascara dados pessoais do produtor e funcionários se for visualizador
     if (shouldMaskPersonalData(role)) {
       colheitasSeguras = colheitasSeguras.map((c) => ({
         ...c,
         producer: c.producer ? maskProdutor(c.producer, role) : c.producer,
+        employee: c.employee ? maskFuncionario(c.employee, role) : c.employee,
+        employee2: c.employee2 ? maskFuncionario(c.employee2, role) : c.employee2,
+        employee3: c.employee3 ? maskFuncionario(c.employee3, role) : c.employee3,
       }))
     }
 

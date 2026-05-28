@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEditRecord } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import {
+  maskNotesIfReadOnly,
+  maskBeneficiario,
+  maskFuncionario,
+  shouldMaskPersonalData,
+} from '@/lib/mask-by-role'
 
 export async function GET(
   request: NextRequest,
@@ -21,13 +28,47 @@ export async function GET(
         items: { include: { product: { select: { name: true, unit: true } } } },
       },
     })
+
     if (!distribution) {
-      return NextResponse.json({ error: 'Distribuição não encontrada' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Distribuição não encontrada' },
+        { status: 404 }
+      )
     }
-    return NextResponse.json(distribution)
+
+    // 🔐 Aplica máscaras conforme o role
+    const session = await auth()
+    const role = session?.user?.role
+
+    // 1) Mascara notes se for somente leitura no módulo
+    let distributionSegura = maskNotesIfReadOnly(distribution, role, 'distribuicoes')
+
+    // 2) Mascara dados pessoais se for visualizador
+    if (shouldMaskPersonalData(role)) {
+      distributionSegura = {
+        ...distributionSegura,
+        beneficiary: distributionSegura.beneficiary
+          ? maskBeneficiario(distributionSegura.beneficiary, role)
+          : distributionSegura.beneficiary,
+        employee: distributionSegura.employee
+          ? maskFuncionario(distributionSegura.employee, role)
+          : distributionSegura.employee,
+        employee2: distributionSegura.employee2
+          ? maskFuncionario(distributionSegura.employee2, role)
+          : distributionSegura.employee2,
+        employee3: distributionSegura.employee3
+          ? maskFuncionario(distributionSegura.employee3, role)
+          : distributionSegura.employee3,
+      }
+    }
+
+    return NextResponse.json(distributionSegura)
   } catch (error) {
     console.error('Erro GET distribuição:', error)
-    return NextResponse.json({ error: 'Erro ao buscar distribuição' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Erro ao buscar distribuição' },
+      { status: 500 }
+    )
   }
 }
 
@@ -44,7 +85,10 @@ export async function PUT(
       select: { createdAt: true },
     })
     if (!existing) {
-      return NextResponse.json({ error: 'Distribuição não encontrada' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Distribuição não encontrada' },
+        { status: 404 }
+      )
     }
 
     const authResult = await requireEditRecord('distribuicoes', existing.createdAt)
@@ -76,11 +120,13 @@ export async function PUT(
         date: date ? new Date(date + 'T12:00:00') : undefined,
         notes: notes || null,
         items: {
-          create: items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            boxes: item.boxes ?? null,
-          })),
+          create: items.map(
+            (item: { productId: string; quantity: number; boxes?: number }) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              boxes: item.boxes ?? null,
+            })
+          ),
         },
       },
       include: {
@@ -95,7 +141,10 @@ export async function PUT(
     return NextResponse.json(distribution)
   } catch (error) {
     console.error('Erro PUT distribuição:', error)
-    return NextResponse.json({ error: 'Erro ao atualizar distribuição' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Erro ao atualizar distribuição' },
+      { status: 500 }
+    )
   }
 }
 
@@ -111,7 +160,10 @@ export async function DELETE(
       select: { createdAt: true },
     })
     if (!existing) {
-      return NextResponse.json({ error: 'Distribuição não encontrada' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Distribuição não encontrada' },
+        { status: 404 }
+      )
     }
 
     const authResult = await requireEditRecord('distribuicoes', existing.createdAt)
@@ -123,6 +175,9 @@ export async function DELETE(
     return NextResponse.json({ message: 'Distribuição excluída com sucesso' })
   } catch (error) {
     console.error('Erro DELETE distribuição:', error)
-    return NextResponse.json({ error: 'Erro ao excluir distribuição' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Erro ao excluir distribuição' },
+      { status: 500 }
+    )
   }
 }

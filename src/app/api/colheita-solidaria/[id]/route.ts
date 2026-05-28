@@ -1,6 +1,13 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEditRecord, requireDeleteRecord } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import {
+  maskNotesIfReadOnly,
+  maskProdutor,
+  maskFuncionario,
+  shouldMaskPersonalData,
+} from '@/lib/mask-by-role'
 
 export async function GET(
   request: NextRequest,
@@ -24,7 +31,34 @@ export async function GET(
     if (!harvest) {
       return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
     }
-    return NextResponse.json(harvest)
+
+    // 🔐 Aplica máscaras conforme o role
+    const session = await auth()
+    const role = session?.user?.role
+
+    // 1) Mascara notes se for somente leitura no módulo
+    let harvestSegura = maskNotesIfReadOnly(harvest, role, 'colheita-solidaria')
+
+    // 2) Mascara dados pessoais se for visualizador
+    if (shouldMaskPersonalData(role)) {
+      harvestSegura = {
+        ...harvestSegura,
+        producer: harvestSegura.producer
+          ? maskProdutor(harvestSegura.producer, role)
+          : harvestSegura.producer,
+        employee: harvestSegura.employee
+          ? maskFuncionario(harvestSegura.employee, role)
+          : harvestSegura.employee,
+        employee2: harvestSegura.employee2
+          ? maskFuncionario(harvestSegura.employee2, role)
+          : harvestSegura.employee2,
+        employee3: harvestSegura.employee3
+          ? maskFuncionario(harvestSegura.employee3, role)
+          : harvestSegura.employee3,
+      }
+    }
+
+    return NextResponse.json(harvestSegura)
   } catch (error) {
     console.error('Erro GET colheita:', error)
     return NextResponse.json({ error: 'Erro ao buscar colheita' }, { status: 500 })

@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
-import { maskNotesListIfReadOnly } from '@/lib/mask-by-role'
+import {
+  maskNotesListIfReadOnly,
+  maskBeneficiario,
+  maskFuncionario,
+  shouldMaskPersonalData,
+} from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('distribuicoes')
@@ -22,14 +27,41 @@ export async function GET() {
       orderBy: { date: 'desc' },
     })
 
-    // 🔐 Mascara notes para quem é só leitura no módulo
+    // 🔐 Aplica máscaras conforme o role
     const session = await auth()
-    const distributionsSeguras = maskNotesListIfReadOnly(distributions, session?.user?.role, 'distribuicoes')
+    const role = session?.user?.role
+
+    // 1) Mascara notes se for somente leitura no módulo
+    let distributionsSeguras = maskNotesListIfReadOnly(
+      distributions,
+      role,
+      'distribuicoes'
+    )
+
+    // 2) Mascara dados pessoais do beneficiário e funcionários se for visualizador
+    if (shouldMaskPersonalData(role)) {
+      distributionsSeguras = distributionsSeguras.map((d) => ({
+        ...d,
+        beneficiary: d.beneficiary
+          ? maskBeneficiario(d.beneficiary, role)
+          : d.beneficiary,
+        employee: d.employee ? maskFuncionario(d.employee, role) : d.employee,
+        employee2: d.employee2
+          ? maskFuncionario(d.employee2, role)
+          : d.employee2,
+        employee3: d.employee3
+          ? maskFuncionario(d.employee3, role)
+          : d.employee3,
+      }))
+    }
 
     return NextResponse.json(distributionsSeguras)
   } catch (error) {
     console.error('Erro GET distribuições:', error)
-    return NextResponse.json({ error: 'Erro ao buscar distribuições' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Erro ao buscar distribuições' },
+      { status: 500 }
+    )
   }
 }
 
@@ -42,7 +74,9 @@ export async function POST(request: Request) {
     const body = await request.json()
 
     // 🔍 Validação: funcionários não podem se repetir
-    const empIds = [body.employeeId, body.employee2Id, body.employee3Id].filter(Boolean)
+    const empIds = [body.employeeId, body.employee2Id, body.employee3Id].filter(
+      Boolean
+    )
     if (empIds.length !== new Set(empIds).size) {
       return NextResponse.json(
         { error: 'Não é possível adicionar o mesmo funcionário mais de uma vez' },
@@ -61,11 +95,13 @@ export async function POST(request: Request) {
         date: dateValue,
         notes: body.notes || null,
         items: {
-          create: body.items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            boxes: item.boxes ?? null,
-          })),
+          create: body.items.map(
+            (item: { productId: string; quantity: number; boxes?: number }) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              boxes: item.boxes ?? null,
+            })
+          ),
         },
       },
       include: {
@@ -82,6 +118,9 @@ export async function POST(request: Request) {
     return NextResponse.json(distribution, { status: 201 })
   } catch (error) {
     console.error('Erro POST distribuição:', error)
-    return NextResponse.json({ error: 'Erro ao criar distribuição' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Erro ao criar distribuição' },
+      { status: 500 }
+    )
   }
 }

@@ -1,26 +1,28 @@
-import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
-import { auth } from "@/lib/auth";
-import { canView, canEdit, canEditRecord, canDeleteRecord } from "@/lib/permissions";
-
-const prisma = new PrismaClient();
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import {
+  requireView,
+  requireEditRecord,
+  requireDeleteRecord,
+} from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import {
+  maskNotesIfReadOnly,
+  maskDoador,
+  maskFuncionario,
+  shouldMaskPersonalData,
+} from '@/lib/mask-by-role'
 
 // GET - Buscar doação por ID
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // 🔐 Autenticação
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
-    if (!canView(session.user.role, "doacoes")) {
-      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-    }
+  const authResult = await requireView('doacoes')
+  if (authResult instanceof NextResponse) return authResult
 
-    const { id } = await params;
+  try {
+    const { id } = await params
 
     const donation = await prisma.donation.findUnique({
       where: { id },
@@ -29,28 +31,50 @@ export async function GET(
         employee: true,
         employee2: true,
         employee3: true,
-        items: {
-          include: {
-            product: true,
-          },
-        },
+        items: { include: { product: true } },
       },
-    });
+    })
 
     if (!donation) {
       return NextResponse.json(
-        { error: "Doação não encontrada" },
+        { error: 'Doação não encontrada' },
         { status: 404 }
-      );
+      )
     }
 
-    return NextResponse.json(donation);
+    // 🔐 Aplica máscaras conforme o role
+    const session = await auth()
+    const role = session?.user?.role
+
+    // 1) Mascara notes se for somente leitura no módulo
+    let donationSegura = maskNotesIfReadOnly(donation, role, 'doacoes')
+
+    // 2) Mascara dados pessoais se for visualizador
+    if (shouldMaskPersonalData(role)) {
+      donationSegura = {
+        ...donationSegura,
+        donor: donationSegura.donor
+          ? maskDoador(donationSegura.donor, role)
+          : donationSegura.donor,
+        employee: donationSegura.employee
+          ? maskFuncionario(donationSegura.employee, role)
+          : donationSegura.employee,
+        employee2: donationSegura.employee2
+          ? maskFuncionario(donationSegura.employee2, role)
+          : donationSegura.employee2,
+        employee3: donationSegura.employee3
+          ? maskFuncionario(donationSegura.employee3, role)
+          : donationSegura.employee3,
+      }
+    }
+
+    return NextResponse.json(donationSegura)
   } catch (error) {
-    console.error("Erro ao buscar doação:", error);
+    console.error('Erro ao buscar doação:', error)
     return NextResponse.json(
-      { error: "Erro ao buscar doação" },
+      { error: 'Erro ao buscar doação' },
       { status: 500 }
-    );
+    )
   }
 }
 
@@ -60,44 +84,26 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // 🔐 1. Autenticação
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const { id } = await params
 
-    // 🔐 2. Permissão básica de edição no módulo
-    if (!canEdit(session.user.role, "doacoes")) {
-      return NextResponse.json(
-        { error: "Sem permissão para editar doações" },
-        { status: 403 }
-      );
-    }
-
-    const { id } = await params;
-
-    // 🔐 3. Busca o registro existente pra checar trava temporal
+    // 🔒 Busca o registro ANTES pra checar trava temporal
     const existing = await prisma.donation.findUnique({
       where: { id },
       select: { date: true },
-    });
+    })
 
     if (!existing) {
       return NextResponse.json(
-        { error: "Doação não encontrada" },
+        { error: 'Doação não encontrada' },
         { status: 404 }
-      );
+      )
     }
 
-    // 🔐 4. Trava temporal: operador só edita doações com data = hoje
-    if (!canEditRecord(session.user.role, "doacoes", existing.date)) {
-      return NextResponse.json(
-        { error: "Apenas administradores podem editar doações de outras datas" },
-        { status: 403 }
-      );
-    }
+    // 🔐 Auth + permissão básica + trava temporal (operador só edita doações de hoje)
+    const authResult = await requireEditRecord('doacoes', existing.date)
+    if (authResult instanceof NextResponse) return authResult
 
-    const body = await request.json();
+    const body = await request.json()
     const {
       donorId,
       employeeId,
@@ -107,44 +113,44 @@ export async function PUT(
       origin,
       notes,
       items,
-    } = body;
+    } = body
 
     // Validações
     if (!donorId) {
       return NextResponse.json(
-        { error: "Doador é obrigatório" },
+        { error: 'Doador é obrigatório' },
         { status: 400 }
-      );
+      )
     }
 
     if (!employeeId) {
       return NextResponse.json(
-        { error: "Funcionário responsável é obrigatório" },
+        { error: 'Funcionário responsável é obrigatório' },
         { status: 400 }
-      );
+      )
     }
 
     if (!items || items.length === 0) {
       return NextResponse.json(
-        { error: "Adicione pelo menos um item à doação" },
+        { error: 'Adicione pelo menos um item à doação' },
         { status: 400 }
-      );
+      )
     }
 
-    // Validação: não permitir funcionário duplicado
-    const employeeIds = [employeeId, employee2Id, employee3Id].filter(Boolean);
-    const uniqueIds = new Set(employeeIds);
+    // 🔍 Validação: funcionários não podem se repetir
+    const employeeIds = [employeeId, employee2Id, employee3Id].filter(Boolean)
+    const uniqueIds = new Set(employeeIds)
     if (uniqueIds.size !== employeeIds.length) {
       return NextResponse.json(
-        { error: "Não é possível adicionar o mesmo funcionário mais de uma vez" },
+        { error: 'Não é possível adicionar o mesmo funcionário mais de uma vez' },
         { status: 400 }
-      );
+      )
     }
 
     // Deleta itens antigos e cria novos (jeito mais simples e seguro)
     await prisma.donationItem.deleteMany({
       where: { donationId: id },
-    });
+    })
 
     const donation = await prisma.donation.update({
       where: { id },
@@ -154,15 +160,22 @@ export async function PUT(
         employee2Id: employee2Id || null,
         employee3Id: employee3Id || null,
         date: date ? new Date(date) : undefined,
-        origin: origin || "coleta",
+        origin: origin || 'coleta',
         notes: notes || null,
         items: {
-          create: items.map((item: any) => ({
-            productId: item.productId,
-            quantity: parseFloat(item.quantity),
-            boxes: item.boxes ? parseInt(item.boxes) : null,
-            weighed: item.weighed || false,
-          })),
+          create: items.map(
+            (item: {
+              productId: string
+              quantity: number | string
+              boxes?: number | string
+              weighed?: boolean
+            }) => ({
+              productId: item.productId,
+              quantity: parseFloat(String(item.quantity)),
+              boxes: item.boxes ? parseInt(String(item.boxes)) : null,
+              weighed: item.weighed || false,
+            })
+          ),
         },
       },
       include: {
@@ -170,21 +183,17 @@ export async function PUT(
         employee: true,
         employee2: true,
         employee3: true,
-        items: {
-          include: {
-            product: true,
-          },
-        },
+        items: { include: { product: true } },
       },
-    });
+    })
 
-    return NextResponse.json(donation);
+    return NextResponse.json(donation)
   } catch (error) {
-    console.error("Erro ao atualizar doação:", error);
+    console.error('Erro ao atualizar doação:', error)
     return NextResponse.json(
-      { error: "Erro ao atualizar doação" },
+      { error: 'Erro ao atualizar doação' },
       { status: 500 }
-    );
+    )
   }
 }
 
@@ -194,32 +203,35 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // 🔐 1. Autenticação
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
+    const { id } = await params
 
-    // 🔐 2. Apenas admin pode excluir doações
-    if (!canDeleteRecord(session.user.role, "doacoes")) {
+    // 🔒 Confirma que o registro existe (pra retornar 404 correto)
+    const existing = await prisma.donation.findUnique({
+      where: { id },
+      select: { id: true },
+    })
+
+    if (!existing) {
       return NextResponse.json(
-        { error: "Apenas administradores podem excluir doações" },
-        { status: 403 }
-      );
+        { error: 'Doação não encontrada' },
+        { status: 404 }
+      )
     }
 
-    const { id } = await params;
+    // 🚫 Apenas admin pode excluir. Operador é bloqueado.
+    const authResult = await requireDeleteRecord('doacoes')
+    if (authResult instanceof NextResponse) return authResult
 
     await prisma.donation.delete({
       where: { id },
-    });
+    })
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Erro ao excluir doação:", error);
+    console.error('Erro ao excluir doação:', error)
     return NextResponse.json(
-      { error: "Erro ao excluir doação" },
+      { error: 'Erro ao excluir doação' },
       { status: 500 }
-    );
+    )
   }
 }
