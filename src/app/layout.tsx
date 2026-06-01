@@ -5,32 +5,37 @@ import LayoutShell from '@/components/LayoutShell'
 import SessionProvider from '@/components/SessionProvider'
 import AccessDeniedToast from '@/components/AccessDeniedToast'
 import { Toaster } from 'react-hot-toast'
+import { BRANDING } from '@/lib/branding'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: {
-    default: 'Banco de Alimentos',
-    template: '%s | Banco de Alimentos',
+    default: BRANDING.fullName,
+    template: `%s | ${BRANDING.name}`,
   },
-  description: 'Sistema de gestão do Banco de Alimentos de São João del-Rei',
-  // ❌ REMOVIDO: manifest: '/manifest.json' (vamos colocar manualmente no <head>)
-  applicationName: 'Banco de Alimentos',
+  description: BRANDING.description,
+  applicationName: BRANDING.name,
   keywords: [
+    'annonae',
     'banco de alimentos',
     'são joão del-rei',
     'doação',
     'gestão',
     'alimentos',
     'colheita solidária',
+    'segurança alimentar',
+    'mesa brasil',
+    'cgesan',
   ],
-  authors: [{ name: 'Banco de Alimentos SJDR' }],
-  creator: 'Banco de Alimentos SJDR',
-  publisher: 'Banco de Alimentos SJDR',
+  authors: [{ name: 'Annonae', url: BRANDING.productionUrl }],
+  creator: BRANDING.name,
+  publisher: BRANDING.name,
+  metadataBase: new URL(BRANDING.productionUrl),
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Banco de Alimentos',
+    title: BRANDING.name,
   },
   formatDetection: {
     telephone: false,
@@ -38,25 +43,43 @@ export const metadata: Metadata = {
     address: false,
   },
   icons: {
-  icon: [
-    { url: '/icons/favicon.ico', sizes: 'any', type: 'image/x-icon' },
-    { url: '/icons/favicon.svg', type: 'image/svg+xml' },
-    { url: '/icons/favicon-96x96.png', sizes: '96x96', type: 'image/png' },
-    { url: '/icons/web-app-manifest-192x192.png', sizes: '192x192', type: 'image/png' },
-    { url: '/icons/web-app-manifest-512x512.png', sizes: '512x512', type: 'image/png' },
-  ],
-  apple: [
-    { url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
-  ],
-  shortcut: '/icons/favicon.ico',
-},
+    icon: [
+      { url: '/icons/favicon.ico', sizes: 'any', type: 'image/x-icon' },
+      { url: '/icons/favicon.svg', type: 'image/svg+xml' },
+      { url: '/icons/favicon-96x96.png', sizes: '96x96', type: 'image/png' },
+      { url: '/icons/web-app-manifest-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/web-app-manifest-512x512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+    shortcut: '/icons/favicon.ico',
+  },
   openGraph: {
     type: 'website',
     locale: 'pt_BR',
-    url: 'https://bancodealimentos.local',
-    title: 'Banco de Alimentos',
-    description: 'Sistema de gestão do Banco de Alimentos de São João del-Rei',
-    siteName: 'Banco de Alimentos',
+    url: BRANDING.productionUrl,
+    title: BRANDING.fullName,
+    description: BRANDING.tagline,
+    siteName: BRANDING.name,
+    images: [
+      {
+        url: BRANDING.assets.logoColor,
+        width: 1200,
+        height: 630,
+        alt: BRANDING.name,
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: BRANDING.fullName,
+    description: BRANDING.tagline,
+    images: [BRANDING.assets.logoColor],
+  },
+  robots: {
+    index: true,
+    follow: true,
   },
 }
 

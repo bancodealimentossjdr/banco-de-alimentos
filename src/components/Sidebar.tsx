@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import {
@@ -20,6 +21,7 @@ import {
   BarChart3,
   X,
 } from 'lucide-react'
+import { BRANDING } from '@/lib/branding'
 
 type MenuItem = {
   label: string
@@ -62,6 +64,9 @@ export default function Sidebar({
   const isAdmin = session?.user.role === 'admin'
   const visibleItems = menuItems.filter(item => !item.adminOnly || isAdmin)
 
+  // Mostrar texto completo: quando NÃO colapsada OU quando aberta no mobile
+  const showFullLogo = !collapsed || sidebarOpen
+
   return (
     <>
       {/* Overlay escuro no mobile */}
@@ -84,15 +89,36 @@ export default function Sidebar({
         `}
       >
         {/* Logo */}
-        <div className="flex items-center justify-between px-4 h-16 border-b border-green-700">
-          {(!collapsed || sidebarOpen) && (
-            <span className="text-lg font-bold truncate">🍎 Banco de Alimentos</span>
+        <div className="flex items-center justify-between px-3 h-16 border-b border-green-700">
+          {showFullLogo ? (
+            <Link href="/" className="flex items-center gap-2 min-w-0">
+              <Image
+                src={BRANDING.assets.logoMono}
+                alt={BRANDING.name}
+                width={140}
+                height={36}
+                priority
+                className="object-contain h-9 w-auto"
+              />
+            </Link>
+          ) : (
+            <Link href="/" className="flex items-center justify-center w-full">
+              <Image
+                src={BRANDING.assets.logoMono}
+                alt={BRANDING.name}
+                width={32}
+                height={32}
+                priority
+                className="object-contain h-8 w-8"
+              />
+            </Link>
           )}
 
           {/* Botão fechar - mobile */}
           <button
             onClick={() => setSidebarOpen(false)}
             className="p-1 rounded hover:bg-green-700 transition-colors lg:hidden"
+            aria-label="Fechar menu"
           >
             <X size={20} />
           </button>
@@ -101,6 +127,7 @@ export default function Sidebar({
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="p-1 rounded hover:bg-green-700 transition-colors hidden lg:block"
+            aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
           >
             {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
           </button>
@@ -133,9 +160,9 @@ export default function Sidebar({
         </nav>
 
         {/* Footer */}
-        {(!collapsed || sidebarOpen) && (
+        {showFullLogo && (
           <div className="px-4 py-3 border-t border-green-700 text-xs text-green-300">
-            © 2026 Banco de Alimentos
+            © {new Date().getFullYear()} {BRANDING.name}
           </div>
         )}
       </aside>

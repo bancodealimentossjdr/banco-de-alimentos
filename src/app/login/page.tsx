@@ -3,7 +3,9 @@
 import { Suspense, useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { LogIn, Eye, EyeOff, Apple, AlertCircle } from 'lucide-react'
+import { LogIn, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { PartnershipLogos } from '@/components/ui/Logo'
+import { BRANDING } from '@/lib/branding'
 
 function LoginForm() {
   const router = useRouter()
@@ -56,13 +58,15 @@ function LoginForm() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-orange-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo / Header */}
+        {/* Logo / Header — Parceria Annonae + Banco SJDR */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-green-500 to-green-700 rounded-2xl shadow-lg mb-4">
-            <Apple className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800">Banco de Alimentos</h1>
-          <p className="text-gray-500 mt-1">Faça login para acessar o sistema</p>
+          <PartnershipLogos logoSize={64} className="mb-4" />
+          <p className="text-gray-600 mt-3 text-sm italic">
+            {BRANDING.tagline}
+          </p>
+          <p className="text-gray-400 mt-1 text-xs">
+            Faça login para acessar o sistema
+          </p>
         </div>
 
         {/* Card de Login */}
@@ -75,7 +79,7 @@ function LoginForm() {
             </div>
           )}
 
-          {/* 🆕 Botão Google */}
+          {/* Botão Google */}
           <button
             type="button"
             onClick={handleGoogleLogin}
@@ -154,6 +158,7 @@ function LoginForm() {
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -180,7 +185,7 @@ function LoginForm() {
 
         {/* Footer */}
         <p className="text-center text-xs text-gray-400 mt-6">
-          © 2026 Banco de Alimentos — Todos os direitos reservados
+          © {new Date().getFullYear()} {BRANDING.name} — Todos os direitos reservados
         </p>
       </div>
     </div>
