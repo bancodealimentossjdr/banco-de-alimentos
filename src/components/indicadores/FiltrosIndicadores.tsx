@@ -11,13 +11,49 @@ interface Props {
   onChange: (filters: Filters) => void;
 }
 
-export default function FiltrosIndicadores({ onChange }: Props) {
-  const today = new Date();
-  const yearAgo = new Date();
-  yearAgo.setFullYear(today.getFullYear() - 1);
+/* ------------------------------------------------------------------ */
+/* Helpers de data                                                     */
+/* ------------------------------------------------------------------ */
 
-  const [from, setFrom] = useState(yearAgo.toISOString().split('T')[0]);
-  const [to, setTo] = useState(today.toISOString().split('T')[0]);
+// formato interno (HTML / backend): YYYY-MM-DD
+function toYMD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// formato de exibição brasileiro: DD-MM-YYYY
+function toBR(ymd: string): string {
+  if (!ymd) return '—';
+  const [y, m, d] = ymd.split('-');
+  return `${d}-${m}-${y}`;
+}
+
+function rangeUltimosDias(dias: number): Filters {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - dias);
+  return { from: toYMD(from), to: toYMD(to) };
+}
+
+function rangeUltimosMeses(meses: number): Filters {
+  const to = new Date();
+  const from = new Date();
+  from.setMonth(from.getMonth() - meses);
+  return { from: toYMD(from), to: toYMD(to) };
+}
+
+/* ------------------------------------------------------------------ */
+/* Componente                                                          */
+/* ------------------------------------------------------------------ */
+
+export default function FiltrosIndicadores({ onChange }: Props) {
+  // 🎯 padrão silencioso: últimos 30 dias (sem botão correspondente)
+  const padrao = rangeUltimosDias(30);
+
+  const [from, setFrom] = useState(padrao.from);
+  const [to, setTo] = useState(padrao.to);
 
   useEffect(() => {
     onChange({ from, to });
@@ -28,26 +64,25 @@ export default function FiltrosIndicadores({ onChange }: Props) {
     onChange({ from, to });
   };
 
+  // presets pedidos: 7, 15, 6 meses, 1 ano (sem 30 dias)
   const presets = [
-    { label: '30 dias', days: 30 },
-    { label: '90 dias', days: 90 },
-    { label: '1 ano', days: 365 },
+    { label: '7 dias', get: () => rangeUltimosDias(7) },
+    { label: '15 dias', get: () => rangeUltimosDias(15) },
+    { label: '6 meses', get: () => rangeUltimosMeses(6) },
+    { label: '1 ano', get: () => rangeUltimosMeses(12) },
   ];
 
-  const aplicarPreset = (days: number) => {
-    const t = new Date();
-    const f = new Date();
-    f.setDate(f.getDate() - days);
-    const fStr = f.toISOString().split('T')[0];
-    const tStr = t.toISOString().split('T')[0];
-    setFrom(fStr);
-    setTo(tStr);
-    onChange({ from: fStr, to: tStr });
+  const aplicarPreset = (get: () => Filters) => {
+    const r = get();
+    setFrom(r.from);
+    setTo(r.to);
+    onChange(r);
   };
 
   return (
     <div className="bg-white rounded-lg shadow p-4 border border-gray-200 mb-6">
       <h2 className="text-lg font-semibold mb-3">📅 Filtros</h2>
+
       <div className="flex flex-wrap gap-4 items-end">
         <div>
           <label className="block text-sm text-gray-600 mb-1">De</label>
@@ -67,17 +102,19 @@ export default function FiltrosIndicadores({ onChange }: Props) {
             className="border rounded px-3 py-2"
           />
         </div>
+
         <button
           onClick={aplicar}
           className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
         >
           Aplicar
         </button>
+
         <div className="flex gap-2 flex-wrap">
           {presets.map((p) => (
             <button
-              key={p.days}
-              onClick={() => aplicarPreset(p.days)}
+              key={p.label}
+              onClick={() => aplicarPreset(p.get)}
               className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded"
             >
               {p.label}
@@ -85,6 +122,13 @@ export default function FiltrosIndicadores({ onChange }: Props) {
           ))}
         </div>
       </div>
+
+      {/* 🇧🇷 exibição explícita do período em DD-MM-YYYY (garantido) */}
+      <p className="mt-3 text-sm text-gray-500">
+        Período selecionado:{' '}
+        <span className="font-medium text-gray-700">{toBR(from)}</span> até{' '}
+        <span className="font-medium text-gray-700">{toBR(to)}</span>
+      </p>
     </div>
   );
 }
