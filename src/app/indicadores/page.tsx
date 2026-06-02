@@ -8,6 +8,7 @@ import KpiCard from '@/components/indicadores/KpiCard';
 import GraficoTendencia from '@/components/indicadores/GraficoTendencia';
 import GraficoPizza from '@/components/indicadores/GraficoPizza';
 import GraficoBarras from '@/components/indicadores/GraficoBarras';
+import BotoesExportacao from '@/components/indicadores/BotoesExportacao';
 
 interface Macro {
   totalDoado: number;
@@ -67,11 +68,14 @@ export default function IndicadoresPage() {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">📊 Indicadores</h1>
-        <p className="text-gray-600 mt-1">
-          Visão geral da operação do Banco de Alimentos
-        </p>
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">📊 Indicadores</h1>
+          <p className="text-gray-600 mt-1">
+            Visão geral da operação do Banco de Alimentos
+          </p>
+        </div>
+        <BotoesExportacao filters={filters} />
       </div>
 
       <FiltrosIndicadores onChange={setFilters} />
@@ -125,10 +129,7 @@ export default function IndicadoresPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <GraficoPizza
-              data={topProdutos}
-              titulo="Top 5 Produtos Doados"
-            />
+            <GraficoPizza data={topProdutos} titulo="Top 5 Produtos Doados" />
             <GraficoBarras
               data={topDoadores}
               titulo="Top 10 Doadores"
@@ -147,10 +148,6 @@ export default function IndicadoresPage() {
               titulo="Top 10 Produtores Rurais"
               cor="#ea580c"
             />
-          </div>
-
-          <div className="text-sm text-gray-500 text-center mt-8 mb-4">
-            💡 Exportação CSV/PDF em implementação (próxima atualização)
           </div>
         </>
       )}
