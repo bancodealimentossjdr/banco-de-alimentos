@@ -51,11 +51,11 @@ export async function GET() {
 //   3. Data > último marco existente (retroativo = DEV via SQL)
 //   4. Data não pode ser no futuro
 // ============================================
-const createMarkerSchema = z.object({
+const CreateMarkerSchema = z.object({
   type: z.enum(['ZERO', 'ADJUSTMENT']),
   date: z.string().min(1, 'Data é obrigatória'),
   quantityKg: z
-    .number({ invalid_type_error: 'Quantidade deve ser um número' })
+    .number({ error: 'Quantidade deve ser um número' })
     .nonnegative('Quantidade deve ser ≥ 0'),
   note: z.string().max(500).optional().nullable(),
 })
@@ -67,7 +67,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const parsed = createMarkerSchema.safeParse(body)
+    const parsed = CreateMarkerSchema.safeParse(body)
+
 
     if (!parsed.success) {
       return NextResponse.json(
