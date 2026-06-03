@@ -15,25 +15,26 @@ model User {
   id            String    @id @default(cuid())
   name          String
   email         String    @unique
-  password      String?   // 🆕 opcional (usuários Google não têm senha)
-  emailVerified DateTime? // 🆕 NextAuth precisa
-  image         String?   // 🆕 foto do Google
-  role          String    @default("visualizador") // 🔄 admin | operador | visualizador
+  password      String?
+  emailVerified DateTime?
+  image         String?
+  role          String    @default("visualizador")
   active        Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  // 🆕 Relações do NextAuth (Google OAuth)
   accounts Account[]
   sessions Session[]
 
-  // Relações com DailyApproval (aproveitamentos diários)
   dailyApprovalsCreated DailyApproval[] @relation("DailyApprovalCreatedBy")
   dailyApprovalsUpdated DailyApproval[] @relation("DailyApprovalUpdatedBy")
+
+  // 🆕 ONDA 16.2 — Marcos de Estoque
+  stockMarkersCreated StockMarker[] @relation("StockMarkerCreatedBy")
 }
 
 // ==========================================
-// 🆕 NEXTAUTH: Account (provedores OAuth)
+// NEXTAUTH
 // ==========================================
 model Account {
   id                String  @id @default(cuid())
@@ -54,9 +55,6 @@ model Account {
   @@unique([provider, providerAccountId])
 }
 
-// ==========================================
-// 🆕 NEXTAUTH: Session
-// ==========================================
 model Session {
   id           String   @id @default(cuid())
   sessionToken String   @unique
@@ -66,9 +64,6 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// ==========================================
-// 🆕 NEXTAUTH: VerificationToken
-// ==========================================
 model VerificationToken {
   identifier String
   token      String   @unique
@@ -78,7 +73,7 @@ model VerificationToken {
 }
 
 // ==========================================
-// PRODUTOS (o que é doado/distribuído)
+// PRODUTOS
 // ==========================================
 model Product {
   id        String   @id @default(cuid())
@@ -96,7 +91,7 @@ model Product {
 }
 
 // ==========================================
-// DOADORES (quem doa)
+// DOADORES
 // ==========================================
 model Donor {
   id        String   @id @default(cuid())
@@ -115,7 +110,7 @@ model Donor {
 }
 
 // ==========================================
-// INSTITUIÇÕES BENEFICIÁRIAS (quem recebe)
+// BENEFICIÁRIOS
 // ==========================================
 model Beneficiary {
   id        String   @id @default(cuid())
@@ -133,7 +128,7 @@ model Beneficiary {
 }
 
 // ==========================================
-// FUNCIONÁRIOS (quem faz a coleta/entrega)
+// FUNCIONÁRIOS
 // ==========================================
 model Employee {
   id        String   @id @default(cuid())
@@ -144,24 +139,21 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Doações - até 3 funcionários por coleta
   donationsAsEmployee1 Donation[] @relation("DonationEmployee1")
   donationsAsEmployee2 Donation[] @relation("DonationEmployee2")
   donationsAsEmployee3 Donation[] @relation("DonationEmployee3")
 
-  // Distribuições - até 3 funcionários por entrega
   distributionsAsEmployee1 Distribution[] @relation("DistributionEmployee1")
   distributionsAsEmployee2 Distribution[] @relation("DistributionEmployee2")
   distributionsAsEmployee3 Distribution[] @relation("DistributionEmployee3")
 
-  // Colheitas - até 3 funcionários por colheita
   harvestsAsEmployee1 SolidarityHarvest[] @relation("HarvestEmployee1")
   harvestsAsEmployee2 SolidarityHarvest[] @relation("HarvestEmployee2")
   harvestsAsEmployee3 SolidarityHarvest[] @relation("HarvestEmployee3")
 }
 
 // ==========================================
-// DOAÇÃO (entrada de alimentos)
+// DOAÇÃO
 // ==========================================
 model Donation {
   id         String   @id @default(cuid())
@@ -172,7 +164,6 @@ model Donation {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  // Funcionários da coleta (1 obrigatório, 2 opcionais)
   employeeId   String?
   employee     Employee? @relation("DonationEmployee1", fields: [employeeId], references: [id])
 
@@ -186,9 +177,6 @@ model Donation {
   items DonationItem[]
 }
 
-// ==========================================
-// ITENS DA DOAÇÃO
-// ==========================================
 model DonationItem {
   id         String  @id @default(cuid())
   donationId String
@@ -202,7 +190,7 @@ model DonationItem {
 }
 
 // ==========================================
-// DISTRIBUIÇÃO (saída de alimentos)
+// DISTRIBUIÇÃO
 // ==========================================
 model Distribution {
   id            String   @id @default(cuid())
@@ -212,7 +200,6 @@ model Distribution {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  // Funcionários da entrega (1 obrigatório, 2 opcionais)
   employeeId   String?
   employee     Employee? @relation("DistributionEmployee1", fields: [employeeId], references: [id])
 
@@ -226,9 +213,6 @@ model Distribution {
   items       DistributionItem[]
 }
 
-// ==========================================
-// ITENS DA DISTRIBUIÇÃO
-// ==========================================
 model DistributionItem {
   id             String @id @default(cuid())
   distributionId String
@@ -241,7 +225,7 @@ model DistributionItem {
 }
 
 // ==========================================
-// PRODUTORES RURAIS (Colheita Solidária)
+// PRODUTORES RURAIS
 // ==========================================
 model Producer {
   id        String   @id @default(cuid())
@@ -257,7 +241,8 @@ model Producer {
 }
 
 // ==========================================
-// COLHEITA SOLIDÁRIA (evento de colheita)
+// COLHEITA SOLIDÁRIA
+// status: "agendada" | "realizada" | "cancelada"
 // ==========================================
 model SolidarityHarvest {
   id             String   @id @default(cuid())
@@ -269,7 +254,6 @@ model SolidarityHarvest {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  // Funcionários da colheita (1 obrigatório, 2 opcionais)
   employeeId  String?
   employee    Employee? @relation("HarvestEmployee1", fields: [employeeId], references: [id])
 
@@ -283,9 +267,6 @@ model SolidarityHarvest {
   items    HarvestItem[]
 }
 
-// ==========================================
-// ITENS DA COLHEITA
-// ==========================================
 model HarvestItem {
   id        String @id @default(cuid())
   harvestId String
@@ -298,14 +279,12 @@ model HarvestItem {
 }
 
 // ==========================================
-// APROVEITAMENTO DIÁRIO (2ª triagem)
-// Registra quanto das doações foi efetivamente
-// aproveitado após a triagem do dia
+// APROVEITAMENTO DIÁRIO (triagem das doações)
 // ==========================================
 model DailyApproval {
   id          String   @id @default(cuid())
   date        DateTime @unique @db.Date
-  approvedQty Float    // peso líquido aproveitado em kg
+  approvedQty Float
   notes       String?
 
   createdById String
@@ -319,4 +298,42 @@ model DailyApproval {
 
   @@index([date])
   @@map("daily_approvals")
+}
+
+// ==========================================
+// 🆕 ONDA 16.2 — MARCOS DE ESTOQUE
+// ==========================================
+// Marco = fotografia oficial do estoque físico em uma data.
+// Ponto de calibração: o estoque calculado parte do último
+// marco e soma/subtrai apenas movimentações posteriores.
+//
+// Tipos:
+//   ZERO       — marco inicial do sistema (único, validado na API)
+//   ADJUSTMENT — recalibração periódica (contagem física)
+//
+// Regras:
+//   - 1 marco por dia (unique em date)
+//   - Apenas 1 marco ZERO em todo o sistema (validado na API)
+//   - Apenas admin pode criar marcos via UI
+//   - Marcos retroativos e exclusão = ação de DEV via SQL direto
+// ==========================================
+enum StockMarkerType {
+  ZERO
+  ADJUSTMENT
+}
+
+model StockMarker {
+  id          String          @id @default(cuid())
+  type        StockMarkerType
+  date        DateTime        @unique @db.Date
+  quantityKg  Float
+  note        String?
+
+  createdById String
+  createdBy   User            @relation("StockMarkerCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+
+  @@index([date])
+  @@index([type])
+  @@map("stock_markers")
 }
