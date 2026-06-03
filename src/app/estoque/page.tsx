@@ -187,6 +187,9 @@ export default function EstoquePage() {
   const totalReceived = preview?.totalReceived ?? 0
   const semDados = preview !== undefined && preview !== null && totalReceived === 0
 
+  // 🛡️ Alerta de estoque negativo (sinal de inconsistência de dados)
+  const estoqueNegativo = resumo ? resumo.inStock < 0 : false
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
@@ -252,6 +255,20 @@ export default function EstoquePage() {
             ))}
           </div>
 
+          {/* 🛡️ Alerta de inconsistência: estoque negativo */}
+          {estoqueNegativo && (
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6">
+              <p className="text-red-700 font-semibold text-sm">
+                ⚠️ Estoque negativo detectado ({formatKg(resumo.inStock)} kg)
+              </p>
+              <p className="text-red-600 text-xs mt-1">
+                O total distribuído está maior que o total aproveitado na câmara fria.
+                Isso indica uma possível inconsistência nos dados (distribuição lançada sem aproveitamento correspondente).
+                Recomenda-se conferir os registros.
+              </p>
+            </div>
+          )}
+
           <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-2">🧮 Como o estoque é calculado</h3>
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -262,17 +279,15 @@ export default function EstoquePage() {
               <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
                 ✅ Aproveitado ({formatKg(resumo.approved)})
               </span>
-              <span className="text-gray-400 font-bold">+</span>
-              <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
-                🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
-              </span>
               <span className="text-gray-400 font-bold">−</span>
               <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
                 📤 Distribuído ({formatKg(resumo.distributed)})
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-3">
-              💡 Doações entram no estoque apenas após serem <strong>aproveitadas</strong>.
+              💡 As doações entram no estoque (câmara fria) apenas após serem <strong>aproveitadas</strong> na triagem.
+              A <strong>colheita solidária</strong> é controlada à parte e não compõe o saldo da câmara.
+              O saldo é <strong>dinâmico</strong>: cada distribuição desconta do estoque.
             </p>
           </div>
         </>
