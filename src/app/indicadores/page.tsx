@@ -5,7 +5,9 @@ import FiltrosIndicadores, {
   Filters,
 } from '@/components/indicadores/FiltrosIndicadores';
 import KpiCard from '@/components/indicadores/KpiCard';
-import GraficoTendencia from '@/components/indicadores/GraficoTendencia';
+import GraficoTendencia, {
+  SerieData,
+} from '@/components/indicadores/GraficoTendencia';
 import GraficoPizza from '@/components/indicadores/GraficoPizza';
 import GraficoBarras from '@/components/indicadores/GraficoBarras';
 import BotoesExportacao from '@/components/indicadores/BotoesExportacao';
@@ -22,7 +24,8 @@ interface Macro {
 export default function IndicadoresPage() {
   const [filters, setFilters] = useState<Filters | null>(null);
   const [macro, setMacro] = useState<Macro | null>(null);
-  const [tendencia, setTendencia] = useState<any[]>([]);
+  // 🆕 tendência agora é o OBJETO da série (não mais array)
+  const [tendencia, setTendencia] = useState<SerieData | null>(null);
   const [topProdutos, setTopProdutos] = useState<any[]>([]);
   const [topDoadores, setTopDoadores] = useState<any[]>([]);
   const [topBeneficiarios, setTopBeneficiarios] = useState<any[]>([]);
@@ -37,7 +40,10 @@ export default function IndicadoresPage() {
 
     Promise.all([
       fetch(`/api/indicadores/macro?${qs}`).then((r) => r.json()),
-      fetch(`/api/indicadores/tendencias?${qs}`).then((r) => r.json()),
+      // 🆕 nova série temporal (Brasília + granularidade auto)
+      fetch(`/api/indicadores/aproveitamento?${qs}&serie=true`).then((r) =>
+        r.json()
+      ),
       fetch(`/api/indicadores/rankings?${qs}&type=produtos`).then((r) =>
         r.json()
       ),
@@ -51,9 +57,12 @@ export default function IndicadoresPage() {
         r.json()
       ),
     ])
-      .then(([m, t, p, d, b, pr]) => {
+      .then(([m, serie, p, d, b, pr]) => {
         setMacro(m);
-        setTendencia(Array.isArray(t) ? t : []);
+        // 🛡️ valida shape mínimo da série antes de setar
+        setTendencia(
+          serie && Array.isArray(serie.points) ? (serie as SerieData) : null
+        );
         setTopProdutos(Array.isArray(p) ? p : []);
         setTopDoadores(Array.isArray(d) ? d : []);
         setTopBeneficiarios(Array.isArray(b) ? b : []);

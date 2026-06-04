@@ -6,11 +6,26 @@ import { useApi } from '@/hooks/useApi'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 
 interface EstoqueResumo {
+  // 📊 Totais globais (histórico completo) — alimentam os cards
   donations: number
   solidarityHarvest: number
   approved: number
   distributed: number
   inStock: number
+
+  // 🎯 Marco Zero — alimenta o box "Como o estoque é calculado"
+  hasMarker: boolean
+  baseMarker: {
+    id: string
+    type: 'ZERO' | 'ADJUSTMENT'
+    date: string
+    quantityKg: number
+  } | null
+  movementsSinceMarker: {
+    approvedKg: number
+    harvestKg: number
+    distributedKg: number
+  }
 }
 
 interface PreviewDonation {
@@ -33,7 +48,10 @@ interface PreviewData {
 }
 
 interface CardConfig {
-  key: keyof EstoqueResumo
+  key: keyof Pick<
+    EstoqueResumo,
+    'donations' | 'solidarityHarvest' | 'approved' | 'distributed' | 'inStock'
+  >
   label: string
   emoji: string
   description: string
@@ -190,6 +208,15 @@ export default function EstoquePage() {
   // 🛡️ Alerta de estoque negativo (sinal de inconsistência de dados)
   const estoqueNegativo = resumo ? resumo.inStock < 0 : false
 
+  // 🎯 Dados do marco (fórmula real do estoque)
+  const temMarco = resumo?.hasMarker ?? false
+  const marcoKg = resumo?.baseMarker?.quantityKg ?? 0
+  const marcoData = resumo?.baseMarker?.date ?? null
+  const marcoTipo = resumo?.baseMarker?.type ?? null
+  const aprovDesde = resumo?.movementsSinceMarker?.approvedKg ?? 0
+  const colhDesde = resumo?.movementsSinceMarker?.harvestKg ?? 0
+  const distrDesde = resumo?.movementsSinceMarker?.distributedKg ?? 0
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
@@ -262,33 +289,90 @@ export default function EstoquePage() {
                 ⚠️ Estoque negativo detectado ({formatKg(resumo.inStock)} kg)
               </p>
               <p className="text-red-600 text-xs mt-1">
-                O total distribuído está maior que o total aproveitado na câmara fria.
-                Isso indica uma possível inconsistência nos dados (distribuição lançada sem aproveitamento correspondente).
+                As saídas desde o marco superaram as entradas.
+                Isso indica uma possível inconsistência nos dados (distribuição lançada sem aproveitamento correspondente)
+                ou a necessidade de uma nova recalibração do estoque.
                 Recomenda-se conferir os registros.
               </p>
             </div>
           )}
 
+          {/* 🧮 Como o estoque é calculado */}
           <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">🧮 Como o estoque é calculado</h3>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
-                📦 Em Estoque ({formatKg(resumo.inStock)} kg)
-              </span>
-              <span className="text-gray-400 font-bold">=</span>
-              <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
-                ✅ Aproveitado ({formatKg(resumo.approved)})
-              </span>
-              <span className="text-gray-400 font-bold">−</span>
-              <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
-                📤 Distribuído ({formatKg(resumo.distributed)})
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 mt-3">
-              💡 As doações entram no estoque (câmara fria) apenas após serem <strong>aproveitadas</strong> na triagem.
-              A <strong>colheita solidária</strong> é controlada à parte e não compõe o saldo da câmara.
-              O saldo é <strong>dinâmico</strong>: cada distribuição desconta do estoque.
-            </p>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">🧮 Como o estoque é calculado</h3>
+
+            {temMarco ? (
+              <>
+                {/* 🎯 Fórmula REAL baseada no Marco Zero */}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
+                    📦 Em Estoque ({formatKg(resumo.inStock)} kg)
+                  </span>
+                  <span className="text-gray-400 font-bold">=</span>
+                  <span className="px-3 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium">
+                    🎯 Marco ({formatKg(marcoKg)})
+                  </span>
+                  <span className="text-gray-400 font-bold">+</span>
+                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
+                    ✅ Aprov. desde ({formatKg(aprovDesde)})
+                  </span>
+                  <span className="text-gray-400 font-bold">+</span>
+                  <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                    🌾 Colheita desde ({formatKg(colhDesde)})
+                  </span>
+                  <span className="text-gray-400 font-bold">−</span>
+                  <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
+                    📤 Distrib. desde ({formatKg(distrDesde)})
+                  </span>
+                </div>
+
+                <p className="text-xs text-gray-500 mt-3">
+                  💡 O saldo parte do{' '}
+                  <strong>
+                    {marcoTipo === 'ADJUSTMENT' ? 'último ajuste' : 'Marco Zero'}
+                    {marcoData ? ` (${formatDate(marcoData)})` : ''}
+                  </strong>{' '}
+                  — uma pesagem física que calibra o estoque oficial. A partir dele, somam-se as{' '}
+                  <strong>entradas</strong> (aproveitamento das doações + colheita realizada) e descontam-se as{' '}
+                  <strong>saídas</strong> (distribuições). Movimentações registradas no mesmo dia do marco já estão
+                  embutidas na pesagem e não são recontadas.
+                </p>
+
+                <p className="text-xs text-gray-400 mt-2">
+                  ℹ️ Os cards acima (Doações, Colheita, Aproveitado, Distribuído) mostram o{' '}
+                  <strong>histórico completo</strong> de registros — independente do marco.
+                </p>
+              </>
+            ) : (
+              <>
+                {/* 🚦 Fallback legado: sem marco cadastrado */}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
+                    📦 Em Estoque ({formatKg(resumo.inStock)} kg)
+                  </span>
+                  <span className="text-gray-400 font-bold">=</span>
+                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
+                    ✅ Aproveitado ({formatKg(resumo.approved)})
+                  </span>
+                  <span className="text-gray-400 font-bold">+</span>
+                  <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                    🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
+                  </span>
+                  <span className="text-gray-400 font-bold">−</span>
+                  <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
+                    📤 Distribuído ({formatKg(resumo.distributed)})
+                  </span>
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+                  <p className="text-xs text-amber-700">
+                    ⚠️ <strong>Nenhum Marco Zero cadastrado.</strong> O saldo está sendo calculado pelo
+                    modelo legado (histórico completo). Crie um Marco Zero para calibrar o estoque
+                    oficialmente a partir de uma pesagem física.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
