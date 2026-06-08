@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import FiltrosIndicadores, {
-  Filters,
+  type FiltrosState,
 } from '@/components/indicadores/FiltrosIndicadores';
 import KpiCard from '@/components/indicadores/KpiCard';
 import GraficoTendencia, {
@@ -11,6 +11,10 @@ import GraficoTendencia, {
 import GraficoPizza from '@/components/indicadores/GraficoPizza';
 import GraficoBarras from '@/components/indicadores/GraficoBarras';
 import BotoesExportacao from '@/components/indicadores/BotoesExportacao';
+import TopFuncionariosCard from '@/components/indicadores/TopFuncionariosCard';
+import TabelaParticipacaoFuncionarios from '@/components/indicadores/TabelaParticipacaoFuncionarios';
+import type { FuncionarioParticipacao } from '@/lib/data/indicadores-data';
+import { useDebounce } from '@/hooks/useDebounce';
 
 interface Macro {
   totalDoado: number;
@@ -22,9 +26,15 @@ interface Macro {
 }
 
 export default function IndicadoresPage() {
-  const [filters, setFilters] = useState<Filters | null>(null);
+  // ============================================
+  // Estado unificado de filtros
+  // ============================================
+  const [filters, setFilters] = useState<FiltrosState | null>(null);
+
+  // ============================================
+  // Estados dos indicadores antigos
+  // ============================================
   const [macro, setMacro] = useState<Macro | null>(null);
-  // 🆕 tendência agora é o OBJETO da série (não mais array)
   const [tendencia, setTendencia] = useState<SerieData | null>(null);
   const [topProdutos, setTopProdutos] = useState<any[]>([]);
   const [topDoadores, setTopDoadores] = useState<any[]>([]);
@@ -32,6 +42,18 @@ export default function IndicadoresPage() {
   const [topProdutores, setTopProdutores] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // ============================================
+  // Estados do Top 5 funcionários (novo)
+  // ============================================
+  const [participacao, setParticipacao] = useState<FuncionarioParticipacao[]>([]);
+  const [loadingPart, setLoadingPart] = useState(false);
+
+  // Debounce só dos filtros que afetam o Top 5
+  const filtersDebounced = useDebounce(filters, 350);
+
+  // ============================================
+  // Carrega KPIs/gráficos antigos (usa from/to)
+  // ============================================
   useEffect(() => {
     if (!filters) return;
     setLoading(true);
@@ -40,7 +62,6 @@ export default function IndicadoresPage() {
 
     Promise.all([
       fetch(`/api/indicadores/macro?${qs}`).then((r) => r.json()),
-      // 🆕 nova série temporal (Brasília + granularidade auto)
       fetch(`/api/indicadores/aproveitamento?${qs}&serie=true`).then((r) =>
         r.json()
       ),
@@ -59,7 +80,6 @@ export default function IndicadoresPage() {
     ])
       .then(([m, serie, p, d, b, pr]) => {
         setMacro(m);
-        // 🛡️ valida shape mínimo da série antes de setar
         setTendencia(
           serie && Array.isArray(serie.points) ? (serie as SerieData) : null
         );
@@ -70,10 +90,48 @@ export default function IndicadoresPage() {
       })
       .catch((e) => console.error('Erro ao carregar indicadores:', e))
       .finally(() => setLoading(false));
-  }, [filters]);
+    // 🔑 Só reage a from/to — multiselects NÃO afetam os antigos (Opção A)
+  }, [filters?.from, filters?.to]);
+
+  // ============================================
+  // Carrega Top 5 funcionários (usa TODOS os filtros)
+  // ============================================
+  useEffect(() => {
+    if (!filtersDebounced) return;
+
+    const params = new URLSearchParams();
+    params.set('from', filtersDebounced.from);
+    params.set('to', filtersDebounced.to);
+    if (filtersDebounced.doadorIds.length)
+      params.set('doadorIds', filtersDebounced.doadorIds.join(','));
+    if (filtersDebounced.produtorIds.length)
+      params.set('produtorIds', filtersDebounced.produtorIds.join(','));
+    if (filtersDebounced.beneficiarioIds.length)
+      params.set('beneficiarioIds', filtersDebounced.beneficiarioIds.join(','));
+    if (filtersDebounced.funcionarioIds.length)
+      params.set('funcionarioIds', filtersDebounced.funcionarioIds.join(','));
+
+    setLoadingPart(true);
+    fetch(`/api/indicadores/participacao-funcionarios?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) setParticipacao(data);
+      })
+      .catch((err) => console.error('Erro ao buscar participação:', err))
+      .finally(() => setLoadingPart(false));
+  }, [filtersDebounced]);
 
   const fmt = (n: number) =>
     n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+
+  // Deriva o filtro de exportação ({ from, to }) a partir do estado unificado
+  const exportFilters = filters
+    ? { from: filters.from, to: filters.to }
+    : null;
+
+  // Mostra tabela detalhada só quando há funcionários filtrados
+  const mostrarTabelaDetalhada =
+    (filters?.funcionarioIds.length ?? 0) > 0;
 
   return (
     <div className="container mx-auto p-6">
@@ -84,7 +142,7 @@ export default function IndicadoresPage() {
             Visão geral da operação do Banco de Alimentos
           </p>
         </div>
-        <BotoesExportacao filters={filters} />
+        <BotoesExportacao filters={exportFilters} />
       </div>
 
       <FiltrosIndicadores onChange={setFilters} />
@@ -95,6 +153,7 @@ export default function IndicadoresPage() {
 
       {macro && !loading && (
         <>
+          {/* ===== KPIs ===== */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
             <KpiCard
               label="Total Doado"
@@ -133,10 +192,12 @@ export default function IndicadoresPage() {
             />
           </div>
 
+          {/* ===== Gráfico tendência ===== */}
           <div className="mb-6">
             <GraficoTendencia data={tendencia} />
           </div>
 
+          {/* ===== Rankings ===== */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             <GraficoPizza data={topProdutos} titulo="Top 5 Produtos Doados" />
             <GraficoBarras
@@ -157,6 +218,21 @@ export default function IndicadoresPage() {
               titulo="Top 10 Produtores Rurais"
               cor="#ea580c"
             />
+          </div>
+
+          {/* ===== 🆕 Top 5 Funcionários ===== */}
+          <div className="border-t border-gray-200 pt-6 mt-2">
+            <TopFuncionariosCard
+              dados={participacao}
+              loading={loadingPart}
+            />
+
+            {mostrarTabelaDetalhada && (
+              <TabelaParticipacaoFuncionarios
+                dados={participacao}
+                loading={loadingPart}
+              />
+            )}
           </div>
         </>
       )}

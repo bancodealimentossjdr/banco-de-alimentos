@@ -2,10 +2,16 @@
 
 import { useState } from 'react';
 import { useSession } from 'next-auth/react';
-import type { Filters } from './FiltrosIndicadores';
+
+// 🔧 Tipo local — antes vinha de FiltrosIndicadores como "Filters"
+// Mantido aqui pra não acoplar ao novo FiltrosState (que tem outra estrutura).
+export type ExportFilters = {
+  from: string;
+  to: string;
+};
 
 interface Props {
-  filters: Filters | null;
+  filters: ExportFilters | null;
 }
 
 export default function BotoesExportacao({ filters }: Props) {
@@ -24,13 +30,10 @@ export default function BotoesExportacao({ filters }: Props) {
       to: filters.to,
       format,
     });
-    // só admin envia mask=false; backend ignora pra outros de qualquer forma
     if (isAdmin && semCensura) params.set('mask', 'false');
 
-    // dispara o download navegando para a URL do endpoint
     const url = `/api/indicadores/export?${params.toString()}`;
 
-    // usa um link temporário para forçar o download sem sair da página
     const a = document.createElement('a');
     a.href = url;
     a.rel = 'noopener';
@@ -38,7 +41,6 @@ export default function BotoesExportacao({ filters }: Props) {
     a.click();
     a.remove();
 
-    // feedback visual breve (o download é assíncrono no browser)
     setTimeout(() => setBaixando(null), 1200);
   };
 

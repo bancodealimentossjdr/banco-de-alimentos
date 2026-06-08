@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { endOfDayBrasilia } from '@/lib/date/day-boundaries'
 
 export type StockSnapshot = {
   hasMarker: boolean
@@ -29,20 +30,6 @@ const EMPTY_SNAPSHOT = (referenceDate: Date): StockSnapshot => ({
   calculatedAt: referenceDate,
 })
 
-/**
- * 🕛 Retorna o "fim do dia" da data fornecida, em UTC.
- * Usado para que movimentações do MESMO DIA do marco sejam
- * IGNORADAS (já refletidas na pesagem física do marco).
- *
- * Ex.: marker.date = 2026-06-03 → retorna 2026-06-03T23:59:59.999Z
- *      Filtro `gt: endOfMarkerDay` pega apenas movimentações de 04/06 em diante.
- */
-function endOfDayUTC(date: Date): Date {
-  const d = new Date(date)
-  d.setUTCHours(23, 59, 59, 999)
-  return d
-}
-
 export async function calculateStock(
   referenceDate: Date = new Date(),
 ): Promise<StockSnapshot> {
@@ -52,7 +39,7 @@ export async function calculateStock(
   if (!(prisma as any).stockMarker) {
     console.warn(
       '[calculateStock] prisma.stockMarker indisponível. ' +
-      'Rode: npx prisma generate && restart do dev server.',
+        'Rode: npx prisma generate && restart do dev server.',
     )
     return EMPTY_SNAPSHOT(referenceDate)
   }
@@ -66,12 +53,16 @@ export async function calculateStock(
 
     if (!baseMarker) return EMPTY_SNAPSHOT(referenceDate)
 
-    // 🕛 Cutoff = fim do dia do marco.
-    // Movimentações registradas NO MESMO DIA do marco são ignoradas,
-    // pois já estão embutidas na pesagem física (decisão Onda 16.2).
-    const cutoff = endOfDayUTC(baseMarker.date)
+    // 🇧🇷 Cutoff = fim do dia do marco em horário de BRASÍLIA.
+    // Movimentações registradas NO MESMO DIA civil do marco são ignoradas
+    // (já estão embutidas na pesagem física — decisão Onda 16.2).
+    //
+    // Antes (bug): endOfDayUTC pegava 23:59:59 UTC = 20:59:59 BSB
+    // → movimentações entre 21h e 23h59 (BSB) entravam como "pós-marco".
+    // Agora: endOfDayBrasilia pega 23:59:59 BSB = 02:59:59 UTC do dia seguinte.
+    const cutoff = endOfDayBrasilia(baseMarker.date)
 
-    // 2️⃣ Movimentações após o marco (estritamente após o fim do dia do marco)
+    // 2️⃣ Movimentações após o marco (estritamente após o fim do dia BSB do marco)
     const [approvalAgg, distributionItems, harvestItems, donationItems] =
       await Promise.all([
         prisma.dailyApproval.aggregate({

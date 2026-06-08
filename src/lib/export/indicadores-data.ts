@@ -1,4 +1,8 @@
 import { prisma } from '@/lib/prisma';
+import {
+  parseYMDtoBrasiliaStart,
+  parseYMDtoBrasiliaEnd,
+} from '@/lib/date/day-boundaries';
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -54,14 +58,11 @@ export async function getIndicadoresData(opts: {
 }): Promise<IndicadoresData> {
   const { from, to, censurar } = opts;
 
-  // --- Filtro de data (mesma lógica das rotas em produção) ---
-  const dateFilter: { gte?: Date; lte?: Date } = {};
-  if (from) dateFilter.gte = new Date(from);
-  if (to) {
-    const toDate = new Date(to);
-    toDate.setHours(23, 59, 59, 999);
-    dateFilter.lte = toDate;
-  }
+  // 🇧🇷 Fronteira de dia em horário de Brasília (UTC−3)
+const dateFilter: { gte?: Date; lte?: Date } = {};
+if (from) dateFilter.gte = parseYMDtoBrasiliaStart(from);
+if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
+
   const hasDate = Object.keys(dateFilter).length > 0;
   const whereDate = hasDate ? { date: dateFilter } : {};
 

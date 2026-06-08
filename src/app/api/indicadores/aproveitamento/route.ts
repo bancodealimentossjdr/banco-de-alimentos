@@ -5,6 +5,10 @@ import {
   calculateUtilizationSeries,
   type UtilizationFilters,
 } from '@/lib/stock/calculate-utilization'
+import {
+  parseYMDtoBrasiliaStart,
+  parseYMDtoBrasiliaEnd,
+} from '@/lib/date/day-boundaries'
 
 /* ------------------------------------------------------------------ */
 /* Helper: CSV da query string -> string[] | undefined                 */
@@ -27,7 +31,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
 
   // ----------------------------------------------------------------
-  // Período (mesma lógica do macro: 'to' cobre o dia inteiro)
+  // Período em horário de BRASÍLIA (UTC−3)
+  // - 'from' vira 00:00:00.000 BSB (= 03:00 UTC)
+  // - 'to'   vira 23:59:59.999 BSB (= 02:59:59 UTC do dia seguinte)
+  //
+  // Antes (bug): from.setHours(0,0,0,0) usava fuso do servidor (UTC na
+  // Vercel) → range deslocado em 3h. Cadastros entre 21h-23h59 BSB
+  // ficavam de fora.
   // ----------------------------------------------------------------
   const fromRaw = searchParams.get('from')
   const toRaw = searchParams.get('to')
@@ -39,20 +49,17 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const from = new Date(fromRaw)
-  const to = new Date(toRaw)
-
-  // Validação de datas
-  if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+  let from: Date
+  let to: Date
+  try {
+    from = parseYMDtoBrasiliaStart(fromRaw)
+    to = parseYMDtoBrasiliaEnd(toRaw)
+  } catch (e) {
     return NextResponse.json(
-      { error: 'Datas inválidas em "from" ou "to".' },
+      { error: 'Datas inválidas em "from" ou "to". Esperado YYYY-MM-DD.' },
       { status: 400 },
     )
   }
-
-  // Normaliza o range: from 00:00:00.000 .. to 23:59:59.999
-  from.setHours(0, 0, 0, 0)
-  to.setHours(23, 59, 59, 999)
 
   if (from > to) {
     return NextResponse.json(
