@@ -16,12 +16,19 @@ export async function GET(req: NextRequest) {
   // ----------------------------------------------------------------
   // 📅 Período → afeta APENAS os FLUXOS:
   //    doado, distribuído, colheita, % aproveitamento, beneficiários.
+  //
+  // 🔧 FIX (fuso): as bordas do dia são fixadas em UTC, NÃO no fuso
+  //    da máquina. Antes usávamos setHours() (horário local), o que
+  //    no localhost (-03:00) cortava o último dia: a borda `to` caía
+  //    em 02:59:59Z e excluía registros gravados ao meio-dia UTC.
+  //    Em produção (UTC) o bug não aparecia → "Vercel OK, local não".
+  //    Usando setUTCHours, o comportamento é idêntico em qualquer fuso.
   // ----------------------------------------------------------------
   const from = fromRaw ? new Date(fromRaw) : new Date('1970-01-01')
   const to = toRaw ? new Date(toRaw) : new Date()
 
-  from.setHours(0, 0, 0, 0)
-  to.setHours(23, 59, 59, 999)
+  from.setUTCHours(0, 0, 0, 0)
+  to.setUTCHours(23, 59, 59, 999)
 
   try {
     // ----------------------------------------------------------------
