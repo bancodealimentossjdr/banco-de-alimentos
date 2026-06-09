@@ -79,7 +79,10 @@ export default function ColheitaSolidariaPage() {
     employeeId: '',
     employee2Id: '',
     employee3Id: '',
-    date: new Date().toISOString().split('T')[0],
+    date: (() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})(),
     status: 'agendada',
     notes: '',
     indemnityValue: 1.5,
@@ -111,7 +114,10 @@ export default function ColheitaSolidariaPage() {
       employeeId: '',
       employee2Id: '',
       employee3Id: '',
-      date: new Date().toISOString().split('T')[0],
+      date: (() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})(),
       status: 'agendada',
       notes: '',
       indemnityValue: 1.5,

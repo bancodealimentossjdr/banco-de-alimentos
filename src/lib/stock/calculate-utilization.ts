@@ -1,13 +1,14 @@
 import { prisma } from '@/lib/prisma'
 import { calculateStock } from '@/lib/stock/calculate-stock'
+import { startOfDayBrasilia } from '@/lib/date/day-boundaries'
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
 /* ------------------------------------------------------------------ */
 
 export type UtilizationFilters = {
-  from: Date // já normalizado para 00:00:00.000
-  to: Date // já normalizado para 23:59:59.999
+  from: Date // já normalizado para início do dia em Brasília (UTC−3)
+  to: Date // já normalizado para fim do dia em Brasília (UTC−3)
   donorIds?: string[]
   producerIds?: string[]
   beneficiaryIds?: string[]
@@ -73,10 +74,6 @@ export type UtilizationSeries = {
 /* ------------------------------------------------------------------ */
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-
-// 🇧🇷 Offset fixo de Brasília (UTC−3). O Brasil não usa mais horário
-// de verão desde 2019, então o offset é estável.
-const BRASILIA_OFFSET_MS = 3 * 60 * 60 * 1000
 
 /* ------------------------------------------------------------------ */
 /* Snapshot / Série vazios (defesa)                                    */
@@ -226,7 +223,7 @@ export async function calculateUtilization(
 
     // ---- Visão geral: aproveitamento agregado (DailyApproval) ----
     // DailyApproval.date é @db.Date (meia-noite UTC). O range
-    // [from 00:00 .. to 23:59] cobre o dia inteiro corretamente.
+    // [from .. to] em fronteira Brasília cobre o dia inteiro corretamente.
     const approvalAgg = await prisma.dailyApproval.aggregate({
       where: { date: { gte: from, lte: to } },
       _sum: { approvedQty: true },
@@ -299,6 +296,12 @@ export async function calculateUtilization(
 /*   ≤ 31 dias → 'day'   |   ≤ 92 dias → 'week'   |   > 92 → 'month'    */
 /*                                                                     */
 /* ⚠️ DailyApproval não tem entidade → série só na VISÃO GERAL.        */
+/*                                                                     */
+/* 🇧🇷 FONTE ÚNICA DE FRONTEIRA: as chaves de bucket derivam de         */
+/*    startOfDayBrasilia (day-boundaries.ts). Movimentações (DateTime)  */
+/*    usam bucketKey (com offset); aprovações (@db.Date) usam           */
+/*    bucketKeyDateOnly (sem offset, pois o dia civil já é absoluto).   */
+/*    Ambas resultam na MESMA chave de dia civil → Σ série == snapshot. */
 /* ------------------------------------------------------------------ */
 
 export async function calculateUtilizationSeries(
@@ -367,18 +370,22 @@ export async function calculateUtilizationSeries(
     // ----------------------------------------------------------------
     const buckets = buildBuckets(from, to, granularity)
 
-    // 🇧🇷 Movimentações DateTime → bucket em horário de Brasília
+    // 🇧🇷 Movimentações DateTime → bucket em horário de Brasília.
+    //    bucketKey aplica o offset (startOfDayBrasilia) e gera o dia civil.
     const addLocal = (
       date: Date,
       field: 'donationsKg' | 'harvestKg' | 'distributedKg',
       qty: number,
     ) => {
-      const key = bucketKeyBrasilia(date, granularity)
+      const key = bucketKey(date, granularity)
       const point = buckets.get(key)
       if (point) point[field] = round3(point[field] + qty)
     }
 
-    // 📅 DailyApproval é @db.Date (dia absoluto) → NÃO desloca, usa dia UTC
+    // 📅 DailyApproval é @db.Date: o valor JÁ É o dia civil (meia-noite UTC).
+    //    NÃO aplicar offset Brasília aqui (deslocaria 1 dia pra trás).
+    //    bucketKeyDateOnly lê os componentes UTC direto → mesma chave do
+    //    esqueleto e das movimentações do mesmo dia civil.
     const addApproval = (date: Date, qty: number) => {
       const key = bucketKeyDateOnly(date, granularity)
       const point = buckets.get(key)
@@ -403,7 +410,12 @@ export async function calculateUtilizationSeries(
     // ----------------------------------------------------------------
     const points: UtilizationSeriesPoint[] = Array.from(buckets.values()).map(
       (p) => ({
-        ...p,
+        bucket: p.bucket,
+        label: p.label,
+        donationsKg: p.donationsKg,
+        harvestKg: p.harvestKg,
+        approvedKg: p.approvedKg,
+        distributedKg: p.distributedKg,
         // 🌾 colheita 100% aproveitada → entra no aproveitado total
         approvedTotalKg: round3(p.approvedKg + p.harvestKg),
         // 🗑️ perda só sobre doação bruta
@@ -446,7 +458,7 @@ function nonEmpty(arr?: string[]): string[] | undefined {
 }
 
 /* ------------------------------------------------------------------ */
-/* 🆕 Helpers da série temporal (horário de Brasília UTC−3)            */
+/* 🆕 Helpers da série temporal — FONTE ÚNICA: day-boundaries.ts        */
 /* ------------------------------------------------------------------ */
 
 // Escolhe granularidade automaticamente pelo tamanho do período
@@ -457,65 +469,96 @@ function pickGranularity(from: Date, to: Date): SeriesGranularity {
   return 'month'
 }
 
-// 🇧🇷 Converte um instante para a "data civil" de Brasília, retornando
-// um Date cujos componentes UTC já representam o horário local de BSB.
-// Truque: subtrai o offset e lê os getters UTC.
-function toBrasilia(date: Date): Date {
-  return new Date(date.getTime() - BRASILIA_OFFSET_MS)
+// 🇧🇷 Componentes "civis" de Brasília de uma data DateTime.
+// Reusa a fonte única (startOfDayBrasilia retorna 03:00 UTC = 00:00 BSB),
+// e lemos os getters UTC, que já representam o dia civil de Brasília.
+function brasiliaCivilParts(date: Date): { y: number; m: number; d: number } {
+  const start = startOfDayBrasilia(date) // 03:00 UTC = 00:00 BSB do dia civil
+  return {
+    y: start.getUTCFullYear(),
+    m: start.getUTCMonth(),
+    d: start.getUTCDate(),
+  }
 }
 
-// Início do dia (00:00) de uma data já "em Brasília", como chave
-function startOfDay(d: Date): Date {
-  return new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
-  )
+// Início do dia (chave UTC hora 0) a partir de partes civis (y, m, d).
+// A hora 0 UTC serve só como identificador estável de bucket — o que
+// importa é o YYYY-MM-DD do slice.
+function dayKeyFromParts(y: number, m: number, d: number): Date {
+  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
 }
 
-// Início da semana (segunda-feira)
-function startOfWeek(d: Date): Date {
-  const s = startOfDay(d)
+// Recua para a segunda-feira da semana do dia informado.
+function toMonday(dayStart: Date): Date {
+  const s = new Date(dayStart)
   const dow = s.getUTCDay() // 0=domingo .. 6=sábado
   const diff = dow === 0 ? 6 : dow - 1 // segunda como início
   s.setUTCDate(s.getUTCDate() - diff)
   return s
 }
 
-// Início do mês
-function startOfMonth(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0))
+// Aplica a granularidade sobre partes civis já resolvidas.
+function bucketStartFromParts(
+  y: number,
+  m: number,
+  d: number,
+  g: SeriesGranularity,
+): Date {
+  if (g === 'day') return dayKeyFromParts(y, m, d)
+  if (g === 'week') return toMonday(dayKeyFromParts(y, m, d))
+  return dayKeyFromParts(y, m, 1) // início do mês
 }
 
-// Data "civil" → início do bucket conforme granularidade
-function bucketStartFromCivil(civil: Date, g: SeriesGranularity): Date {
-  if (g === 'day') return startOfDay(civil)
-  if (g === 'week') return startOfWeek(civil)
-  return startOfMonth(civil)
+// 🇧🇷 Chave de bucket para MOVIMENTAÇÕES (DateTime) → aplica offset Brasília.
+function bucketKey(date: Date, g: SeriesGranularity): string {
+  const { y, m, d } = brasiliaCivilParts(date)
+  return bucketStartFromParts(y, m, d, g).toISOString().slice(0, 10)
 }
 
-// 🇧🇷 Chave de bucket para DateTime (movimentações) → horário de Brasília
-function bucketKeyBrasilia(date: Date, g: SeriesGranularity): string {
-  const civil = toBrasilia(date)
-  return bucketStartFromCivil(civil, g).toISOString().slice(0, 10)
-}
-
-// 📅 Chave de bucket para @db.Date (DailyApproval) → dia absoluto, sem deslocar
+// 📅 Chave de bucket para @db.Date (DailyApproval) → usa o dia UTC direto,
+// SEM offset (o @db.Date já representa o dia civil correto).
 function bucketKeyDateOnly(date: Date, g: SeriesGranularity): string {
-  // date já é meia-noite UTC representando "o dia"; usa direto
-  return bucketStartFromCivil(date, g).toISOString().slice(0, 10)
+  const y = date.getUTCFullYear()
+  const m = date.getUTCMonth()
+  const d = date.getUTCDate()
+  return bucketStartFromParts(y, m, d, g).toISOString().slice(0, 10)
+}
+
+// Fim do bucket (último dia incluído) — usado só para o label de intervalo.
+function bucketEnd(start: Date, g: SeriesGranularity): Date {
+  if (g === 'day') return start
+  if (g === 'week') {
+    return new Date(start.getTime() + 6 * MS_PER_DAY)
+  }
+  // mês: último dia = dia 0 do mês seguinte
+  return new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 0, 0, 0, 0),
+  )
 }
 
 // Label amigável pro eixo X (pt-BR)
 function bucketLabel(start: Date, g: SeriesGranularity): string {
-  const dd = String(start.getUTCDate()).padStart(2, '0')
+  const fmtDM = (d: Date) =>
+    `${String(d.getUTCDate()).padStart(2, '0')}/${String(
+      d.getUTCMonth() + 1,
+    ).padStart(2, '0')}`
+
+  if (g === 'day') return fmtDM(start)
+
+  // 🆕 semana vira INTERVALO: "DD/MM – DD/MM"
+  if (g === 'week') {
+    const end = bucketEnd(start, g)
+    return `${fmtDM(start)} – ${fmtDM(end)}`
+  }
+
+  // mês: MM/YYYY
   const mm = String(start.getUTCMonth() + 1).padStart(2, '0')
   const yyyy = start.getUTCFullYear()
-  if (g === 'day') return `${dd}/${mm}`
-  if (g === 'week') return `${dd}/${mm}` // semana representada pelo 1º dia
-  return `${mm}/${yyyy}` // mês
+  return `${mm}/${yyyy}`
 }
 
 // Constrói o Map de buckets do período inteiro, todos zerados.
-// O período é interpretado em horário de Brasília para alinhar com os dados.
+// O período é interpretado em horário de Brasília (fonte única).
 function buildBuckets(
   from: Date,
   to: Date,
@@ -543,9 +586,13 @@ function buildBuckets(
     }
   >()
 
-  // from/to vêm normalizados em hora local do servidor; converte p/ civil BSB
-  let cursor = bucketStartFromCivil(toBrasilia(from), g)
-  const end = bucketStartFromCivil(toBrasilia(to), g)
+  // from/to já vêm em fronteira Brasília (parseYMDtoBrasilia*).
+  // O cursor anda pela base civil de Brasília — mesma âncora dos dados.
+  const fromParts = brasiliaCivilParts(from)
+  const toParts = brasiliaCivilParts(to)
+
+  let cursor = bucketStartFromParts(fromParts.y, fromParts.m, fromParts.d, g)
+  const end = bucketStartFromParts(toParts.y, toParts.m, toParts.d, g)
 
   while (cursor.getTime() <= end.getTime()) {
     const key = cursor.toISOString().slice(0, 10)
