@@ -23,7 +23,6 @@ export async function GET() {
         items: {
           include: { product: { select: { name: true, unit: true } } },
         },
-        // ✅ novo: indica se há comprovante (para exibir botão "Comprovante")
         receipt: { select: { id: true } },
       },
       orderBy: { date: 'desc' },
@@ -54,7 +53,21 @@ export async function GET() {
         employee3: d.employee3
           ? maskFuncionario(d.employee3, role)
           : d.employee3,
-      }))
+      })) as typeof distributionsSeguras
+    }
+
+    // 3) 🆕 Regra #9 — Camada de serialização (defesa em profundidade)
+    //    O VISUALIZADOR vê a distribuição "crua", SEM a camada de finalização.
+    //    Omite status / legacy / receipt da resposta (não confiar só na UI).
+    //    ⚠️ Operador/Admin MANTÊM esses campos (precisam para finalizar).
+    if (role === 'visualizador') {
+      distributionsSeguras = distributionsSeguras.map((d) => {
+        const { status, legacy, receipt, ...rest } = d
+        void status
+        void legacy
+        void receipt
+        return rest
+      }) as typeof distributionsSeguras
     }
 
     return NextResponse.json(distributionsSeguras)
@@ -114,7 +127,6 @@ export async function POST(request: Request) {
         items: {
           include: { product: { select: { name: true, unit: true } } },
         },
-        // ✅ novo: inclui o comprovante se existir
         receipt: { select: { id: true } },
       },
     })
