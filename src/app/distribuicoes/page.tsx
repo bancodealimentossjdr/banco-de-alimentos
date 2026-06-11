@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
@@ -21,6 +22,9 @@ interface Distribution {
   id: string
   date: string
   notes: string | null
+  status: 'PENDENTE' | 'ENTREGUE' // 🆕
+  legacy: boolean // 🆕
+  receipt: { id: string } | null // 🆕
   beneficiary: { id: string; name: string; type: string }
   employee: { id: string; name: string } | null
   employee2: { id: string; name: string } | null
@@ -491,6 +495,20 @@ export default function DistribuicoesPage() {
                           📦 {totalBoxes} cx
                         </span>
                       )}
+                      {/* 🆕 Badge de status */}
+                      {dist.legacy ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                          🗄️ Legado
+                        </span>
+                      ) : dist.status === 'ENTREGUE' ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                          ✅ Entregue
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                          ⏳ Pendente
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {formatDate(dist.date)}
@@ -509,10 +527,31 @@ export default function DistribuicoesPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
                     <span className="text-sm font-medium text-red-600">
                       {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
                     </span>
+
+                    {/* 🆕 Finalizar — só se PENDENTE, não-legado e pode editar */}
+                    {podeEditar && !dist.legacy && dist.status === 'PENDENTE' && (
+                      <Link
+                        href={`/distribuicoes/${dist.id}/finalizar`}
+                        className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-1 rounded transition"
+                      >
+                        ✅ Finalizar
+                      </Link>
+                    )}
+
+                    {/* 🆕 Comprovante — só se ENTREGUE e existe receipt */}
+                    {dist.status === 'ENTREGUE' && dist.receipt && (
+                      <Link
+                        href={`/distribuicoes/${dist.id}/comprovante`}
+                        className="inline-flex items-center gap-1 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-medium px-3 py-1 rounded transition"
+                      >
+                        📄 Comprovante
+                      </Link>
+                    )}
+
                     {canEditThis && (
                       <button
                         onClick={() => startEdit(dist)}

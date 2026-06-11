@@ -23,6 +23,8 @@ export async function GET() {
         items: {
           include: { product: { select: { name: true, unit: true } } },
         },
+        // ✅ novo: indica se há comprovante (para exibir botão "Comprovante")
+        receipt: { select: { id: true } },
       },
       orderBy: { date: 'desc' },
     })
@@ -112,6 +114,8 @@ export async function POST(request: Request) {
         items: {
           include: { product: { select: { name: true, unit: true } } },
         },
+        // ✅ novo: inclui o comprovante se existir
+        receipt: { select: { id: true } },
       },
     })
 

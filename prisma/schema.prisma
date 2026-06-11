@@ -31,6 +31,9 @@ model User {
 
   // 🆕 ONDA 16.2 — Marcos de Estoque
   stockMarkersCreated StockMarker[] @relation("StockMarkerCreatedBy")
+
+  // 🆕 ONDA 16.6a — Comprovantes de entrega finalizados (auditoria)
+  receiptsFinalized DeliveryReceipt[] @relation("ReceiptFinalizedBy")
 }
 
 // ==========================================
@@ -200,6 +203,10 @@ model Distribution {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  // 🆕 ONDA 16.6a — Status + flag de legado
+  status        DistributionStatus @default(PENDENTE)
+  legacy        Boolean            @default(false)
+
   employeeId   String?
   employee     Employee? @relation("DistributionEmployee1", fields: [employeeId], references: [id])
 
@@ -211,6 +218,11 @@ model Distribution {
 
   beneficiary Beneficiary        @relation(fields: [beneficiaryId], references: [id])
   items       DistributionItem[]
+
+  // 🆕 ONDA 16.6a — Comprovante de entrega (1:1)
+  receipt     DeliveryReceipt?
+
+  @@index([status])
 }
 
 model DistributionItem {
@@ -303,20 +315,6 @@ model DailyApproval {
 // ==========================================
 // 🆕 ONDA 16.2 — MARCOS DE ESTOQUE
 // ==========================================
-// Marco = fotografia oficial do estoque físico em uma data.
-// Ponto de calibração: o estoque calculado parte do último
-// marco e soma/subtrai apenas movimentações posteriores.
-//
-// Tipos:
-//   ZERO       — marco inicial do sistema (único, validado na API)
-//   ADJUSTMENT — recalibração periódica (contagem física)
-//
-// Regras:
-//   - 1 marco por dia (unique em date)
-//   - Apenas 1 marco ZERO em todo o sistema (validado na API)
-//   - Apenas admin pode criar marcos via UI
-//   - Marcos retroativos e exclusão = ação de DEV via SQL direto
-// ==========================================
 enum StockMarkerType {
   ZERO
   ADJUSTMENT
@@ -336,4 +334,44 @@ model StockMarker {
   @@index([date])
   @@index([type])
   @@map("stock_markers")
+}
+
+// ==========================================
+// 🆕 ONDA 16.6a — STATUS DE DISTRIBUIÇÃO
+// PENDENTE  — criada, aguardando finalização (entrega + assinatura)
+// ENTREGUE  — finalizada com comprovante (ou legado migrado)
+// (CANCELADA fora de escopo nesta onda — decisão 09/06/2026)
+// ==========================================
+enum DistributionStatus {
+  PENDENTE
+  ENTREGUE
+}
+
+// ==========================================
+// 🆕 ONDA 16.6a — COMPROVANTE DE ENTREGA
+// Comprovante = assinatura digital do recebedor.
+// Relação 1:1 com Distribution.
+//
+// Regras:
+//   - Criado ao finalizar a distribuição (status → ENTREGUE)
+//   - signatureSvg: assinatura vetorizada, SEM storage externo
+//   - finalizedBy: operador/admin que finalizou (auditoria)
+//   - legacy → não gera comprovante (só muda status na Distribution)
+//   - Edição: apenas Admin, trava temporal do mesmo dia (validada na API)
+//   - VISIBILIDADE: oculto para role "visualizador" (filtrado na serialização)
+// ==========================================
+model DeliveryReceipt {
+  id             String       @id @default(cuid())
+  distributionId String       @unique
+  distribution   Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+
+  recipientName  String
+  signatureData  String       @db.Text // PNG base64 (data URL) gerado pelo react-signature-canvas
+  notes          String?      @db.Text
+
+  finalizedById  String
+  finalizedBy    User         @relation("ReceiptFinalizedBy", fields: [finalizedById], references: [id]) // 🔧 nome da relação adicionado
+  finalizedAt    DateTime     @default(now())
+
+  @@map("delivery_receipts")
 }
