@@ -19,6 +19,7 @@ import {
   Sprout,
   Shield,
   BarChart3,
+  PartyPopper,
   X,
 } from 'lucide-react'
 import { BRANDING } from '@/lib/branding'
@@ -41,6 +42,7 @@ const menuItems: MenuItem[] = [
   { label: 'Distribuições', href: '/distribuicoes', icon: Truck },
   { label: 'Colheita Solidária', href: '/colheita-solidaria', icon: Sprout },
   { label: 'Estoque', href: '/estoque', icon: Warehouse },
+  { label: 'Eventos', href: '/eventos', icon: PartyPopper },
   { label: 'Indicadores', href: '/indicadores', icon: BarChart3 },
   { label: 'Usuários', href: '/usuarios', icon: Shield, adminOnly: true },
 ]
