@@ -34,6 +34,12 @@ model User {
 
   // 🆕 ONDA 16.6a — Comprovantes de entrega finalizados (auditoria)
   receiptsFinalized DeliveryReceipt[] @relation("ReceiptFinalizedBy")
+
+eventosCriados        Evento[]         @relation("EventosCriados")
+  eventosEncerrados     Evento[]         @relation("EventosEncerrados")
+  operacoesEmEventos    EventoOperador[] @relation("OperacoesEmEventos")
+  recebimentosRegistrados Recebimento[]  @relation("RecebimentosRegistrados")
+
 }
 
 // ==========================================
@@ -374,4 +380,142 @@ model DeliveryReceipt {
   finalizedAt    DateTime     @default(now())
 
   @@map("delivery_receipts")
+}
+// ============================================
+// ONDA 17 — SISTEMA DE EVENTOS DE ARRECADAÇÃO
+// (17.3 — alimentos por evento + refugo no alimento)
+// ============================================
+
+enum EventoStatus {
+  RASCUNHO
+  ATIVO
+  ENCERRADO
+}
+
+enum MotivoRefugo {
+  VALIDADE_VENCIDA
+  EMBALAGEM_VIOLADA
+  AVARIA
+  CONTAMINACAO
+  OUTRO
+}
+
+model Evento {
+  id             String           @id @default(cuid())
+  nome           String
+  descricao      String?
+  dataInicio     DateTime
+  dataFim        DateTime?
+  status         EventoStatus     @default(RASCUNHO)
+  integraEstoque Boolean          @default(true)
+
+  // Relations
+  locais         LocalColeta[]
+  operadores     EventoOperador[]
+  recebimentos   Recebimento[]
+  alimentos      EventoAlimento[] // 🆕 17.3
+
+  // Auditoria mínima (Onda 17)
+  criadoPorId    String
+  criadoPor      User             @relation("EventosCriados", fields: [criadoPorId], references: [id])
+  encerradoPorId String?
+  encerradoPor   User?            @relation("EventosEncerrados", fields: [encerradoPorId], references: [id])
+  encerradoEm    DateTime?
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status])
+  @@index([criadoPorId])
+}
+
+model LocalColeta {
+  id           String        @id @default(cuid())
+  nome         String
+  endereco     String?
+
+  eventoId     String
+  evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  recebimentos Recebimento[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([eventoId])
+}
+
+// 🆕 17.3 — ALIMENTO DO EVENTO
+// Lista dinâmica que o admin digita na criação ("ARROZ", "FEIJÃO"...).
+// Refugo vive aqui: preenchido no pós-evento, por alimento.
+model EventoAlimento {
+  id           String        @id @default(cuid())
+
+  eventoId     String
+  evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  nome         String        // "ARROZ", "FEIJÃO", "ÓLEO"...
+  ordem        Int           @default(0) // ordem fixa na tela de campo
+
+  // Refugo (pós-evento, por alimento) — migrado do Recebimento
+  refugoKg     Float         @default(0)
+  motivoRefugo MotivoRefugo? // opcional — justificativa
+  obsRefugo    String?
+
+  recebimentos Recebimento[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([eventoId, nome]) // não repetir alimento no mesmo evento
+  @@index([eventoId])
+}
+
+model EventoOperador {
+  id        String   @id @default(cuid())
+
+  eventoId  String
+  evento    Evento   @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User     @relation("OperacoesEmEventos", fields: [userId], references: [id])
+
+  ativo     Boolean  @default(true) // false após encerramento do evento
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([eventoId, userId])
+  @@index([userId, ativo])
+}
+
+model Recebimento {
+  id           String        @id @default(cuid())
+
+  eventoId     String
+  evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  localId      String
+  local        LocalColeta   @relation(fields: [localId], references: [id])
+
+  // 🆕 17.3 — alimento agora é referência (não mais texto livre)
+  alimentoId   String
+  alimento     EventoAlimento @relation(fields: [alimentoId], references: [id])
+
+  quantidade   Float          // cada +1 = +1kg (troca por ingresso)
+  unidade      String        @default("kg")
+
+  // ❌ REMOVIDO: descricao, qtdRefugo, motivoRefugo, obsRefugo
+  //    (refugo migrou para EventoAlimento)
+
+  operadorId   String
+  operador     User          @relation("RecebimentosRegistrados", fields: [operadorId], references: [id])
+
+  createdAt    DateTime      @default(now())
+
+  @@index([eventoId])
+  @@index([localId])
+  @@index([alimentoId])
+  @@index([operadorId])
+  @@index([eventoId, createdAt]) // p/ indicador diário
 }
