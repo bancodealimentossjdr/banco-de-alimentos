@@ -5,6 +5,7 @@ import {
   canEditRecord,
   canView,
   canDeleteRecord,
+  canRegisterRecebimento,
   type Module,
 } from './permissions'
 import type { UserRole } from '@/types/next-auth'
@@ -20,11 +21,6 @@ export type AuthSession = {
 
 /**
  * Garante que há uma sessão válida. Retorna a sessão ou uma Response 401.
- *
- * Uso:
- *   const auth = await requireAuth()
- *   if (auth instanceof NextResponse) return auth
- *   // auth.user.id, auth.user.role disponíveis
  */
 export async function requireAuth(): Promise<AuthSession | NextResponse> {
   const session = await auth()
@@ -96,10 +92,6 @@ export async function requireEditRecord(
 
 /**
  * 🚫 Garante que o usuário pode EXCLUIR registros do módulo.
- *
- * Em módulos time-locked (doações, distribuições, colheita), apenas admin
- * pode excluir — operador é sempre bloqueado, mesmo no mesmo dia.
- * Em módulos comuns, segue a regra de canEdit.
  */
 export async function requireDeleteRecord(
   module: Module,
@@ -124,6 +116,27 @@ export async function requireAdmin(): Promise<AuthSession | NextResponse> {
   if (result.user.role !== 'admin') {
     return NextResponse.json(
       { error: 'Apenas administradores podem realizar esta ação' },
+      { status: 403 },
+    )
+  }
+  return result
+}
+
+/**
+ * 🆕 ONDA 17.3 — Garante que o usuário pode REGISTRAR recebimentos
+ * em eventos (admin OU operador — Opção A).
+ *
+ * A trava de status ATIVO do evento é feita na rota de recebimento,
+ * após buscar o evento no banco.
+ */
+export async function requireRegisterRecebimento(): Promise<
+  AuthSession | NextResponse
+> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (!canRegisterRecebimento(result.user.role)) {
+    return NextResponse.json(
+      { error: 'Você não tem permissão para registrar recebimentos' },
       { status: 403 },
     )
   }

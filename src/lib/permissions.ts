@@ -17,6 +17,7 @@ export type Module =
   | 'estoque'
   | 'usuarios'
   | 'indicadores'
+  | 'eventos' // 🆕 ONDA 17 — Eventos de arrecadação
 
 /**
  * Re-exporta UserRole como Role pra manter compatibilidade com o hook.
@@ -41,30 +42,41 @@ const VIEW_PERMISSIONS: Record<UserRole, Module[]> = {
     'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
     'estoque', 'usuarios', 'indicadores',
+    'eventos', // 🆕 ONDA 17
   ],
   operador: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
     'estoque', 'indicadores',
+    'eventos', // 🆕 ONDA 17 — vê a lista; registro de recebimentos na 17.3
   ],
   visualizador: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios',
     'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque',
     'indicadores',
+    'eventos', // 🆕 ONDA 17 — apenas a LISTA (não acessa o detalhe)
   ],
 }
 
 /**
  * Quais módulos cada role pode EDITAR (criar/atualizar/excluir).
  * Para operador em módulos time-locked, ainda há a trava de data.
+ *
+ * ⚠️ ONDA 17.3 — 'eventos' aqui significa GERENCIAR o evento
+ * (criar, editar, ativar, encerrar, locais, catálogo, operadores).
+ * Isso continua SENDO SÓ ADMIN. O REGISTRO de recebimentos por
+ * operador é uma permissão separada: canRegisterRecebimento().
  */
 const EDIT_PERMISSIONS: Record<UserRole, Module[]> = {
   admin: [
     'produtos', 'doadores', 'beneficiarios', 'funcionarios', 'produtores',
     'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque', 'usuarios',
+    'eventos', // 🆕 ONDA 17 — só admin GERENCIA eventos
   ],
   operador: [
     'doacoes', 'distribuicoes', 'colheita-solidaria',
+    // 'eventos' NÃO entra aqui: operador NÃO gerencia eventos.
+    // O registro de recebimentos (Opção A) usa canRegisterRecebimento().
   ],
   visualizador: [],
 }
@@ -78,23 +90,32 @@ export function canView(role: UserRole, module: Module): boolean {
 
 /**
  * Verifica se o role pode EDITAR (criar/atualizar/excluir) o módulo.
- * Para operador em módulos time-locked, use também canEditRecord().
+ * Para módulos time-locked, use também canEditRecord().
  */
 export function canEdit(role: UserRole, module: Module): boolean {
   return EDIT_PERMISSIONS[role].includes(module)
 }
 
 /**
+ * 🆕 ONDA 17.3 — Registro de recebimentos em eventos (Opção A).
+ *
+ * Diferente de canEdit('eventos') (gestão do evento = só admin),
+ * o REGISTRO de alimentos é liberado a qualquer admin ou operador
+ * em evento ATIVO. O vínculo EventoOperador é apenas organizacional
+ * (rótulo "quem está associado a este evento"), NÃO um gate de registro.
+ *
+ * A trava de status (evento precisa estar ATIVO) é verificada na
+ * própria rota de recebimento, pois depende do estado no banco.
+ *
+ * Quem pode CADASTRAR alimento no catálogo / criar local novo no
+ * evento continua sendo SÓ admin (via canEdit('eventos')).
+ */
+export function canRegisterRecebimento(role: UserRole): boolean {
+  return role === 'admin' || role === 'operador'
+}
+
+/**
  * Extrai a string YYYY-MM-DD de uma data, lidando com fuso horário.
- *
- * - String ISO do Prisma ("2026-04-26T00:00:00.000Z") → "2026-04-26"
- *   (pega os 10 primeiros chars, que são a data em UTC — exatamente o
- *   dia que o usuário escolheu no <input type="date">).
- * - Date local (ex: new Date() = "agora") → YYYY-MM-DD no fuso local.
- *
- * Isso garante comparação correta entre a data do registro (salva como
- * UTC midnight pelo Prisma) e "hoje" (Date local), sem o bug clássico
- * de fuso "voltar um dia" no Brasil (UTC-3).
  */
 function getDateString(value: Date | string): string {
   if (typeof value === 'string') {
@@ -117,12 +138,6 @@ export function isSameDay(a: Date | string, b: Date | string): boolean {
 /**
  * Verifica se um operador pode editar/excluir um registro específico
  * em módulos com trava temporal (doações, distribuições, colheita).
- *
- * Regra: só pode modificar se a DATA DO REGISTRO (campo `date`) for HOJE.
- * Mesmo se for retroativo, se a `date` não for hoje, NÃO pode editar.
- * Admin passa sempre. Visualizador nunca passa.
- *
- * @param recordDate - O campo `date` do registro (data da doação/distribuição/colheita)
  */
 export function canEditRecord(
   role: UserRole,
@@ -159,26 +174,24 @@ export function getVisibleModules(role: UserRole): Module[] {
 /**
  * Mapeia pathname → Module.
  * Usado pelo middleware (auth.config.ts) pra decidir acesso por URL.
- *
- * Retorna null para rotas que não são módulos controlados
- * (ex: /, /login, /api/auth/*, /register) → acesso liberado por padrão.
  */
 export function getModuleFromPath(pathname: string): Module | null {
   if (pathname === '/' || pathname === '/dashboard') return 'dashboard'
 
   const routeMap: Array<[string, Module]> = [
-  ['/produtos', 'produtos'],
-  ['/doadores', 'doadores'],
-  ['/beneficiarios', 'beneficiarios'],
-  ['/funcionarios', 'funcionarios'],
-  ['/produtores', 'produtores'],
-  ['/doacoes', 'doacoes'],
-  ['/distribuicoes', 'distribuicoes'],
-  ['/colheita-solidaria', 'colheita-solidaria'],
-  ['/estoque', 'estoque'],
-  ['/usuarios', 'usuarios'],
-  ['/indicadores', 'indicadores'],
-]
+    ['/produtos', 'produtos'],
+    ['/doadores', 'doadores'],
+    ['/beneficiarios', 'beneficiarios'],
+    ['/funcionarios', 'funcionarios'],
+    ['/produtores', 'produtores'],
+    ['/doacoes', 'doacoes'],
+    ['/distribuicoes', 'distribuicoes'],
+    ['/colheita-solidaria', 'colheita-solidaria'],
+    ['/estoque', 'estoque'],
+    ['/usuarios', 'usuarios'],
+    ['/indicadores', 'indicadores'],
+    ['/eventos', 'eventos'], // 🆕 ONDA 17
+  ]
 
   for (const [prefix, module] of routeMap) {
     if (pathname.startsWith(prefix)) return module
@@ -191,9 +204,10 @@ export function getModuleFromPath(pathname: string): Module | null {
  * Verifica se um role pode ACESSAR uma rota (pathname).
  * Usado pelo middleware do NextAuth.
  *
- * - Rotas não mapeadas (ex: /register, assets) → liberadas.
- * - Rotas mapeadas → checa via canView.
- * - Sem role (não logado) → bloqueia.
+ * ⚠️ Nota: o middleware libera /eventos e /eventos/[id] igual (ambos → módulo
+ * 'eventos'). O bloqueio do DETALHE para visualizador é feito DENTRO da
+ * página /eventos/[id]/page.tsx (defesa em profundidade), pois o middleware
+ * não distingue lista de detalhe.
  */
 export function canAccessRoute(
   role: UserRole | undefined,
