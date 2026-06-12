@@ -83,12 +83,15 @@ export const metadata: Metadata = {
   },
 }
 
+// 🔧 Onda 16.7 — Hotfix anti-zoom (mobile/PWA)
+// Antes: maximumScale: 5 + userScalable: true → permitia pinch-zoom acidental.
+// Agora: trava em 1 + userScalable: false → app operacional estável no campo.
 export const viewport: Viewport = {
   themeColor: '#16a34a',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 5,
-  userScalable: true,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: 'cover',
 }
 
