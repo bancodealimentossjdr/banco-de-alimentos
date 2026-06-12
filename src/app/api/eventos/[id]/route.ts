@@ -1,388 +1,176 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { requireView, requireEdit, requireDeleteRecord } from '@/lib/auth-helpers'
+import { canEdit } from '@/lib/permissions'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
-// ============================================
-// GET - Buscar evento por ID (com locais + auditoria)
-// ============================================
+// jspdf precisa de runtime Node (não Edge)
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+function maskEmail(email: string | null): string {
+  if (!email) return '—'
+  const [user, domain] = email.split('@')
+  if (!domain) return '***'
+  return `${user.slice(0, 2)}${'*'.repeat(Math.max(user.length - 2, 1))}@${domain}`
+}
+
 export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireView('eventos')
-  if (authResult instanceof NextResponse) return authResult
+  const { id } = await params
 
-  try {
-    const { id } = await params
+  const session = await auth()
+  const role = session?.user?.role
+  if (!role) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-    const evento = await prisma.evento.findUnique({
-      where: { id },
-      include: {
-        locais: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            _count: { select: { recebimentos: true } },
-          },
-        },
-        criadoPor: { select: { id: true, name: true } },
-        encerradoPor: { select: { id: true, name: true } },
-        _count: {
-          select: { recebimentos: true, operadores: true, locais: true },
-        },
+  const isAdmin = canEdit(role, 'eventos')
+
+  // 🔐 Backend NÃO confia no frontend: só admin pode mask=false.
+  const querMask = req.nextUrl.searchParams.get('mask')
+  const semCensura = isAdmin && querMask === 'false'
+
+  const evento = await prisma.evento.findUnique({
+    where: { id },
+    include: {
+      locais: {
+        orderBy: { createdAt: 'asc' },
+        include: { _count: { select: { recebimentos: true } } },
       },
-    })
-
-    if (!evento) {
-      return NextResponse.json(
-        { error: 'Evento não encontrado' },
-        { status: 404 }
-      )
-    }
-
-    return NextResponse.json(evento)
-  } catch (error) {
-    console.error('Erro ao buscar evento:', error)
-    return NextResponse.json(
-      { error: 'Erro ao buscar evento' },
-      { status: 500 }
-    )
-  }
-}
-
-// ============================================
-// PUT - Atualizar evento (APENAS ADMIN)
-// Edita dados básicos + reconcilia locais.
-// Não deleta locais que já têm recebimentos.
-// ============================================
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  // 🔐 Auth + permissão de edição (só admin tem 'eventos' em EDIT_PERMISSIONS)
-  const authResult = await requireEdit('eventos')
-  if (authResult instanceof NextResponse) return authResult
-
-  try {
-    const { id } = await params
-
-    // 🔒 Confirma existência
-    const existing = await prisma.evento.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    })
-
-    if (!existing) {
-      return NextResponse.json(
-        { error: 'Evento não encontrado' },
-        { status: 404 }
-      )
-    }
-
-    // 🚫 Evento encerrado não pode ser editado
-    if (existing.status === 'ENCERRADO') {
-      return NextResponse.json(
-        { error: 'Eventos encerrados não podem ser editados' },
-        { status: 403 }
-      )
-    }
-
-    const body = await request.json()
-    const {
-      nome,
-      descricao,
-      dataInicio,
-      dataFim,
-      integraEstoque,
-      locais,
-    }: {
-      nome?: string
-      descricao?: string | null
-      dataInicio?: string
-      dataFim?: string | null
-      integraEstoque?: boolean
-      locais?: Array<{ id?: string; nome: string; endereco?: string | null }>
-    } = body
-
-    // Validações
-    if (!nome || !nome.trim()) {
-      return NextResponse.json(
-        { error: 'Nome do evento é obrigatório' },
-        { status: 400 }
-      )
-    }
-
-    if (!dataInicio) {
-      return NextResponse.json(
-        { error: 'Data de início é obrigatória' },
-        { status: 400 }
-      )
-    }
-
-    // 🧮 Reconciliação de locais (se enviados)
-    if (locais !== undefined) {
-      // Locais válidos vindos do form
-      const validLocais = locais.filter((l) => l.nome && l.nome.trim())
-
-      // Locais atuais no banco (com contagem de recebimentos)
-      const locaisAtuais = await prisma.localColeta.findMany({
-        where: { eventoId: id },
-        select: {
-          id: true,
-          _count: { select: { recebimentos: true } },
-        },
-      })
-
-      const idsEnviados = new Set(
-        validLocais.filter((l) => l.id).map((l) => l.id as string)
-      )
-
-      // 🔒 Locais a remover: estão no banco mas NÃO vieram no form
-      const aRemover = locaisAtuais.filter((l) => !idsEnviados.has(l.id))
-
-      // ⚠️ Bloqueia remoção de local que já tem recebimentos
-      const comRecebimentos = aRemover.filter((l) => l._count.recebimentos > 0)
-      if (comRecebimentos.length > 0) {
-        return NextResponse.json(
-          {
-            error:
-              'Não é possível remover locais que já possuem recebimentos registrados. Eles precisam ser mantidos para preservar o histórico.',
-          },
-          { status: 400 }
-        )
-      }
-
-      // Transação: atualiza evento + reconcilia locais
-      await prisma.$transaction([
-        // 1) Atualiza dados do evento
-        prisma.evento.update({
-          where: { id },
-          data: {
-            nome: nome.trim(),
-            descricao: descricao?.trim() || null,
-            dataInicio: new Date(dataInicio),
-            dataFim: dataFim ? new Date(dataFim) : null,
-            ...(integraEstoque !== undefined && { integraEstoque }),
-          },
-        }),
-        // 2) Remove locais sem recebimentos que saíram do form
-        prisma.localColeta.deleteMany({
-          where: { id: { in: aRemover.map((l) => l.id) } },
-        }),
-        // 3) Atualiza locais existentes (que vieram com id)
-        ...validLocais
-          .filter((l) => l.id)
-          .map((l) =>
-            prisma.localColeta.update({
-              where: { id: l.id },
-              data: {
-                nome: l.nome.trim(),
-                endereco: l.endereco?.trim() || null,
-              },
-            })
-          ),
-        // 4) Cria locais novos (sem id)
-        ...validLocais
-          .filter((l) => !l.id)
-          .map((l) =>
-            prisma.localColeta.create({
-              data: {
-                eventoId: id,
-                nome: l.nome.trim(),
-                endereco: l.endereco?.trim() || null,
-              },
-            })
-          ),
-      ])
-    } else {
-      // Sem locais no payload → atualiza só os dados do evento
-      await prisma.evento.update({
-        where: { id },
-        data: {
-          nome: nome.trim(),
-          descricao: descricao?.trim() || null,
-          dataInicio: new Date(dataInicio),
-          dataFim: dataFim ? new Date(dataFim) : null,
-          ...(integraEstoque !== undefined && { integraEstoque }),
-        },
-      })
-    }
-
-    // Retorna o evento atualizado completo
-    const evento = await prisma.evento.findUnique({
-      where: { id },
-      include: {
-        locais: { orderBy: { createdAt: 'asc' } },
-        criadoPor: { select: { id: true, name: true } },
-        encerradoPor: { select: { id: true, name: true } },
-        _count: {
-          select: { recebimentos: true, operadores: true, locais: true },
-        },
+      criadoPor: { select: { name: true } },
+      // ✅ Sempre inclui o user (3 campos, leve). A exibição é
+      //    controlada por isAdmin na montagem do PDF, não na query.
+      operadores: {
+        include: { user: { select: { name: true, email: true, role: true } } },
       },
-    })
-
-    return NextResponse.json(evento)
-  } catch (error) {
-    console.error('Erro ao atualizar evento:', error)
-    return NextResponse.json(
-      { error: 'Erro ao atualizar evento' },
-      { status: 500 }
-    )
-  }
-}
-
-// ============================================
-// PATCH - Transição de status do evento (APENAS ADMIN)
-// Ações: { action: 'ativar' } | { action: 'encerrar' }
-//   ativar:   RASCUNHO  → ATIVO
-//   encerrar: ATIVO     → ENCERRADO (+ desativa operadores)
-// ============================================
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const authResult = await requireEdit('eventos')
-  if (authResult instanceof NextResponse) return authResult
-
-  try {
-    const { id } = await params
-
-    const existing = await prisma.evento.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    })
-
-    if (!existing) {
-      return NextResponse.json(
-        { error: 'Evento não encontrado' },
-        { status: 404 }
-      )
-    }
-
-    const body = await request.json()
-    const { action }: { action?: 'ativar' | 'encerrar' } = body
-
-    // ▶️ ATIVAR: RASCUNHO → ATIVO
-    if (action === 'ativar') {
-      if (existing.status !== 'RASCUNHO') {
-        return NextResponse.json(
-          { error: 'Apenas eventos em rascunho podem ser ativados' },
-          { status: 400 }
-        )
-      }
-
-      // 🔒 Precisa ter pelo menos 1 local pra ativar
-      const totalLocais = await prisma.localColeta.count({
-        where: { eventoId: id },
-      })
-      if (totalLocais === 0) {
-        return NextResponse.json(
-          { error: 'Adicione pelo menos um local de coleta antes de ativar o evento' },
-          { status: 400 }
-        )
-      }
-
-      const evento = await prisma.evento.update({
-        where: { id },
-        data: { status: 'ATIVO' },
-      })
-      return NextResponse.json(evento)
-    }
-
-    // ⏹️ ENCERRAR: ATIVO → ENCERRADO (+ desativa operadores)
-    if (action === 'encerrar') {
-      if (existing.status !== 'ATIVO') {
-        return NextResponse.json(
-          { error: 'Apenas eventos ativos podem ser encerrados' },
-          { status: 400 }
-        )
-      }
-
-      // ✅ requireEdit já garantiu que é admin (eventos só tem admin em EDIT)
-      const adminId = authResult.user.id
-
-      const [evento] = await prisma.$transaction([
-        // 1) Encerra o evento (snapshot via encerradoEm + auditoria)
-        prisma.evento.update({
-          where: { id },
-          data: {
-            status: 'ENCERRADO',
-            encerradoPorId: adminId,
-            encerradoEm: new Date(),
-          },
-        }),
-        // 2) Desativa todos os operadores do evento (voltam a visualizador)
-        prisma.eventoOperador.updateMany({
-          where: { eventoId: id, ativo: true },
-          data: { ativo: false },
-        }),
-      ])
-
-      return NextResponse.json(evento)
-    }
-
-    return NextResponse.json(
-      { error: 'Ação inválida. Use "ativar" ou "encerrar".' },
-      { status: 400 }
-    )
-  } catch (error) {
-    console.error('Erro ao alterar status do evento:', error)
-    return NextResponse.json(
-      { error: 'Erro ao alterar status do evento' },
-      { status: 500 }
-    )
-  }
-}
-
-// ============================================
-// DELETE - Excluir evento (APENAS ADMIN)
-// Bloqueia se houver recebimentos (preserva histórico).
-// ============================================
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  // 🚫 Apenas admin pode excluir
-  const authResult = await requireDeleteRecord('eventos')
-  if (authResult instanceof NextResponse) return authResult
-
-  try {
-    const { id } = await params
-
-    const existing = await prisma.evento.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        _count: { select: { recebimentos: true } },
+      recebimentos: {
+        select: { descricao: true, quantidade: true, qtdRefugo: true, localId: true },
       },
-    })
+    },
+  })
 
-    if (!existing) {
-      return NextResponse.json(
-        { error: 'Evento não encontrado' },
-        { status: 404 }
-      )
-    }
+  if (!evento) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-    // ⚠️ Não permite excluir evento com recebimentos (preserva histórico)
-    if (existing._count.recebimentos > 0) {
-      return NextResponse.json(
-        {
-          error:
-            'Não é possível excluir um evento que já possui recebimentos registrados. Considere encerrá-lo.',
-        },
-        { status: 400 }
-      )
-    }
-
-    // onDelete: Cascade remove locais e operadores automaticamente
-    await prisma.evento.delete({ where: { id } })
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error('Erro ao excluir evento:', error)
-    return NextResponse.json(
-      { error: 'Erro ao excluir evento' },
-      { status: 500 }
-    )
+  // ─── Agregações ───
+  const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
+  const porLocal = new Map<string, number>()
+  let totalKg = 0
+  let refugoKg = 0
+  for (const r of evento.recebimentos) {
+    totalKg += r.quantidade
+    refugoKg += r.qtdRefugo ?? 0
+    const ln = localNome.get(r.localId) ?? '—'
+    porLocal.set(ln, (porLocal.get(ln) ?? 0) + r.quantidade)
   }
+  const round = (n: number) => Math.round(n * 100) / 100
+  const fmtKg = (n: number) =>
+    `${round(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
+
+  // ─── Monta o PDF (jsPDF) ───
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  const verde: [number, number, number] = [34, 140, 82]
+  const pageHeight = doc.internal.pageSize.getHeight()
+  let y = 48
+
+  // Cabeçalho
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(18)
+  doc.setTextColor(...verde)
+  doc.text('Relatório do Evento de Arrecadação', 40, y)
+  y += 26
+
+  doc.setFontSize(14)
+  doc.setTextColor(20, 20, 20)
+  doc.text(evento.nome, 40, y)
+  y += 22
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10)
+  doc.setTextColor(90, 90, 90)
+  doc.text(`Status: ${evento.status}`, 40, y)
+  y += 14
+  if (evento.criadoPor) {
+    doc.text(`Criado por: ${evento.criadoPor.name}`, 40, y)
+    y += 14
+  }
+  y += 8
+
+  // Resumo
+  autoTable(doc, {
+    startY: y,
+    head: [['Indicador', 'Valor']],
+    body: [
+      ['Total recebido', fmtKg(totalKg)],
+      ['Refugo', fmtKg(refugoKg)],
+      ['Líquido (sem refugo)', fmtKg(totalKg - refugoKg)],
+      ['Recebimentos', String(evento.recebimentos.length)],
+      ['Locais', String(evento.locais.length)],
+    ],
+    theme: 'striped',
+    headStyles: { fillColor: verde },
+    styles: { fontSize: 10 },
+    margin: { left: 40, right: 40 },
+  })
+  // @ts-expect-error lastAutoTable é injetado pelo plugin
+  y = doc.lastAutoTable.finalY + 24
+
+  // Quantidade por local
+  const locaisBody = [...porLocal.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([nome, kg]) => [nome, fmtKg(kg)])
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Local de coleta', 'Recebido']],
+    body: locaisBody.length > 0 ? locaisBody : [['— sem recebimentos —', '']],
+    theme: 'grid',
+    headStyles: { fillColor: verde },
+    styles: { fontSize: 10 },
+    margin: { left: 40, right: 40 },
+  })
+  // @ts-expect-error lastAutoTable é injetado pelo plugin
+  y = doc.lastAutoTable.finalY + 24
+
+  // 🎭 Operadores: só no PDF do admin; mascarado salvo "sem censura"
+  if (isAdmin && evento.operadores) {
+    const opBody = evento.operadores.map((op) => [
+      op.user.name ?? '—',
+      semCensura ? (op.user.email ?? '—') : maskEmail(op.user.email),
+      op.user.role,
+    ])
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Operador', 'E-mail', 'Perfil']],
+      body: opBody.length > 0 ? opBody : [['— nenhum —', '', '']],
+      theme: 'striped',
+      headStyles: { fillColor: verde },
+      styles: { fontSize: 9 },
+      margin: { left: 40, right: 40 },
+    })
+  }
+
+  // Rodapé
+  const tag = semCensura ? 'DADOS SEM CENSURA (admin)' : 'Dados sensíveis mascarados'
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(150, 150, 150)
+  doc.text(
+    `${tag} — gerado em ${new Date().toLocaleString('pt-BR')} — by Annonae`,
+    40,
+    pageHeight - 24,
+  )
+
+  const bytes = doc.output('arraybuffer')
+
+  return new NextResponse(Buffer.from(bytes) as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="banco-de-alimentos-evento-${id}-by-annonae.pdf"`,
+      'Cache-Control': 'no-store',
+    },
+  })
 }
