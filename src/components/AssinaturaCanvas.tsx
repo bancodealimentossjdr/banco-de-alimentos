@@ -1,6 +1,13 @@
 'use client'
 
-import { useRef, useImperativeHandle, forwardRef, useState } from 'react'
+import {
+  useRef,
+  useImperativeHandle,
+  forwardRef,
+  useState,
+  useEffect,
+  useCallback,
+} from 'react'
 import SignatureCanvas from 'react-signature-canvas'
 
 export interface AssinaturaCanvasRef {
@@ -20,12 +27,12 @@ interface AssinaturaCanvasProps {
 const AssinaturaCanvas = forwardRef<AssinaturaCanvasRef, AssinaturaCanvasProps>(
   function AssinaturaCanvas({ onChange }, ref) {
     const sigRef = useRef<SignatureCanvas>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
     const [hasSignature, setHasSignature] = useState(false)
 
     useImperativeHandle(ref, () => ({
       toDataURL: () => {
         if (!sigRef.current || sigRef.current.isEmpty()) return null
-        // getTrimmedCanvas remove o espaço em branco ao redor da assinatura
         return sigRef.current.getCanvas().toDataURL('image/png')
       },
       clear: () => {
@@ -35,6 +42,71 @@ const AssinaturaCanvas = forwardRef<AssinaturaCanvasRef, AssinaturaCanvasProps>(
       },
       isEmpty: () => sigRef.current?.isEmpty() ?? true,
     }))
+
+    /**
+     * 🔧 Ajusta o tamanho INTERNO do canvas para casar com o tamanho CSS,
+     * aplicando o devicePixelRatio (nitidez em telas retina).
+     * Preserva o traçado existente: salva → redimensiona → restaura.
+     */
+    const resizeCanvas = useCallback(() => {
+      const sig = sigRef.current
+      const container = containerRef.current
+      if (!sig || !container) return
+
+      const canvas = sig.getCanvas()
+
+      // 1️⃣ Salva o traçado atual (se houver)
+      const wasEmpty = sig.isEmpty()
+      const saved = wasEmpty ? null : canvas.toDataURL('image/png')
+
+      // 2️⃣ Calcula dimensões reais a partir do container
+      const ratio = Math.max(window.devicePixelRatio || 1, 1)
+      const { width, height } = container.getBoundingClientRect()
+      if (width === 0 || height === 0) return
+
+      // 3️⃣ Redimensiona o bitmap interno (isso zera o desenho)
+      canvas.width = width * ratio
+      canvas.height = height * ratio
+
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        // Reseta a transform antes de escalar (evita acúmulo no giro)
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.scale(ratio, ratio)
+      }
+
+      // 4️⃣ Restaura o traçado salvo
+      if (saved) {
+        const img = new window.Image()
+        img.onload = () => {
+          ctx?.drawImage(img, 0, 0, width, height)
+        }
+        img.src = saved
+      } else {
+        sig.clear()
+      }
+    }, [])
+
+    // 🔄 Ajuste inicial + listeners de resize/giro (com debounce)
+    useEffect(() => {
+      resizeCanvas()
+
+      let timer: ReturnType<typeof setTimeout>
+      const handleResize = () => {
+        clearTimeout(timer)
+        // pequeno delay para o layout refluir antes de medir
+        timer = setTimeout(resizeCanvas, 150)
+      }
+
+      window.addEventListener('resize', handleResize)
+      window.addEventListener('orientationchange', handleResize)
+
+      return () => {
+        clearTimeout(timer)
+        window.removeEventListener('resize', handleResize)
+        window.removeEventListener('orientationchange', handleResize)
+      }
+    }, [resizeCanvas])
 
     function handleEnd() {
       const empty = sigRef.current?.isEmpty() ?? true
@@ -50,13 +122,16 @@ const AssinaturaCanvas = forwardRef<AssinaturaCanvasRef, AssinaturaCanvasProps>(
 
     return (
       <div className="w-full">
-        <div className="relative overflow-hidden rounded-xl border-2 border-dashed border-green-300 bg-white">
+        <div
+          ref={containerRef}
+          className="relative h-[260px] w-full overflow-hidden rounded-xl border-2 border-dashed border-green-300 bg-white"
+        >
           <SignatureCanvas
             ref={sigRef}
             penColor="#1f2937"
             onEnd={handleEnd}
             canvasProps={{
-              className: 'w-full h-[260px] touch-none',
+              className: 'absolute inset-0 h-full w-full touch-none',
             }}
           />
 
