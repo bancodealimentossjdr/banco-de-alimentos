@@ -40,13 +40,17 @@ export async function GET(
         include: { _count: { select: { recebimentos: true } } },
       },
       criadoPor: { select: { name: true } },
-      // ✅ Sempre inclui o user (3 campos, leve). A exibição é
-      //    controlada por isAdmin na montagem do PDF, não na query.
+      // ✅ Sempre inclui o user (3 campos, leve). Exibição controlada por isAdmin.
       operadores: {
         include: { user: { select: { name: true, email: true, role: true } } },
       },
+      // 🆕 17.3 — refugo vive no alimento, não no recebimento
+      alimentos: {
+        select: { refugoKg: true },
+      },
+      // 🆕 17.3 — recebimento não tem mais descricao/qtdRefugo
       recebimentos: {
-        select: { descricao: true, quantidade: true, qtdRefugo: true, localId: true },
+        select: { quantidade: true, localId: true },
       },
     },
   })
@@ -57,13 +61,14 @@ export async function GET(
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
   const porLocal = new Map<string, number>()
   let totalKg = 0
-  let refugoKg = 0
   for (const r of evento.recebimentos) {
     totalKg += r.quantidade
-    refugoKg += r.qtdRefugo ?? 0
     const ln = localNome.get(r.localId) ?? '—'
     porLocal.set(ln, (porLocal.get(ln) ?? 0) + r.quantidade)
   }
+  // 🆕 17.3 — refugo somado a partir dos alimentos
+  const refugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
+
   const round = (n: number) => Math.round(n * 100) / 100
   const fmtKg = (n: number) =>
     `${round(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
