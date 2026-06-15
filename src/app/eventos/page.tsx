@@ -183,11 +183,12 @@ export default function EventosPage() {
           resetForm()
           mutateEventos()
         } else {
-          const data = await res.json()
-          alert(data.error || 'Erro ao salvar')
+          const data = await res.json().catch(() => ({})) // 🛡️ não quebra com corpo vazio
+          alert(data.error || `Erro ao salvar (HTTP ${res.status})`)
         }
       } catch (error) {
         console.error('Erro ao salvar:', error)
+        alert('Erro ao salvar evento')
       }
     })
   }
@@ -206,10 +207,11 @@ export default function EventosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      if (res.ok) mutateEventos()
-      else {
-        const data = await res.json()
-        alert(data.error || 'Erro ao alterar status')
+      if (res.ok) {
+        mutateEventos()
+      } else {
+        const data = await res.json().catch(() => ({})) // 🛡️ não quebra com corpo vazio
+        alert(data.error || `Erro ao alterar status (HTTP ${res.status})`)
       }
     } catch (error) {
       console.error('Erro ao alterar status:', error)
@@ -222,10 +224,11 @@ export default function EventosPage() {
     if (!confirm('Tem certeza que deseja excluir este evento? Esta ação não pode ser desfeita.')) return
     try {
       const res = await fetch('/api/eventos/' + id, { method: 'DELETE' })
-      if (res.ok) mutateEventos()
-      else {
-        const data = await res.json()
-        alert(data.error || 'Erro ao excluir')
+      if (res.ok) {
+        mutateEventos()
+      } else {
+        const data = await res.json().catch(() => ({})) // 🛡️ não quebra com corpo vazio
+        alert(data.error || `Erro ao excluir (HTTP ${res.status})`)
       }
     } catch (error) {
       console.error('Erro ao excluir:', error)
