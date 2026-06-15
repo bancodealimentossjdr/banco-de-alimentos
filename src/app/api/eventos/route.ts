@@ -11,13 +11,15 @@ export async function GET() {
     const eventos = await prisma.evento.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        // 🔑 SEM ISSO, evento.locais vem undefined → crash na página
         locais: {
           orderBy: { createdAt: 'asc' },
         },
-        // 🆕 17.3 — alimentos do evento, na ordem definida pelo admin
+        // 🆕 17.4 — alimentos do evento, com o produto vinculado
         alimentos: {
           orderBy: { ordem: 'asc' },
+          include: {
+            product: { select: { id: true, name: true, unit: true } },
+          },
         },
         criadoPor: { select: { id: true, name: true } },
         encerradoPor: { select: { id: true, name: true } },
@@ -26,7 +28,7 @@ export async function GET() {
             recebimentos: true,
             operadores: true,
             locais: true,
-            alimentos: true, // 🆕 17.3
+            alimentos: true,
           },
         },
       },
@@ -41,7 +43,6 @@ export async function GET() {
     )
   }
 }
-
 
 // POST - Criar novo evento + locais + alimentos (APENAS ADMIN)
 export async function POST(request: NextRequest) {
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
       dataFim,
       integraEstoque,
       locais,
-      alimentos, // 🆕 17.3 — array de strings
+      alimentos, // 🆕 17.4 — array de { productId }
     } = body
 
     // Validações básicas
@@ -86,9 +87,7 @@ export async function POST(request: NextRequest) {
 
     // 🔍 Locais: filtra os que têm nome preenchido
     const locaisValidos = Array.isArray(locais)
-      ? locais.filter(
-          (l: { nome?: string }) => l.nome && l.nome.trim()
-        )
+      ? locais.filter((l: { nome?: string }) => l.nome && l.nome.trim())
       : []
 
     // 🔍 Nomes de local não podem se repetir
@@ -102,26 +101,39 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 🆕 17.3 — Alimentos: filtra vazios, normaliza e valida duplicados
+    // 🆕 17.4 — Alimentos: agora são productId do catálogo global
     const alimentosValidos = Array.isArray(alimentos)
       ? alimentos
-          .map((a: string) => (typeof a === 'string' ? a.trim() : ''))
-          .filter((a: string) => a.length > 0)
+          .map((a: { productId?: string }) =>
+            typeof a?.productId === 'string' ? a.productId.trim() : ''
+          )
+          .filter((id: string) => id.length > 0)
       : []
 
-    // 🔍 Nomes de alimento não podem se repetir (case-insensitive)
-    const nomesAlimentos = alimentosValidos.map((a: string) => a.toLowerCase())
-    if (new Set(nomesAlimentos).size !== nomesAlimentos.length) {
+    // 🔍 Pelo menos 1 alimento
+    if (alimentosValidos.length === 0) {
       return NextResponse.json(
-        { error: 'Não é possível adicionar alimentos com o mesmo nome' },
+        { error: 'Adicione pelo menos um alimento ao evento' },
         { status: 400 }
       )
     }
 
-    // 🔍 Pelo menos 1 alimento (sem alimento, a tela de campo fica inútil)
-    if (alimentosValidos.length === 0) {
+    // 🔍 Produto não pode se repetir (respeita @@unique([eventoId, productId]))
+    if (new Set(alimentosValidos).size !== alimentosValidos.length) {
       return NextResponse.json(
-        { error: 'Adicione pelo menos um alimento ao evento' },
+        { error: 'Não é possível adicionar o mesmo alimento mais de uma vez' },
+        { status: 400 }
+      )
+    }
+
+    // 🔍 Garante que todos os produtos existem e estão ativos
+    const produtos = await prisma.product.findMany({
+      where: { id: { in: alimentosValidos }, active: true },
+      select: { id: true },
+    })
+    if (produtos.length !== alimentosValidos.length) {
+      return NextResponse.json(
+        { error: 'Um ou mais alimentos selecionados são inválidos ou inativos' },
         { status: 400 }
       )
     }
@@ -136,28 +148,35 @@ export async function POST(request: NextRequest) {
         status: 'RASCUNHO', // 🟡 sempre nasce como rascunho
         criadoPorId: authResult.user.id,
         locais: {
-          create: locaisValidos.map((l: { nome: string; endereco?: string }) => ({
-            nome: l.nome.trim(),
-            endereco: l.endereco?.trim() || null,
-          })),
+          create: locaisValidos.map(
+            (l: { nome: string; endereco?: string }) => ({
+              nome: l.nome.trim(),
+              endereco: l.endereco?.trim() || null,
+            })
+          ),
         },
-        // 🆕 17.3 — alimentos criados na mesma transação, com ordem preservada
+        // 🆕 17.4 — vincula ao Product via connect, preservando a ordem
         alimentos: {
-          create: alimentosValidos.map((nomeAlimento: string, index: number) => ({
-            nome: nomeAlimento,
-            ordem: index, // mantém a ordem que o admin digitou
+          create: alimentosValidos.map((productId: string, index: number) => ({
+            ordem: index,
+            product: { connect: { id: productId } },
           })),
         },
       },
       include: {
         locais: { orderBy: { createdAt: 'asc' } },
-        alimentos: { orderBy: { ordem: 'asc' } }, // 🆕 17.3
+        alimentos: {
+          orderBy: { ordem: 'asc' },
+          include: {
+            product: { select: { id: true, name: true, unit: true } },
+          },
+        },
         _count: {
           select: {
             locais: true,
             recebimentos: true,
             operadores: true,
-            alimentos: true, // 🆕 17.3
+            alimentos: true,
           },
         },
       },

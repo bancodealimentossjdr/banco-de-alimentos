@@ -14,12 +14,22 @@ interface Local {
   endereco: string | null
   _count?: { recebimentos: number }
 }
-// 🆕 17.3 — alimento do evento
+
+// 🔄 17.4 — alimento do evento agora aponta pra um Product
 interface Alimento {
   id: string
-  nome: string
   ordem: number
+  product: { id: string; name: string; unit: string }
 }
+
+// 🆕 17.4 — produto do catálogo global (para o <select>)
+interface Product {
+  id: string
+  name: string
+  unit: string
+  active: boolean
+}
+
 interface Evento {
   id: string
   nome: string
@@ -29,7 +39,7 @@ interface Evento {
   status: EventoStatus
   integraEstoque: boolean
   locais: Local[]
-  alimentos?: Alimento[] // 🆕 17.3
+  alimentos?: Alimento[]
   criadoPor?: { id: string; name: string } | null
   encerradoPor?: { id: string; name: string } | null
   encerradoEm?: string | null
@@ -44,7 +54,6 @@ interface EventoFormState {
   integraEstoque: boolean
 }
 
-// 🎨 Estilo de cada status
 const STATUS_BADGE: Record<EventoStatus, { label: string; cls: string }> = {
   RASCUNHO: { label: '📝 Rascunho', cls: 'bg-gray-100 text-gray-600 border-gray-200' },
   ATIVO: { label: '🟢 Ativo', cls: 'bg-green-100 text-green-700 border-green-200' },
@@ -53,13 +62,11 @@ const STATUS_BADGE: Record<EventoStatus, { label: string; cls: string }> = {
 
 export default function EventosPage() {
   const { canEdit, canDelete } = usePermissions()
-  const podeGerenciar = canEdit('eventos')   // só admin
-  const podeExcluir = canDelete('eventos')   // só admin
+  const podeGerenciar = canEdit('eventos')
+  const podeExcluir = canDelete('eventos')
 
-  // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 📋 Lista de eventos
   const {
     data: eventosData,
     isLoading,
@@ -67,6 +74,14 @@ export default function EventosPage() {
   } = useApi<Evento[]>('/api/eventos', { dedupingInterval: 10_000 })
   const eventos = eventosData ?? []
   const loading = isLoading && !eventosData
+
+    // 🆕 17.4 — catálogo global de produtos ATIVOS para o <select>
+  // Rota correta é /api/produtos (PT). Filtro ?active=true feito no servidor.
+  const { data: productsData } = useApi<Product[]>('/api/produtos?active=true', {
+    dedupingInterval: 30_000,
+  })
+  const produtos = productsData ?? []
+
 
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -79,7 +94,7 @@ export default function EventosPage() {
     integraEstoque: true,
   })
   const [locais, setLocais] = useState<LocalForm[]>([{ nome: '', endereco: '' }])
-  // 🆕 17.3 — lista de alimentos (string simples; cada linha = 1 alimento)
+  // 🔄 17.4 — agora guarda productId selecionado em cada linha
   const [alimentos, setAlimentos] = useState<string[]>([''])
 
   const resetForm = () => {
@@ -89,7 +104,7 @@ export default function EventosPage() {
       dataFim: '', integraEstoque: true,
     })
     setLocais([{ nome: '', endereco: '' }])
-    setAlimentos(['']) // 🆕 17.3
+    setAlimentos([''])
     setEditingId(null)
     setShowForm(false)
   }
@@ -107,10 +122,10 @@ export default function EventosPage() {
         ? evento.locais.map(l => ({ id: l.id, nome: l.nome, endereco: l.endereco || '' }))
         : [{ nome: '', endereco: '' }]
     )
-    // 🆕 17.3 — carrega alimentos na ordem
+    // 🔄 17.4 — carrega productId de cada alimento, na ordem
     setAlimentos(
       (evento.alimentos?.length ?? 0) > 0
-        ? [...evento.alimentos!].sort((a, b) => a.ordem - b.ordem).map(a => a.nome)
+        ? [...evento.alimentos!].sort((a, b) => a.ordem - b.ordem).map(a => a.product.id)
         : ['']
     )
 
@@ -130,7 +145,7 @@ export default function EventosPage() {
     setLocais(updated)
   }
 
-  // 🆕 17.3 — Alimentos dinâmicos
+  // 🔄 17.4 — Alimentos dinâmicos (agora productId)
   const addAlimento = () => setAlimentos([...alimentos, ''])
   const removeAlimento = (index: number) => {
     if (alimentos.length > 1) setAlimentos(alimentos.filter((_, i) => i !== index))
@@ -151,13 +166,12 @@ export default function EventosPage() {
     const validLocais = locais.filter(l => l.nome.trim())
     if (validLocais.length === 0) return alert('Adicione pelo menos um local de coleta!')
 
-    // 🆕 17.3 — valida alimentos (espelha o servidor)
-    const validAlimentos = alimentos.map(a => a.trim()).filter(a => a.length > 0)
-    if (validAlimentos.length === 0) return alert('Adicione pelo menos um alimento ao evento!')
+    // 🔄 17.4 — valida alimentos (productId selecionado)
+    const validAlimentos = alimentos.filter(id => id && id.trim().length > 0)
+    if (validAlimentos.length === 0) return alert('Selecione pelo menos um alimento para o evento!')
 
-    const nomesLower = validAlimentos.map(a => a.toLowerCase())
-    if (new Set(nomesLower).size !== nomesLower.length) {
-      return alert('Não é possível adicionar alimentos com o mesmo nome!')
+    if (new Set(validAlimentos).size !== validAlimentos.length) {
+      return alert('Não é possível adicionar o mesmo alimento mais de uma vez!')
     }
 
     await runSubmit(async () => {
@@ -176,14 +190,15 @@ export default function EventosPage() {
               nome: l.nome,
               endereco: l.endereco || null,
             })),
-            alimentos: validAlimentos, // 🆕 17.3 — array de strings
+            // 🔄 17.4 — array de { productId }
+            alimentos: validAlimentos.map(productId => ({ productId })),
           }),
         })
         if (res.ok) {
           resetForm()
           mutateEventos()
         } else {
-          const data = await res.json().catch(() => ({})) // 🛡️ não quebra com corpo vazio
+          const data = await res.json().catch(() => ({}))
           alert(data.error || `Erro ao salvar (HTTP ${res.status})`)
         }
       } catch (error) {
@@ -193,7 +208,6 @@ export default function EventosPage() {
     })
   }
 
-  // ▶️⏹️ Transição de status (ativar / encerrar)
   const handleStatus = async (id: string, action: 'ativar' | 'encerrar') => {
     const msg =
       action === 'ativar'
@@ -210,7 +224,7 @@ export default function EventosPage() {
       if (res.ok) {
         mutateEventos()
       } else {
-        const data = await res.json().catch(() => ({})) // 🛡️ não quebra com corpo vazio
+        const data = await res.json().catch(() => ({}))
         alert(data.error || `Erro ao alterar status (HTTP ${res.status})`)
       }
     } catch (error) {
@@ -219,7 +233,6 @@ export default function EventosPage() {
     }
   }
 
-  // 🗑️ Excluir
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este evento? Esta ação não pode ser desfeita.')) return
     try {
@@ -227,7 +240,7 @@ export default function EventosPage() {
       if (res.ok) {
         mutateEventos()
       } else {
-        const data = await res.json().catch(() => ({})) // 🛡️ não quebra com corpo vazio
+        const data = await res.json().catch(() => ({}))
         alert(data.error || `Erro ao excluir (HTTP ${res.status})`)
       }
     } catch (error) {
@@ -378,7 +391,7 @@ export default function EventosPage() {
             )}
           </div>
 
-          {/* 🆕 17.3 — 🥫 Alimentos do evento */}
+          {/* 🔄 17.4 — 🥫 Alimentos do evento (agora <select> do catálogo) */}
           <div className="mb-6">
             <div className="flex justify-between items-center mb-1">
               <label className="text-sm font-semibold text-gray-700">Alimentos do evento *</label>
@@ -387,32 +400,49 @@ export default function EventosPage() {
               </button>
             </div>
             <p className="text-xs text-gray-400 mb-3">
-              Os itens aceitos neste evento (ex: Arroz, Feijão, Óleo). A ordem definida aqui é a que aparece na tela de campo.
+              Selecione os produtos do catálogo aceitos neste evento. A ordem definida aqui é a que aparece na tela de campo.
             </p>
 
-            {alimentos.map((alimento, index) => (
-              <div key={index} className="flex gap-2 mb-2 items-center">
-                <span className="shrink-0 w-6 text-center text-xs font-medium text-gray-400">
-                  {index + 1}.
-                </span>
-                <input
-                  type="text"
-                  value={alimento}
-                  onChange={e => updateAlimento(index, e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm uppercase"
-                  placeholder="Ex: ARROZ"
-                />
-                {alimentos.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeAlimento(index)}
-                    className="shrink-0 p-2.5 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-lg"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
+            {produtos.length === 0 ? (
+              <p className="text-xs text-amber-600">
+                ⚠️ Nenhum produto ativo no catálogo. Cadastre produtos na aba <strong>Produtos</strong> antes de criar o evento.
+              </p>
+            ) : (
+              alimentos.map((productId, index) => {
+                // produtos já escolhidos nas OUTRAS linhas (evita duplicar no select)
+                const escolhidosEmOutras = alimentos.filter((_, i) => i !== index)
+                return (
+                  <div key={index} className="flex gap-2 mb-2 items-center">
+                    <span className="shrink-0 w-6 text-center text-xs font-medium text-gray-400">
+                      {index + 1}.
+                    </span>
+                    <select
+                      value={productId}
+                      onChange={e => updateAlimento(index, e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2.5 text-sm bg-white"
+                    >
+                      <option value="">— Selecione um produto —</option>
+                      {produtos
+                        .filter(p => p.id === productId || !escolhidosEmOutras.includes(p.id))
+                        .map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.unit})
+                          </option>
+                        ))}
+                    </select>
+                    {alimentos.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeAlimento(index)}
+                        className="shrink-0 p-2.5 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-lg"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )
+              })
+            )}
             {editingId && (
               <p className="text-xs text-amber-600 mt-2">
                 ⚠️ Alimentos que já têm recebimentos registrados não podem ser removidos.
@@ -544,7 +574,6 @@ export default function EventosPage() {
                   <span className="px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-700">
                     🏠 {(evento.locais?.length ?? 0)} {(evento.locais?.length ?? 0) === 1 ? 'local' : 'locais'}
                   </span>
-                  {/* 🆕 17.3 — contagem de alimentos */}
                   <span className="px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-700">
                     🥫 {(evento._count?.alimentos ?? evento.alimentos?.length ?? 0)} {(evento._count?.alimentos ?? evento.alimentos?.length ?? 0) === 1 ? 'alimento' : 'alimentos'}
                   </span>
@@ -564,7 +593,7 @@ export default function EventosPage() {
                   </div>
                 )}
 
-                {/* 🆕 17.3 — Tags dos alimentos */}
+                {/* 🔄 17.4 — Tags dos alimentos (via product.name) */}
                 {(evento.alimentos?.length ?? 0) > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {[...evento.alimentos!].sort((a, b) => a.ordem - b.ordem).map(a => (
@@ -572,7 +601,7 @@ export default function EventosPage() {
                         key={a.id}
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-100"
                       >
-                        🥫 {a.nome}
+                        🥫 {a.product.name}
                       </span>
                     ))}
                   </div>

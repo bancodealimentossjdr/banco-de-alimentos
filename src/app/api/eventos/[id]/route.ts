@@ -22,7 +22,11 @@ export async function GET(
       where: { id },
       include: {
         locais: { orderBy: { createdAt: 'asc' } },
-        alimentos: { orderBy: { ordem: 'asc' } },
+        // 🔄 17.4 — alimento agora traz o product
+        alimentos: {
+          orderBy: { ordem: 'asc' },
+          include: { product: { select: { id: true, name: true, unit: true } } },
+        },
         criadoPor: { select: { id: true, name: true } },
         encerradoPor: { select: { id: true, name: true } },
         _count: {
@@ -122,6 +126,7 @@ export async function PATCH(
 // ──────────────────────────────────────────────
 // PUT — Editar evento + locais + alimentos (ADMIN)
 // Regra: não remove local/alimento que já tem recebimento.
+// 🔄 17.4 — alimentos: [{ productId }]
 // ──────────────────────────────────────────────
 export async function PUT(
   request: NextRequest,
@@ -153,7 +158,13 @@ export async function PUT(
       where: { id },
       include: {
         locais: { include: { _count: { select: { recebimentos: true } } } },
-        alimentos: { include: { _count: { select: { recebimentos: true } } } },
+        // 🔄 17.4 — traz product p/ mensagens de erro legíveis
+        alimentos: {
+          include: {
+            _count: { select: { recebimentos: true } },
+            product: { select: { id: true, name: true } },
+          },
+        },
       },
     })
     if (!evento) {
@@ -182,27 +193,38 @@ export async function PUT(
       )
     }
 
-    // ── Alimentos ──
-    const alimentosInput: string[] = Array.isArray(alimentos) ? alimentos : []
-    const alimentosValidos = alimentosInput
-      .map((a) => (typeof a === 'string' ? a.trim() : ''))
-      .filter((a) => a.length > 0)
+    // ── Alimentos (🔄 17.4 — agora por productId) ──
+    const alimentosInput: { productId?: string }[] = Array.isArray(alimentos) ? alimentos : []
+    const productIdsValidos = alimentosInput
+      .map((a) => (a && typeof a.productId === 'string' ? a.productId.trim() : ''))
+      .filter((pid) => pid.length > 0)
 
-    if (alimentosValidos.length === 0) {
+    if (productIdsValidos.length === 0) {
       return NextResponse.json(
         { error: 'Adicione pelo menos um alimento ao evento' },
         { status: 400 },
       )
     }
-    const nomesAlim = alimentosValidos.map((a) => a.toLowerCase())
-    if (new Set(nomesAlim).size !== nomesAlim.length) {
+    if (new Set(productIdsValidos).size !== productIdsValidos.length) {
       return NextResponse.json(
-        { error: 'Não é possível adicionar alimentos com o mesmo nome' },
+        { error: 'Não é possível adicionar o mesmo alimento mais de uma vez' },
         { status: 400 },
       )
     }
 
-    // ── Diffs: o que pode ser removido? ──
+    // 🛡️ Garante que todos os productIds existem (backend não confia no front)
+    const produtosExistentes = await prisma.product.findMany({
+      where: { id: { in: productIdsValidos } },
+      select: { id: true, name: true },
+    })
+    if (produtosExistentes.length !== productIdsValidos.length) {
+      return NextResponse.json(
+        { error: 'Um ou mais produtos selecionados não existem no catálogo' },
+        { status: 400 },
+      )
+    }
+
+    // ── Diffs: locais ──
     const idsLocaisMantidos = new Set(
       locaisValidos.filter((l) => l.id).map((l) => l.id as string),
     )
@@ -215,15 +237,15 @@ export async function PUT(
       )
     }
 
-    // Alimentos: comparamos por nome (case-insensitive)
-    const nomesAlimMantidos = new Set(nomesAlim)
-    const alimParaRemover = evento.alimentos.filter(
-      (a) => !nomesAlimMantidos.has(a.nome.toLowerCase()),
-    )
+    // ── Diffs: alimentos (🔄 por productId) ──
+    const productIdsMantidos = new Set(productIdsValidos)
+    const alimParaRemover = evento.alimentos.filter((a) => !productIdsMantidos.has(a.productId))
     const bloqueioAlim = alimParaRemover.find((a) => a._count.recebimentos > 0)
     if (bloqueioAlim) {
       return NextResponse.json(
-        { error: `O alimento "${bloqueioAlim.nome}" tem recebimentos e não pode ser removido` },
+        {
+          error: `O alimento "${bloqueioAlim.product.name}" tem recebimentos e não pode ser removido`,
+        },
         { status: 400 },
       )
     }
@@ -268,21 +290,22 @@ export async function PUT(
           where: { id: { in: alimParaRemover.map((a) => a.id) } },
         })
       }
-      // upsert alimentos por nome, preservando ordem do array
-      const existentesPorNome = new Map(
-        evento.alimentos.map((a) => [a.nome.toLowerCase(), a]),
+      // upsert alimentos por productId, preservando ordem do array
+      const existentesPorProduct = new Map(
+        evento.alimentos.map((a) => [a.productId, a]),
       )
-      for (let i = 0; i < alimentosValidos.length; i++) {
-        const nomeAlim = alimentosValidos[i]
-        const existente = existentesPorNome.get(nomeAlim.toLowerCase())
+      for (let i = 0; i < productIdsValidos.length; i++) {
+        const pid = productIdsValidos[i]
+        const existente = existentesPorProduct.get(pid)
         if (existente) {
+          // só atualiza a ordem (refugo/obs preservados)
           await tx.eventoAlimento.update({
             where: { id: existente.id },
-            data: { nome: nomeAlim, ordem: i },
+            data: { ordem: i },
           })
         } else {
           await tx.eventoAlimento.create({
-            data: { eventoId: id, nome: nomeAlim, ordem: i },
+            data: { eventoId: id, productId: pid, ordem: i },
           })
         }
       }
@@ -291,7 +314,10 @@ export async function PUT(
         where: { id },
         include: {
           locais: { orderBy: { createdAt: 'asc' } },
-          alimentos: { orderBy: { ordem: 'asc' } },
+          alimentos: {
+            orderBy: { ordem: 'asc' },
+            include: { product: { select: { id: true, name: true, unit: true } } },
+          },
           _count: {
             select: { recebimentos: true, operadores: true, locais: true, alimentos: true },
           },

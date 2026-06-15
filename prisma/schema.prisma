@@ -97,6 +97,7 @@ model Product {
   donationItems     DonationItem[]
   distributionItems DistributionItem[]
   harvestItems      HarvestItem[]
+  eventoAlimentos EventoAlimento[]
 }
 
 // ==========================================
@@ -445,21 +446,25 @@ model LocalColeta {
   @@index([eventoId])
 }
 
-// 🆕 17.3 — ALIMENTO DO EVENTO
-// Lista dinâmica que o admin digita na criação ("ARROZ", "FEIJÃO"...).
-// Refugo vive aqui: preenchido no pós-evento, por alimento.
+// 🔄 17.3 — ALIMENTO DO EVENTO = ponte Evento ↔ Product
+// O alimento de evento agora É um produto do catálogo global (aba Produtos).
+// Nome e unidade vêm de product.name / product.unit.
+// O refugo (pós-evento) permanece aqui, pois é por-evento.
 model EventoAlimento {
   id           String        @id @default(cuid())
 
   eventoId     String
   evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
-  nome         String        // "ARROZ", "FEIJÃO", "ÓLEO"...
+  // 🆕 17.4 — vínculo obrigatório ao catálogo global
+  productId    String
+  product      Product       @relation(fields: [productId], references: [id])
+
   ordem        Int           @default(0) // ordem fixa na tela de campo
 
-  // Refugo (pós-evento, por alimento) — migrado do Recebimento
+  // Refugo (pós-evento, por alimento) — em kg (peso descartado)
   refugoKg     Float         @default(0)
-  motivoRefugo MotivoRefugo? // opcional — justificativa
+  motivoRefugo MotivoRefugo?
   obsRefugo    String?
 
   recebimentos Recebimento[]
@@ -467,9 +472,11 @@ model EventoAlimento {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  @@unique([eventoId, nome]) // não repetir alimento no mesmo evento
+  @@unique([eventoId, productId]) // 🔄 não repetir o mesmo produto no evento
   @@index([eventoId])
+  @@index([productId])           // 🆕 p/ relatório por produto
 }
+
 
 model EventoOperador {
   id        String   @id @default(cuid())
@@ -498,15 +505,12 @@ model Recebimento {
   localId      String
   local        LocalColeta   @relation(fields: [localId], references: [id])
 
-  // 🆕 17.3 — alimento agora é referência (não mais texto livre)
   alimentoId   String
   alimento     EventoAlimento @relation(fields: [alimentoId], references: [id])
 
-  quantidade   Float          // cada +1 = +1kg (troca por ingresso)
-  unidade      String        @default("kg")
-
-  // ❌ REMOVIDO: descricao, qtdRefugo, motivoRefugo, obsRefugo
-  //    (refugo migrou para EventoAlimento)
+  // 🔄 17.4 — quantidade na unidade do produto (product.unit); snapshot abaixo
+  quantidade   Float
+  unidade      String        // ⚠️ removido @default("kg"): agora vem de product.unit (kg, L, un...)
 
   operadorId   String
   operador     User          @relation("RecebimentosRegistrados", fields: [operadorId], references: [id])
@@ -517,5 +521,5 @@ model Recebimento {
   @@index([localId])
   @@index([alimentoId])
   @@index([operadorId])
-  @@index([eventoId, createdAt]) // p/ indicador diário
+  @@index([eventoId, createdAt])
 }

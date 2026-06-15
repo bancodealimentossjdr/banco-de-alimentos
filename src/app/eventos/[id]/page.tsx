@@ -6,7 +6,6 @@ import EventoDetalheClient from './EventoDetalheClient'
 
 export const dynamic = 'force-dynamic'
 
-// 🎭 Shape do operador quando a query incluiu a relação user (isAdmin)
 type OperadorComUser = {
   id: string
   ativo: boolean
@@ -20,16 +19,14 @@ export default async function EventoDetalhePage({
 }) {
   const { id } = await params
 
-  // 🔐 Guarda de acesso server-side (defesa em profundidade)
   const session = await auth()
   const role = session?.user?.role
   if (!role) redirect('/login')
 
-  const podeGerenciar = canEdit(role, 'eventos') // só admin
-  const podeRegistrar = canRegisterRecebimento(role) // operador
+  const podeGerenciar = canEdit(role, 'eventos')
+  const podeRegistrar = canRegisterRecebimento(role)
   const isAdmin = podeGerenciar
 
-  // 🔎 Busca o evento + recebimentos + alimentos (gráficos)
   const evento = await prisma.evento.findUnique({
     where: { id },
     include: {
@@ -37,10 +34,13 @@ export default async function EventoDetalhePage({
         orderBy: { createdAt: 'asc' },
         include: { _count: { select: { recebimentos: true } } },
       },
-      // 🆕 17.3 — alimentos do evento (com refugo)
+      // 🔄 17.4 — alimentos do evento (com refugo + product)
       alimentos: {
         orderBy: { ordem: 'asc' },
-        include: { _count: { select: { recebimentos: true } } },
+        include: {
+          _count: { select: { recebimentos: true } },
+          product: { select: { id: true, name: true, unit: true } },
+        },
       },
       criadoPor: { select: { id: true, name: true } },
       encerradoPor: { select: { id: true, name: true } },
@@ -55,9 +55,14 @@ export default async function EventoDetalhePage({
       recebimentos: {
         select: {
           id: true,
-          // 🔄 17.3 — agora referência, não texto livre
           alimentoId: true,
-          alimento: { select: { id: true, nome: true } },
+          // 🔄 17.4 — nome/unit vêm de product
+          alimento: {
+            select: {
+              id: true,
+              product: { select: { id: true, name: true, unit: true } },
+            },
+          },
           quantidade: true,
           unidade: true,
           localId: true,
@@ -73,9 +78,6 @@ export default async function EventoDetalhePage({
 
   if (!evento) notFound()
 
-  // 🎭 Operadores: SÓ existem na resposta se for admin.
-  // O include condicional (isAdmin ? {...} : false) faz o TS perder o tipo
-  // da relação `user`; por isso narrowing explícito aqui.
   const operadoresView =
     isAdmin && evento.operadores
       ? (evento.operadores as unknown as OperadorComUser[]).map((eo) => ({
@@ -92,7 +94,7 @@ export default async function EventoDetalhePage({
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
 
   const kgPorLocalMap = new Map<string, number>()
-  const kgPorTipoMap = new Map<string, number>() // 🔄 agora por alimento.nome
+  const kgPorTipoMap = new Map<string, number>() // 🔄 por product.name
   const kgPorDiaMap = new Map<string, number>()
 
   let totalKg = 0
@@ -100,20 +102,17 @@ export default async function EventoDetalhePage({
   for (const r of evento.recebimentos) {
     totalKg += r.quantidade
 
-    // por local
     const ln = localNome.get(r.localId) ?? '—'
     kgPorLocalMap.set(ln, (kgPorLocalMap.get(ln) ?? 0) + r.quantidade)
 
-    // 🔄 17.3 — por alimento (nome da relação, sem normalização frágil)
-    const tipo = r.alimento?.nome ?? 'Não informado'
+    // 🔄 17.4 — nome do alimento vem de product.name
+    const tipo = r.alimento?.product?.name ?? 'Não informado'
     kgPorTipoMap.set(tipo, (kgPorTipoMap.get(tipo) ?? 0) + r.quantidade)
 
-    // por dia (YYYY-MM-DD)
     const dia = r.createdAt.toISOString().slice(0, 10)
     kgPorDiaMap.set(dia, (kgPorDiaMap.get(dia) ?? 0) + r.quantidade)
   }
 
-  // 🆕 17.3 — refugo total vem dos ALIMENTOS (preenchido no pós-evento)
   const totalRefugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
 
   const round = (n: number) => Math.round(n * 100) / 100
@@ -148,10 +147,12 @@ export default async function EventoDetalhePage({
       endereco: l.endereco,
       recebimentos: l._count.recebimentos,
     })),
-    // 🆕 17.3 — alimentos serializados (p/ tela de refugo + campo)
+    // 🔄 17.4 — alimentos serializados (nome/unit via product)
     alimentos: evento.alimentos.map((a) => ({
       id: a.id,
-      nome: a.nome,
+      productId: a.productId,
+      nome: a.product.name,   // 🔄 nome derivado do catálogo
+      unit: a.product.unit,   // 🆕 unidade do catálogo
       ordem: a.ordem,
       refugoKg: a.refugoKg ?? 0,
       motivoRefugo: a.motivoRefugo,
@@ -163,7 +164,7 @@ export default async function EventoDetalhePage({
       recebimentos: evento._count.recebimentos,
       locais: evento._count.locais,
       operadores: evento._count.operadores,
-      alimentos: evento._count.alimentos, // 🆕 17.3
+      alimentos: evento._count.alimentos,
     },
     metrics: {
       totalKg: round(totalKg),
