@@ -1,6 +1,14 @@
 import { prisma } from '@/lib/prisma'
 import type { EventoExportData } from './evento-pdf'
 
+// 🎭 Shape do operador quando a query incluiu a relação user (isAdmin)
+// ⚠️ Aqui o select traz só name/email/role (sem id) — reflete a query deste arquivo.
+type OperadorComUser = {
+  id: string
+  ativo: boolean
+  user: { name: string | null; email: string | null; role: string }
+}
+
 /** 🎭 vitor@gmail.com → vi***@gmail.com */
 function maskEmail(email: string | null): string {
   if (!email) return '—'
@@ -77,7 +85,7 @@ export async function getEventoExportData(opts: {
   // 🔐 Operadores só existem no PDF do admin.
   const operadores =
     isAdmin && evento.operadores
-      ? evento.operadores.map((eo) => ({
+      ? (evento.operadores as unknown as OperadorComUser[]).map((eo) => ({
           nome: eo.user.name ?? '—',
           email: censurar ? maskEmail(eo.user.email) : (eo.user.email ?? '—'),
           role: eo.user.role,

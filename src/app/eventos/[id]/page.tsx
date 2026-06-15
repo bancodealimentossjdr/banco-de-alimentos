@@ -6,6 +6,13 @@ import EventoDetalheClient from './EventoDetalheClient'
 
 export const dynamic = 'force-dynamic'
 
+// 🎭 Shape do operador quando a query incluiu a relação user (isAdmin)
+type OperadorComUser = {
+  id: string
+  ativo: boolean
+  user: { id: string; name: string | null; email: string | null; role: string }
+}
+
 export default async function EventoDetalhePage({
   params,
 }: {
@@ -67,9 +74,11 @@ export default async function EventoDetalhePage({
   if (!evento) notFound()
 
   // 🎭 Operadores: SÓ existem na resposta se for admin.
+  // O include condicional (isAdmin ? {...} : false) faz o TS perder o tipo
+  // da relação `user`; por isso narrowing explícito aqui.
   const operadoresView =
     isAdmin && evento.operadores
-      ? evento.operadores.map((eo) => ({
+      ? (evento.operadores as unknown as OperadorComUser[]).map((eo) => ({
           id: eo.id,
           ativo: eo.ativo,
           userId: eo.user.id,
