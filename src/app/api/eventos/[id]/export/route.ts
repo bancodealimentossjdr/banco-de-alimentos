@@ -59,9 +59,9 @@ export async function GET(
         },
       },
       criadoPor: { select: { name: true } },
-      operadores: isAdmin
-        ? { include: { user: { select: { name: true, email: true, role: true } } } }
-        : false,
+      operadores: {
+  include: { user: { select: { name: true, email: true, role: true } } },
+      },
       // 🆕 17.3 — recebimento agora é alimentoId + quantidade (sem descricao/qtdRefugo)
       recebimentos: {
         select: { quantidade: true, localId: true, alimentoId: true },

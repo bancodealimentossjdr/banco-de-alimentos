@@ -63,7 +63,7 @@ export default function GraficosEvento({ metrics }: { metrics: EventoMetrics }) 
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="nome" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
             <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip formatter={(v: number) => fmtKg(v)} />
+            <Tooltip formatter={(v) => fmtKg(Number(v) || 0)} />
             <Bar dataKey="kg" name="Recebido" radius={[6, 6, 0, 0]} fill="#22c55e" />
           </BarChart>
         </ResponsiveContainer>
@@ -80,8 +80,8 @@ export default function GraficosEvento({ metrics }: { metrics: EventoMetrics }) 
             <XAxis dataKey="dia" tickFormatter={fmtDia} tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip
-              formatter={(v: number) => fmtKg(v)}
-              labelFormatter={(l: string) => `Dia ${fmtDia(l)}`}
+              formatter={(v) => fmtKg(Number(v))}
+              labelFormatter={(l) => `Dia ${fmtDia(String(l))}`}
             />
             <Line type="monotone" dataKey="kg" name="Recebido" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
           </LineChart>
@@ -105,16 +105,17 @@ export default function GraficosEvento({ metrics }: { metrics: EventoMetrics }) 
               cx="50%"
               cy="50%"
               outerRadius={110}
-              label={({ tipo, percent }) =>
-                `${tipo} (${((percent ?? 0) * 100).toFixed(0)}%)`
-              }
+              label={(p) => {
+  const { tipo, percent } = p as { tipo?: string; percent?: number };
+  return `${tipo} (${((percent ?? 0) * 100).toFixed(0)}%)`;
+}}
               labelLine={false}
             >
               {pizzaData.map((_, i) => (
                 <Cell key={i} fill={CORES[i % CORES.length]} />
               ))}
             </Pie>
-            <Tooltip formatter={(v: number) => fmtKg(v)} />
+            <Tooltip formatter={(v) => fmtKg(Number(v))} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
