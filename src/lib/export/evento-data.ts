@@ -28,10 +28,15 @@ export async function getEventoExportData(opts: {
     where: { id },
     include: {
       locais: { orderBy: { createdAt: 'asc' } },
-      // 🆕 17.3 — alimentos: fonte do refugo (pós-evento, por alimento)
+      // 🔄 17.4 — alimento traz o nome via product (catálogo)
       alimentos: {
         orderBy: { ordem: 'asc' },
-        select: { id: true, nome: true, refugoKg: true, motivoRefugo: true },
+        select: {
+          id: true,
+          refugoKg: true,
+          motivoRefugo: true,
+          product: { select: { id: true, name: true, unit: true } },
+        },
       },
       criadoPor: { select: { name: true } },
       operadores: isAdmin
@@ -45,7 +50,8 @@ export async function getEventoExportData(opts: {
   if (!evento) return null
 
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
-  const alimentoNome = new Map(evento.alimentos.map((a) => [a.id, a.nome]))
+  // 🔄 17.4 — nome do alimento vem do product
+  const alimentoNome = new Map(evento.alimentos.map((a) => [a.id, a.product.name]))
 
   const porLocalMap = new Map<string, number>()
   const recebidoPorAlimento = new Map<string, number>() // alimentoId → kg
@@ -58,7 +64,7 @@ export async function getEventoExportData(opts: {
     const ln = localNome.get(r.localId) ?? '—'
     porLocalMap.set(ln, (porLocalMap.get(ln) ?? 0) + r.quantidade)
 
-    // 🆕 por alimento
+    // 🆕 por alimento (agregação por alimentoId — correto)
     recebidoPorAlimento.set(
       r.alimentoId,
       (recebidoPorAlimento.get(r.alimentoId) ?? 0) + r.quantidade,
@@ -76,7 +82,7 @@ export async function getEventoExportData(opts: {
 
   // 🆕 17.3 — recebido + refugo por alimento (ordem fixa da tela de campo)
   const porAlimento = evento.alimentos.map((a) => ({
-    nome: a.nome,
+    nome: a.product.name,
     recebidoKg: round(recebidoPorAlimento.get(a.id) ?? 0),
     refugoKg: round(a.refugoKg ?? 0),
     motivoRefugo: a.motivoRefugo ?? null,

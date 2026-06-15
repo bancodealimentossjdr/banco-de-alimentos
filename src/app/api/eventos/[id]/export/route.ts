@@ -48,19 +48,19 @@ export async function GET(
         orderBy: { createdAt: 'asc' },
         include: { _count: { select: { recebimentos: true } } },
       },
-      // 🆕 17.3 — alimentos: fonte do refugo (pós-evento, por alimento)
+      // 🔄 17.4 — alimento agora traz o nome via product (catálogo)
       alimentos: {
         orderBy: { ordem: 'asc' },
         select: {
           id: true,
-          nome: true,
           refugoKg: true,
           motivoRefugo: true,
+          product: { select: { id: true, name: true, unit: true } },
         },
       },
       criadoPor: { select: { name: true } },
       operadores: {
-  include: { user: { select: { name: true, email: true, role: true } } },
+        include: { user: { select: { name: true, email: true, role: true } } },
       },
       // 🆕 17.3 — recebimento agora é alimentoId + quantidade (sem descricao/qtdRefugo)
       recebimentos: {
@@ -73,7 +73,8 @@ export async function GET(
 
   // ─── Mapas de apoio ───
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
-  const alimentoNome = new Map(evento.alimentos.map((a) => [a.id, a.nome]))
+  // 🔄 17.4 — nome do alimento vem do product
+  const alimentoNome = new Map(evento.alimentos.map((a) => [a.id, a.product.name]))
 
   // ─── Agregações ───
   const porLocal = new Map<string, number>()
@@ -87,7 +88,7 @@ export async function GET(
     const ln = localNome.get(r.localId) ?? '—'
     porLocal.set(ln, (porLocal.get(ln) ?? 0) + r.quantidade)
 
-    // 🆕 por alimento
+    // 🆕 por alimento (chave = id, evita colisão de nomes iguais)
     const an = alimentoNome.get(r.alimentoId) ?? '—'
     recebidoPorAlimento.set(an, (recebidoPorAlimento.get(an) ?? 0) + r.quantidade)
   }
@@ -167,10 +168,11 @@ export async function GET(
 
   // ─── 🆕 17.3 — Recebido e refugo POR ALIMENTO ───
   const alimentosBody = evento.alimentos.map((a) => {
-    const recebido = recebidoPorAlimento.get(a.nome) ?? 0
+    // 🔄 17.4 — chave do mapa é o nome do product (idêntico ao usado na agregação)
+    const recebido = recebidoPorAlimento.get(a.product.name) ?? 0
     const motivo = a.motivoRefugo ? MOTIVO_LABEL[a.motivoRefugo] ?? a.motivoRefugo : '—'
     return [
-      a.nome,
+      a.product.name,
       fmtKg(recebido),
       fmtKg(a.refugoKg ?? 0),
       (a.refugoKg ?? 0) > 0 ? motivo : '—',
