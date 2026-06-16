@@ -48,6 +48,28 @@ export interface EventoMetrics {
   kgPorTipo: { tipo: string; kg: number }[]
   kgPorDia: { dia: string; kg: number }[]
 }
+
+// 🆕 ONDA B
+interface DoacaoProduto {
+  nome: string
+  unidade: string
+  quantidade: number
+}
+interface DoacaoSubtotal {
+  unidade: string
+  quantidade: number
+}
+interface DoacaoLocal {
+  id: string
+  nome: string
+  produtos: DoacaoProduto[]
+  subtotais: DoacaoSubtotal[]
+}
+interface DoacoesView {
+  porLocal: DoacaoLocal[]
+  totalGeral: DoacaoSubtotal[]
+}
+
 interface EventoView {
   id: string
   nome: string
@@ -64,6 +86,7 @@ interface EventoView {
   operadores: OperadorView[]
   counts: { recebimentos: number; locais: number; operadores: number; alimentos: number }
   metrics: EventoMetrics
+  doacoes: DoacoesView // 🆕 ONDA B
 }
 
 const STATUS_BADGE: Record<EventoStatus, { label: string; cls: string }> = {
@@ -97,6 +120,10 @@ export default function EventoDetalheClient({
 
   const fmtKg = (n: number) =>
     `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
+
+  // 🆕 ONDA B
+  const fmtQtd = (n: number, unidade: string) =>
+    `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unidade}`
 
   const motivoLabel = (m: string | null) => (m ? MOTIVO_LABEL[m] ?? m : null)
 
@@ -210,7 +237,7 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: DOAÇÕES (NOVA — onda B preenche os cards) ════════════ */}
+      {/* ════════════ ABA: DOAÇÕES (ONDA B) ════════════ */}
       {aba === 'doacoes' && (
         <div className="space-y-4">
           {/* Botão Registrar Doação */}
@@ -231,22 +258,56 @@ export default function EventoDetalheClient({
             </p>
           )}
 
-          {/* 🚧 Placeholder — cards de somatório chegam na ONDA B */}
-          {evento.counts.recebimentos === 0 ? (
+          {evento.doacoes.porLocal.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">📥</p>
               <p>Nenhuma doação registrada ainda</p>
             </div>
           ) : (
-            <div className="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
-              <p className="text-sm">
-                🚧 Os cards de somatório por local e o total geral serão exibidos aqui
-                (próxima onda).
-              </p>
-              <p className="text-xs mt-1">
-                {evento.counts.recebimentos} recebimento(s) já registrado(s).
-              </p>
-            </div>
+            <>
+              {/* Cards por local */}
+              {evento.doacoes.porLocal.map((local) => (
+                <div key={local.id} className="bg-white rounded-xl shadow-sm border p-4">
+                  <p className="font-semibold text-gray-900 mb-3">📍 {local.nome}</p>
+
+                  <div className="space-y-1.5">
+                    {local.produtos.map((p, i) => (
+                      <div
+                        key={`${p.nome}-${p.unidade}-${i}`}
+                        className="flex items-center justify-between text-sm border-b border-dashed border-gray-100 pb-1.5"
+                      >
+                        <span className="text-gray-700">🥫 {p.nome}</span>
+                        <span className="font-medium text-gray-900 tabular-nums">
+                          {fmtQtd(p.quantidade, p.unidade)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Subtotal do local (por unidade) */}
+                  <div className="mt-3 pt-2 border-t flex items-center justify-between">
+                    <span className="text-xs font-medium text-gray-500 uppercase">
+                      Subtotal
+                    </span>
+                    <span className="text-sm font-bold text-gray-900 tabular-nums">
+                      {local.subtotais.map((s) => fmtQtd(s.quantidade, s.unidade)).join(' · ')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Total geral */}
+              <div className="bg-green-600 rounded-xl shadow-sm p-5 flex items-center justify-between text-white">
+                <span className="font-semibold uppercase tracking-wide text-sm">
+                  Total geral
+                </span>
+                <span className="text-xl font-bold tabular-nums">
+                  {evento.doacoes.totalGeral
+                    .map((t) => fmtQtd(t.quantidade, t.unidade))
+                    .join(' · ')}
+                </span>
+              </div>
+            </>
           )}
         </div>
       )}

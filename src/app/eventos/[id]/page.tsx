@@ -129,6 +129,67 @@ export default async function EventoDetalhePage({
     .map(([dia, kg]) => ({ dia, kg: round(kg) }))
     .sort((a, b) => a.dia.localeCompare(b.dia))
 
+  // ════════════ 🆕 ONDA B — AGREGAÇÃO DE DOAÇÕES ════════════
+  // Estrutura: por local → por (produto + unidade) → quantidade
+  // + subtotais por local (por unidade) + total geral (por unidade)
+  type ProdAcc = Map<string, { nome: string; unidade: string; quantidade: number }>
+
+  const porLocalAcc = new Map<
+    string,
+    { id: string; nome: string; produtos: ProdAcc }
+  >()
+  const totalGeralMap = new Map<string, number>() // unidade -> qtd
+
+  for (const r of evento.recebimentos) {
+    const localId = r.localId
+    const localNm = localNome.get(localId) ?? '—'
+    const nomeProd = r.alimento?.product?.name ?? 'Não informado'
+    const unidade = r.unidade ?? r.alimento?.product?.unit ?? 'kg'
+    const qtd = r.quantidade
+
+    // por local
+    if (!porLocalAcc.has(localId)) {
+      porLocalAcc.set(localId, { id: localId, nome: localNm, produtos: new Map() })
+    }
+    const localEntry = porLocalAcc.get(localId)!
+    const prodKey = `${nomeProd}__${unidade}`
+    const prodEntry = localEntry.produtos.get(prodKey)
+    if (prodEntry) {
+      prodEntry.quantidade += qtd
+    } else {
+      localEntry.produtos.set(prodKey, { nome: nomeProd, unidade, quantidade: qtd })
+    }
+
+    // total geral por unidade
+    totalGeralMap.set(unidade, (totalGeralMap.get(unidade) ?? 0) + qtd)
+  }
+
+  const doacoesPorLocal = [...porLocalAcc.values()].map((local) => {
+    const produtos = [...local.produtos.values()]
+      .map((p) => ({ ...p, quantidade: round(p.quantidade) }))
+      .sort((a, b) => b.quantidade - a.quantidade)
+
+    // subtotais do local por unidade
+    const subMap = new Map<string, number>()
+    for (const p of produtos) {
+      subMap.set(p.unidade, (subMap.get(p.unidade) ?? 0) + p.quantidade)
+    }
+    const subtotais = [...subMap.entries()]
+      .map(([unidade, quantidade]) => ({ unidade, quantidade: round(quantidade) }))
+      .sort((a, b) => a.unidade.localeCompare(b.unidade))
+
+    return { id: local.id, nome: local.nome, produtos, subtotais }
+  })
+
+  const totalGeral = [...totalGeralMap.entries()]
+    .map(([unidade, quantidade]) => ({ unidade, quantidade: round(quantidade) }))
+    .sort((a, b) => a.unidade.localeCompare(b.unidade))
+
+  const doacoes = {
+    porLocal: doacoesPorLocal,
+    totalGeral,
+  }
+
   // Serializa para o Client Component
   const eventoView = {
     id: evento.id,
@@ -174,6 +235,7 @@ export default async function EventoDetalhePage({
       kgPorTipo,
       kgPorDia,
     },
+    doacoes, // 🆕 ONDA B
   }
 
   return (
