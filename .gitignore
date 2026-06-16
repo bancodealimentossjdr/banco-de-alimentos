@@ -55,3 +55,9 @@ dev.db-journal
 .env*.local
 
 .env
+
+# Arquivos gerados pelo next-pwa (não versionar)
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js
+public/workbox-*.js

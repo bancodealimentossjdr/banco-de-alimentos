@@ -7,7 +7,6 @@ import ExportarEventoPdf from './ExportarEventoPdf'
 
 type EventoStatus = 'RASCUNHO' | 'ATIVO' | 'ENCERRADO'
 
-// 🆕 17.3 — rótulos legíveis do enum MotivoRefugo (espelha o PDF)
 const MOTIVO_LABEL: Record<string, string> = {
   VALIDADE_VENCIDA: 'Validade vencida',
   EMBALAGEM_VIOLADA: 'Embalagem violada',
@@ -22,10 +21,11 @@ interface LocalView {
   endereco: string | null
   recebimentos: number
 }
-// 🆕 17.3 — alimento serializado pela page.tsx
 interface AlimentoView {
   id: string
+  productId: string
   nome: string
+  unit: string
   ordem: number
   refugoKg: number
   motivoRefugo: string | null
@@ -60,9 +60,9 @@ interface EventoView {
   encerradoPor: { id: string; name: string } | null
   criadoPor: { id: string; name: string } | null
   locais: LocalView[]
-  alimentos: AlimentoView[] // 🆕 17.3
+  alimentos: AlimentoView[]
   operadores: OperadorView[]
-  counts: { recebimentos: number; locais: number; operadores: number; alimentos: number } // 🆕 17.3
+  counts: { recebimentos: number; locais: number; operadores: number; alimentos: number }
   metrics: EventoMetrics
 }
 
@@ -72,8 +72,8 @@ const STATUS_BADGE: Record<EventoStatus, { label: string; cls: string }> = {
   ENCERRADO: { label: '⏹️ Encerrado', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
 }
 
-// 🔐 Aba "operadores" só existe na lista se for admin
-type Aba = 'resumo' | 'graficos' | 'locais' | 'alimentos' | 'operadores'
+// 🔄 ORDEM: Resumo · Doações · Locais · Alimentos · Operadores · Gráficos
+type Aba = 'resumo' | 'doacoes' | 'locais' | 'alimentos' | 'operadores' | 'graficos'
 
 export default function EventoDetalheClient({
   evento,
@@ -98,16 +98,13 @@ export default function EventoDetalheClient({
   const fmtKg = (n: number) =>
     `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
 
-  // 🆕 17.3 — tradução do motivo de refugo (defensivo p/ enums futuros)
-  const motivoLabel = (m: string | null) =>
-    m ? MOTIVO_LABEL[m] ?? m : null
+  const motivoLabel = (m: string | null) => (m ? MOTIVO_LABEL[m] ?? m : null)
 
   const tabBtn = (id: Aba) =>
     `px-4 py-2 text-sm font-medium rounded-lg transition whitespace-nowrap ${
       aba === id ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-100'
     }`
 
-  // 🆕 17.3 — alimentos ordenados (defensivo)
   const alimentosOrdenados = [...evento.alimentos].sort((a, b) => a.ordem - b.ordem)
 
   return (
@@ -140,34 +137,36 @@ export default function EventoDetalheClient({
           </p>
         </div>
 
-        {/* 📄 Exportação (PDF mascarado p/ todos; admin pode sem censura) */}
-        <ExportarEventoPdf eventoId={evento.id} isAdmin={isAdmin} />
+        <div className="flex items-center gap-2 shrink-0">
+          <ExportarEventoPdf eventoId={evento.id} isAdmin={isAdmin} />
+        </div>
       </div>
 
-      {/* 🗂️ Abas */}
+      {/* 🗂️ Abas — ORDEM NOVA */}
       <div className="flex gap-2 mb-6 border-b pb-3 overflow-x-auto">
         <button className={tabBtn('resumo')} onClick={() => setAba('resumo')}>
           📋 Resumo
         </button>
-        <button className={tabBtn('graficos')} onClick={() => setAba('graficos')}>
-          📊 Gráficos
+        <button className={tabBtn('doacoes')} onClick={() => setAba('doacoes')}>
+          📥 Doações ({evento.counts.recebimentos})
         </button>
         <button className={tabBtn('locais')} onClick={() => setAba('locais')}>
           🏠 Locais ({evento.counts.locais})
         </button>
-        {/* 🆕 17.3 — Aba Alimentos (todos veem) */}
         <button className={tabBtn('alimentos')} onClick={() => setAba('alimentos')}>
           🥫 Alimentos ({evento.counts.alimentos})
         </button>
-        {/* 🔐 Aba Operadores: SÓ admin */}
         {isAdmin && (
           <button className={tabBtn('operadores')} onClick={() => setAba('operadores')}>
             👥 Operadores ({evento.counts.operadores})
           </button>
         )}
+        <button className={tabBtn('graficos')} onClick={() => setAba('graficos')}>
+          📊 Gráficos
+        </button>
       </div>
 
-      {/* ════════════ ABA: RESUMO ════════════ */}
+      {/* ════════════ ABA: RESUMO (intacta) ════════════ */}
       {aba === 'resumo' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -211,12 +210,61 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: GRÁFICOS ════════════ */}
-      {aba === 'graficos' && <GraficosEvento metrics={evento.metrics} />}
+      {/* ════════════ ABA: DOAÇÕES (NOVA — onda B preenche os cards) ════════════ */}
+      {aba === 'doacoes' && (
+        <div className="space-y-4">
+          {/* Botão Registrar Doação */}
+          {podeRegistrar && evento.status === 'ATIVO' && (
+            <div className="flex justify-end">
+              <Link
+                href={`/eventos/${evento.id}/campo`}
+                className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+              >
+                📥 Registrar Doação
+              </Link>
+            </div>
+          )}
+
+          {evento.status !== 'ATIVO' && (
+            <p className="text-xs text-gray-400">
+              ℹ️ Só é possível registrar doações em eventos com status <b>Ativo</b>.
+            </p>
+          )}
+
+          {/* 🚧 Placeholder — cards de somatório chegam na ONDA B */}
+          {evento.counts.recebimentos === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              <p className="text-4xl mb-2">📥</p>
+              <p>Nenhuma doação registrada ainda</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
+              <p className="text-sm">
+                🚧 Os cards de somatório por local e o total geral serão exibidos aqui
+                (próxima onda).
+              </p>
+              <p className="text-xs mt-1">
+                {evento.counts.recebimentos} recebimento(s) já registrado(s).
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ════════════ ABA: LOCAIS ════════════ */}
       {aba === 'locais' && (
         <div className="space-y-3">
+          {isAdmin && (
+            <div className="flex justify-end">
+              <button
+                disabled
+                title="Função 'Adicionar local' chega na onda C"
+                className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                + Adicionar local (em breve)
+              </button>
+            </div>
+          )}
           {evento.locais.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">🏠</p>
@@ -241,17 +289,23 @@ export default function EventoDetalheClient({
               </div>
             ))
           )}
-          {podeGerenciar && (
-            <p className="text-xs text-gray-400 pt-2">
-              ℹ️ A criação e edição de locais é feita na tela de edição do evento (lista → Editar).
-            </p>
-          )}
         </div>
       )}
 
-      {/* ════════════ 🆕 ABA: ALIMENTOS ════════════ */}
+      {/* ════════════ ABA: ALIMENTOS ════════════ */}
       {aba === 'alimentos' && (
         <div className="space-y-3">
+          {isAdmin && (
+            <div className="flex justify-end">
+              <button
+                disabled
+                title="Função 'Adicionar alimento' chega na onda C"
+                className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                + Adicionar alimento (em breve)
+              </button>
+            </div>
+          )}
           {alimentosOrdenados.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">🥫</p>
@@ -263,7 +317,10 @@ export default function EventoDetalheClient({
               return (
                 <div key={a.id} className="bg-white rounded-xl shadow-sm border p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-gray-900">🥫 {a.nome}</p>
+                    <p className="font-medium text-gray-900">
+                      🥫 {a.nome}{' '}
+                      <span className="text-xs uppercase text-gray-400">({a.unit})</span>
+                    </p>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
                         {a.recebimentos}{' '}
@@ -277,7 +334,6 @@ export default function EventoDetalheClient({
                     </div>
                   </div>
 
-                  {/* Detalhe do refugo (read-only por enquanto) */}
                   {(motivo || a.obsRefugo) && (
                     <div className="mt-2 pt-2 border-t text-sm text-gray-500 space-y-0.5">
                       {motivo && (
@@ -296,41 +352,21 @@ export default function EventoDetalheClient({
               )
             })
           )}
-
-          {podeGerenciar && (
-            <div className="flex justify-end pt-2">
-              <button
-                disabled
-                title="Edição de alimentos e refugo chega na próxima onda (17.3.b)"
-                className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                ✏️ Registrar refugo (em breve)
-              </button>
-            </div>
-          )}
-          {podeGerenciar && (
-            <p className="text-xs text-gray-400">
-              ℹ️ A lista de alimentos é definida na criação/edição do evento. O refugo será
-              preenchido no pós-evento (próxima onda).
-            </p>
-          )}
         </div>
       )}
 
       {/* ════════════ ABA: OPERADORES (SÓ ADMIN) ════════════ */}
       {aba === 'operadores' && isAdmin && (
         <div className="space-y-3">
-          {podeGerenciar && (
-            <div className="flex justify-end">
-              <button
-                disabled
-                title="Vincular operadores chega na próxima onda (17.3.b)"
-                className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + Vincular operador (em breve)
-              </button>
-            </div>
-          )}
+          <div className="flex justify-end">
+            <button
+              disabled
+              title="Função 'Vincular operador' chega na onda C"
+              className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              + Vincular operador (em breve)
+            </button>
+          </div>
 
           {evento.operadores.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
@@ -351,31 +387,23 @@ export default function EventoDetalheClient({
                   <p className="font-medium text-gray-900 truncate">{op.nome ?? '—'}</p>
                   <p className="text-sm text-gray-500 truncate">{op.email}</p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
-                      op.ativo
-                        ? 'bg-green-100 text-green-700 border-green-200'
-                        : 'bg-gray-100 text-gray-500 border-gray-200'
-                    }`}
-                  >
-                    {op.ativo ? 'Ativo' : 'Inativo'}
-                  </span>
-                  {podeGerenciar && (
-                    <button
-                      disabled
-                      title="Gerenciar vínculo chega na 17.3.b"
-                      className="text-xs text-gray-300 cursor-not-allowed px-2 py-1"
-                    >
-                      Gerenciar
-                    </button>
-                  )}
-                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
+                    op.ativo
+                      ? 'bg-green-100 text-green-700 border-green-200'
+                      : 'bg-gray-100 text-gray-500 border-gray-200'
+                  }`}
+                >
+                  {op.ativo ? 'Ativo' : 'Inativo'}
+                </span>
               </div>
             ))
           )}
         </div>
       )}
+
+      {/* ════════════ ABA: GRÁFICOS (por último) ════════════ */}
+      {aba === 'graficos' && <GraficosEvento metrics={evento.metrics} />}
     </div>
   )
 }
