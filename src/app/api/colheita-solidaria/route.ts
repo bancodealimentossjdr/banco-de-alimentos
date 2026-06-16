@@ -34,14 +34,21 @@ export async function GET() {
     // 1) Mascara notes se for somente leitura no módulo
     let colheitasSeguras = maskNotesListIfReadOnly(colheitas, role, 'colheita-solidaria')
 
-    // 2) Mascara dados pessoais do produtor e funcionários se for visualizador
+    // 2) Mascara dados pessoais + APENAS VALORES FINANCEIROS se for visualizador.
+    //    ✅ Pesos (quantity) e caixas (boxes) permanecem VISÍVEIS.
+    //    🔴 Só o valor monetário R$/kg (indemnityValue) é ocultado.
     if (shouldMaskPersonalData(role)) {
       colheitasSeguras = colheitasSeguras.map((c) => ({
         ...c,
+        // 🎭 Dados pessoais
         producer: c.producer ? maskProdutor(c.producer, role) : c.producer,
         employee: c.employee ? maskFuncionario(c.employee, role) : c.employee,
         employee2: c.employee2 ? maskFuncionario(c.employee2, role) : c.employee2,
         employee3: c.employee3 ? maskFuncionario(c.employee3, role) : c.employee3,
+        // 💰 Só o valor financeiro é anulado. Pesos/caixas continuam crus.
+        indemnityValue: null,
+        // 🏷️ Flag para o front esconder APENAS os campos em R$
+        isMasked: true,
       }))
     }
 

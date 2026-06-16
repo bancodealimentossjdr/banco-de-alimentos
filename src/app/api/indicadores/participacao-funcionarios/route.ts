@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireView } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { shouldMaskPersonalData, maskContactName } from '@/lib/mask-by-role'
 import {
   getParticipacaoFuncionarios,
   type IndicadoresFilters,
 } from '@/lib/data/indicadores-data'
 
-/**
- * GET /api/indicadores/participacao-funcionarios
- *
- * Query params (todos opcionais):
- *   - from: YYYY-MM-DD (data início)
- *   - to: YYYY-MM-DD (data fim)
- *   - doadorIds: csv
- *   - produtorIds: csv
- *   - beneficiarioIds: csv
- *   - funcionarioIds: csv (filtra pra listar SÓ esses na resposta)
- */
 export async function GET(request: NextRequest) {
   const authResult = await requireView('indicadores')
   if (authResult instanceof NextResponse) return authResult
@@ -30,13 +21,13 @@ export async function GET(request: NextRequest) {
       return arr.length ? arr : undefined
     }
 
-    // from = início do dia; to = fim do dia (inclusivo)
     const parseFrom = (): Date | undefined => {
       const raw = searchParams.get('from')
       if (!raw) return undefined
       const d = new Date(`${raw}T00:00:00.000Z`)
       return isNaN(d.getTime()) ? undefined : d
     }
+
     const parseTo = (): Date | undefined => {
       const raw = searchParams.get('to')
       if (!raw) return undefined
@@ -53,17 +44,28 @@ export async function GET(request: NextRequest) {
       funcionarioIds: parseCsv('funcionarioIds'),
     }
 
-    // Calcula participação de TODOS os funcionários
     const { funcionarioIds, ...eventFilters } = filters
-    let resultado = await getParticipacaoFuncionarios(eventFilters)
 
-    // Filtra a lista de resposta se o usuário escolheu funcionários específicos
-    if (funcionarioIds && funcionarioIds.length > 0) {
-      const set = new Set(funcionarioIds)
-      resultado = resultado.filter((r) => set.has(r.funcionarioId))
-    }
+    // Resultado base (tipo original preservado)
+    const base = await getParticipacaoFuncionarios(eventFilters)
 
-    return NextResponse.json(resultado)
+    // Filtro opcional por funcionários
+    const filtrado =
+      funcionarioIds && funcionarioIds.length > 0
+        ? base.filter((r) => new Set(funcionarioIds).has(r.funcionarioId))
+        : base
+
+    // Mascaramento condicional no servidor (defesa em profundidade)
+    const session = await auth()
+    const resultadoFinal = shouldMaskPersonalData(session?.user?.role)
+      ? filtrado.map((r) => ({
+          ...r,
+          funcionarioNome: maskContactName(r.funcionarioNome ?? ''),
+          // funcionarioRole permanece visível
+        }))
+      : filtrado
+
+    return NextResponse.json(resultadoFinal)
   } catch (error) {
     console.error('Erro ao calcular participação de funcionários:', error)
     return NextResponse.json(

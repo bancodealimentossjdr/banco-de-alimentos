@@ -16,6 +16,8 @@ export default async function EventosPage() {
   const podeGerenciar = canEdit(role, 'eventos')
 
   const eventos = await prisma.evento.findMany({
+    // 🔐 Visualizador NÃO vê rascunhos (coisa interna). Defesa no servidor.
+    where: podeGerenciar ? {} : { status: { not: 'RASCUNHO' } },
     orderBy: [{ status: 'asc' }, { dataInicio: 'desc' }],
     select: {
       id: true,
@@ -31,14 +33,12 @@ export default async function EventosPage() {
     },
   })
 
-  // Ordem semântica: Ativos → Rascunhos → Encerrados (mais recentes primeiro dentro de cada grupo)
   const ordemStatus: Record<EventoStatus, number> = {
     ATIVO: 0,
     RASCUNHO: 1,
     ENCERRADO: 2,
   }
 
-  // Serializa datas e normaliza para o Client Component
   const eventosView = eventos
     .map((e) => ({
       id: e.id,
@@ -57,7 +57,6 @@ export default async function EventosPage() {
     .sort((a, b) => {
       const porStatus = ordemStatus[a.status] - ordemStatus[b.status]
       if (porStatus !== 0) return porStatus
-      // dentro do mesmo status: data de início mais recente primeiro
       return b.dataInicio.localeCompare(a.dataInicio)
     })
 

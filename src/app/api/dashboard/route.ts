@@ -1,6 +1,8 @@
 ﻿import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView } from '@/lib/auth-helpers'
+import { auth } from '@/lib/auth'
+import { shouldMaskPersonalData, maskContactName } from '@/lib/mask-by-role'
 
 export async function GET() {
   const authResult = await requireView('dashboard')
@@ -67,6 +69,34 @@ export async function GET() {
     const totalStock = totalInColdRoom
     const totalApproved = totalInColdRoom + totalDistributedKg
 
+    // 🔐 LGPD — mascara nomes das listas recentes p/ visualizador (fail-secure)
+    const session = await auth()
+    const role = session?.user?.role
+    const mask = shouldMaskPersonalData(role)
+
+    const safeRecentDonations = mask
+      ? recentDonations.map((d) => ({
+          ...d,
+          donor: d.donor ? { name: maskContactName(d.donor.name) } : d.donor,
+        }))
+      : recentDonations
+
+    const safeRecentDistributions = mask
+      ? recentDistributions.map((d) => ({
+          ...d,
+          beneficiary: d.beneficiary
+            ? { name: maskContactName(d.beneficiary.name) }
+            : d.beneficiary,
+        }))
+      : recentDistributions
+
+    const safeRecentHarvests = mask
+      ? recentHarvests.map((h) => ({
+          ...h,
+          producer: h.producer ? { name: maskContactName(h.producer.name) } : h.producer,
+        }))
+      : recentHarvests
+
     return NextResponse.json({
       totalProducts,
       totalDonors,
@@ -78,11 +108,11 @@ export async function GET() {
       totalHarvests,
       totalStock,
       totalApproved,
-      stockItems: [],     // ⚠️ vazio (não há mais granularidade)
-      notifications: [],  // ⚠️ vazio (sem alertas por produto)
-      recentDonations,
-      recentDistributions,
-      recentHarvests,
+      stockItems: [],
+      notifications: [],
+      recentDonations: safeRecentDonations,
+      recentDistributions: safeRecentDistributions,
+      recentHarvests: safeRecentHarvests,
     })
   } catch (error) {
     console.error('Erro GET dashboard:', error)

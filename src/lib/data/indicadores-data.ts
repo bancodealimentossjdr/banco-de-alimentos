@@ -172,7 +172,7 @@ export async function getParticipacaoFuncionarios(
 
       return {
         funcionarioId: func.id,
-        funcionarioNome: func.name,
+        funcionarioNome: func.name ?? 'Sem nome', // ✅ garante string pura (Prisma name pode ser null)
         funcionarioRole: func.role,
         kgEnvolvido: kgDoacoes + kgDistribuicoes + kgColheitas,
         numEventos: doacoes.length + distribuicoes.length + colheitas.length,
