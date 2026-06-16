@@ -21,11 +21,23 @@ const CADASTRO_CONFIG = {
 }
 
 /**
+ * 🔧 Opções comuns a todos os hooks de cadastro.
+ *
+ * @property enabled Se `false`, o fetch é PULADO (key vira null no SWR).
+ *                   Use para evitar 403 quando o usuário não tem permissão
+ *                   de leitura no recurso (ex.: Visualizador).
+ *                   Default: true.
+ */
+interface CadastroOptions {
+  enabled?: boolean
+}
+
+/**
  * 🛒 Lista de produtos cadastrados
  */
-export function useProdutos() {
+export function useProdutos({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Product[]>(
-    '/api/produtos',
+    enabled ? '/api/produtos' : null,
     CADASTRO_CONFIG
   )
   return {
@@ -39,9 +51,9 @@ export function useProdutos() {
 /**
  * 🏪 Lista de doadores
  */
-export function useDoadores() {
+export function useDoadores({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Donor[]>(
-    '/api/doadores',
+    enabled ? '/api/doadores' : null,
     CADASTRO_CONFIG
   )
   return {
@@ -55,9 +67,9 @@ export function useDoadores() {
 /**
  * 👥 Lista de beneficiários
  */
-export function useBeneficiarios() {
+export function useBeneficiarios({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Beneficiary[]>(
-    '/api/beneficiarios',
+    enabled ? '/api/beneficiarios' : null,
     CADASTRO_CONFIG
   )
   return {
@@ -71,9 +83,9 @@ export function useBeneficiarios() {
 /**
  * 🧑 Lista de funcionários
  */
-export function useFuncionarios() {
+export function useFuncionarios({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Employee[]>(
-    '/api/funcionarios',
+    enabled ? '/api/funcionarios' : null,
     CADASTRO_CONFIG
   )
   return {
@@ -87,9 +99,9 @@ export function useFuncionarios() {
 /**
  * 🌾 Lista de produtores rurais
  */
-export function useProdutores() {
+export function useProdutores({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Producer[]>(
-    '/api/produtores',
+    enabled ? '/api/produtores' : null,
     CADASTRO_CONFIG
   )
   return {

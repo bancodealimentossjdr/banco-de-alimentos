@@ -17,6 +17,7 @@ interface HarvestItem {
 interface Harvest {
   id: string; date: string; status: string; notes: string | null
   indemnityValue: number | null
+  isMasked?: boolean
   producer: { id: string; name: string }
   employee: { id: string; name: string } | null
   employee2: { id: string; name: string } | null
@@ -48,6 +49,9 @@ const STATUS_OPTIONS = [
   { value: 'cancelada', label: 'Cancelada', color: 'bg-red-100 text-red-700' },
 ]
 
+// 🎭 Placeholder visual para valores ocultos do visualizador
+const MASK = '•••'
+
 export default function ColheitaSolidariaPage() {
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeEditar = canEdit('colheita-solidaria')
@@ -56,9 +60,11 @@ export default function ColheitaSolidariaPage() {
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
   // 🚀 Cache global de cadastros
-  const { produtos: products } = useProdutos()
-  const { produtores: producers } = useProdutores()
-  const { funcionarios: employees } = useFuncionarios()
+  // ⚠️ produtos/produtores/funcionários só são buscados quando o usuário PODE EDITAR.
+  // Visualizador não vê o formulário, então essas chamadas dariam 403 à toa.
+  const { produtos: products } = useProdutos({ enabled: podeEditar })
+  const { funcionarios: employees } = useFuncionarios({ enabled: podeEditar })
+  const { produtores: producers } = useProdutores({ enabled: podeEditar })
 
   // 📋 Lista de colheitas
   const {
@@ -80,9 +86,9 @@ export default function ColheitaSolidariaPage() {
     employee2Id: '',
     employee3Id: '',
     date: (() => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-})(),
+      const d = new Date()
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })(),
     status: 'agendada',
     notes: '',
     indemnityValue: 1.5,
@@ -115,9 +121,9 @@ export default function ColheitaSolidariaPage() {
       employee2Id: '',
       employee3Id: '',
       date: (() => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-})(),
+        const d = new Date()
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })(),
       status: 'agendada',
       notes: '',
       indemnityValue: 1.5,
@@ -568,6 +574,8 @@ export default function ColheitaSolidariaPage() {
             const harvestEmployees = getHarvestEmployees(harvest)
             const canEditThis = canEditRecord('colheita-solidaria', harvest.date)
             const canDeleteThis = podeExcluir
+            // 🎭 Se a API marcou como mascarado, ocultamos TODOS os números
+            const masked = harvest.isMasked === true
 
             return (
               <div key={harvest.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
@@ -578,7 +586,7 @@ export default function ColheitaSolidariaPage() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.color}`}>
                         {statusStyle.label}
                       </span>
-                      {ind.totalBoxes > 0 && (
+                      {!masked && ind.totalBoxes > 0 && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                           📦 {ind.totalBoxes} cx
                         </span>
@@ -628,16 +636,23 @@ export default function ColheitaSolidariaPage() {
                     {harvest.items.map(item => (
                       <div key={item.id} className="px-3 py-1.5 bg-green-50 border border-green-100 rounded-lg text-sm">
                         <span className="text-green-700 font-medium">{item.product.name}</span>
+                        {/* ✅ Peso sempre visível */}
                         <span className="text-gray-500 mx-1">•</span>
                         <span className="text-gray-700">{item.quantity} {item.product.unit}</span>
+                        {/* ✅ Caixas sempre visíveis */}
                         {item.boxes ? (
                           <>
                             <span className="text-gray-500 mx-1">•</span>
                             <span className="text-blue-600 font-medium">{item.boxes}cx</span>
                           </>
                         ) : null}
-                        <span className="text-gray-500 mx-1">•</span>
-                        <span className="text-amber-700 font-semibold">R$ {(item.quantity * ind.rate).toFixed(2)}</span>
+                        {/* 🔴 Valor R$ só para quem pode ver */}
+                        {!masked && (
+                          <>
+                            <span className="text-gray-500 mx-1">•</span>
+                            <span className="text-amber-700 font-semibold">R$ {(item.quantity * ind.rate).toFixed(2)}</span>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -647,14 +662,18 @@ export default function ColheitaSolidariaPage() {
                       <div key={item.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm">
                         <div className="min-w-0">
                           <span className="text-green-700 font-medium">{item.product.name}</span>
+                          {/* ✅ Peso e caixas sempre visíveis */}
                           <span className="text-gray-500 ml-1">
                             ({item.quantity} {item.product.unit}
                             {item.boxes ? ` · ${item.boxes}cx` : ''})
                           </span>
                         </div>
-                        <span className="text-amber-700 font-semibold shrink-0 ml-2">
-                          R$ {(item.quantity * ind.rate).toFixed(2)}
-                        </span>
+                        {/* 🔴 Valor R$ só para quem pode ver */}
+                        {!masked && (
+                          <span className="text-amber-700 font-semibold shrink-0 ml-2">
+                            R$ {(item.quantity * ind.rate).toFixed(2)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -662,26 +681,34 @@ export default function ColheitaSolidariaPage() {
 
                 <div className="pt-3 border-t border-gray-100">
                   <div className="hidden sm:flex flex-wrap gap-4 items-center">
+                    {/* ✅ Peso Total sempre visível */}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">Peso Total:</span>
                       <span className="text-sm font-bold text-gray-900">{ind.totalKg.toFixed(1)} kg</span>
                     </div>
+                    {/* ✅ Caixas sempre visíveis */}
                     {ind.totalBoxes > 0 && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500">Caixas:</span>
                         <span className="text-sm font-bold text-blue-600">📦 {ind.totalBoxes}</span>
                       </div>
                     )}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Valor/kg:</span>
-                      <span className="text-sm font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 ml-auto">
-                      <span className="text-xs text-gray-500">Indenização Total:</span>
-                      <span className="text-lg font-bold text-amber-700">
-                        R$ {ind.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
+                    {/* 🔴 Valor/kg só para quem pode ver */}
+                    {!masked && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Valor/kg:</span>
+                        <span className="text-sm font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {/* 🔴 Indenização Total só para quem pode ver */}
+                    {!masked && (
+                      <div className="flex items-center gap-2 ml-auto">
+                        <span className="text-xs text-gray-500">Indenização Total:</span>
+                        <span className="text-lg font-bold text-amber-700">
+                          R$ {ind.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="sm:hidden space-y-2">
@@ -695,16 +722,20 @@ export default function ColheitaSolidariaPage() {
                         <span className="font-bold text-blue-600">📦 {ind.totalBoxes}</span>
                       </div>
                     )}
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Valor/kg</span>
-                      <span className="font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between items-center bg-amber-50 -mx-4 px-4 py-2 rounded-lg">
-                      <span className="text-sm font-medium text-amber-700">Indenização Total</span>
-                      <span className="text-xl font-bold text-amber-700">
-                        R$ {ind.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
+                    {!masked && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Valor/kg</span>
+                        <span className="font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {!masked && (
+                      <div className="flex justify-between items-center bg-amber-50 -mx-4 px-4 py-2 rounded-lg">
+                        <span className="text-sm font-medium text-amber-700">Indenização Total</span>
+                        <span className="text-xl font-bold text-amber-700">
+                          R$ {ind.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
