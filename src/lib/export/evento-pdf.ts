@@ -1,15 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
-// 🆕 17.3 — rótulos legíveis do enum MotivoRefugo
-const MOTIVO_LABEL: Record<string, string> = {
-  VALIDADE_VENCIDA: 'Validade vencida',
-  EMBALAGEM_VIOLADA: 'Embalagem violada',
-  AVARIA: 'Avaria',
-  CONTAMINACAO: 'Contaminação',
-  OUTRO: 'Outro',
-}
-
 export interface EventoExportData {
   nome: string
   status: string
@@ -26,7 +17,6 @@ export interface EventoExportData {
     nome: string
     recebidoKg: number
     refugoKg: number
-    motivoRefugo: string | null
   }[]
   // operadores só vêm preenchidos quando isAdmin (já mascarados ou não no server)
   operadores: { nome: string; email: string; role: string }[] | null
@@ -36,7 +26,6 @@ export interface EventoExportData {
 const fmtKg = (n: number) =>
   `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
 
-const motivoLabel = (m: string | null) => (m ? MOTIVO_LABEL[m] ?? m : '—')
 
 export function gerarPdfEvento(data: EventoExportData): Buffer {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
@@ -101,14 +90,13 @@ export function gerarPdfEvento(data: EventoExportData): Buffer {
   // ── 🆕 17.3 — Recebido e refugo por alimento ──
   autoTable(doc, {
     startY: y,
-    head: [['Alimento', 'Recebido', 'Refugo', 'Motivo do refugo']],
+    head: [['Alimento', 'Recebido', 'Refugo']],
     body:
       data.porAlimento.length > 0
         ? data.porAlimento.map((a) => [
             a.nome,
             fmtKg(a.recebidoKg),
             fmtKg(a.refugoKg),
-            a.refugoKg > 0 ? motivoLabel(a.motivoRefugo) : '—',
           ])
         : [['— sem alimentos —', '', '', '']],
     theme: 'striped',

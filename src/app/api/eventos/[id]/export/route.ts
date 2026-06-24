@@ -16,15 +16,6 @@ function maskEmail(email: string | null): string {
   return `${user.slice(0, 2)}${'*'.repeat(Math.max(user.length - 2, 1))}@${domain}`
 }
 
-// 🆕 17.3 — rótulos legíveis para o enum MotivoRefugo
-const MOTIVO_LABEL: Record<string, string> = {
-  VALIDADE_VENCIDA: 'Validade vencida',
-  EMBALAGEM_VIOLADA: 'Embalagem violada',
-  AVARIA: 'Avaria',
-  CONTAMINACAO: 'Contaminação',
-  OUTRO: 'Outro',
-}
-
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -54,7 +45,6 @@ export async function GET(
         select: {
           id: true,
           refugoKg: true,
-          motivoRefugo: true,
           product: { select: { id: true, name: true, unit: true } },
         },
       },
@@ -167,27 +157,25 @@ export async function GET(
   y = doc.lastAutoTable.finalY + 24
 
   // ─── 🆕 17.3 — Recebido e refugo POR ALIMENTO ───
-  const alimentosBody = evento.alimentos.map((a) => {
-    // 🔄 17.4 — chave do mapa é o nome do product (idêntico ao usado na agregação)
-    const recebido = recebidoPorAlimento.get(a.product.name) ?? 0
-    const motivo = a.motivoRefugo ? MOTIVO_LABEL[a.motivoRefugo] ?? a.motivoRefugo : '—'
-    return [
-      a.product.name,
-      fmtKg(recebido),
-      fmtKg(a.refugoKg ?? 0),
-      (a.refugoKg ?? 0) > 0 ? motivo : '—',
-    ]
-  })
+const alimentosBody = evento.alimentos.map((a) => {
+  // 🔄 17.4 — chave do mapa é o nome do product (idêntico ao usado na agregação)
+  const recebido = recebidoPorAlimento.get(a.product.name) ?? 0
+  return [
+    a.product.name,
+    fmtKg(recebido),
+    fmtKg(a.refugoKg ?? 0),
+  ]
+})
 
-  autoTable(doc, {
-    startY: y,
-    head: [['Alimento', 'Recebido', 'Refugo', 'Motivo do refugo']],
-    body: alimentosBody.length > 0 ? alimentosBody : [['— sem alimentos —', '', '', '']],
-    theme: 'striped',
-    headStyles: { fillColor: verde },
-    styles: { fontSize: 10 },
-    margin: { left: 40, right: 40 },
-  })
+autoTable(doc, {
+  startY: y,
+  head: [['Alimento', 'Recebido', 'Refugo']],
+  body: alimentosBody.length > 0 ? alimentosBody : [['— sem alimentos —', '', '']],
+  theme: 'striped',
+  headStyles: { fillColor: verde },
+  styles: { fontSize: 10 },
+  margin: { left: 40, right: 40 },
+})
   // @ts-expect-error lastAutoTable é injetado pelo plugin
   y = doc.lastAutoTable.finalY + 24
 

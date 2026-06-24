@@ -34,7 +34,6 @@ export async function getEventoExportData(opts: {
         select: {
           id: true,
           refugoKg: true,
-          motivoRefugo: true,
           product: { select: { id: true, name: true, unit: true } },
         },
       },
@@ -85,7 +84,6 @@ export async function getEventoExportData(opts: {
     nome: a.product.name,
     recebidoKg: round(recebidoPorAlimento.get(a.id) ?? 0),
     refugoKg: round(a.refugoKg ?? 0),
-    motivoRefugo: a.motivoRefugo ?? null,
   }))
 
   // 🔐 Operadores só existem no PDF do admin.

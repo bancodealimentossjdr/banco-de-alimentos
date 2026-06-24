@@ -126,7 +126,8 @@ export async function PATCH(
 // ──────────────────────────────────────────────
 // PUT — Editar evento + locais + alimentos (ADMIN)
 // Regra: não remove local/alimento que já tem recebimento.
-// 🔄 17.4 — alimentos: [{ productId }]
+// 🔄 17.4 — alimentos: [{ productId, refugoKg }]
+// 🆕 17.6 — grava refugoKg por alimento + obsRefugo geral do evento
 // ──────────────────────────────────────────────
 export async function PUT(
   request: NextRequest,
@@ -139,7 +140,9 @@ export async function PUT(
 
   try {
     const body = await request.json().catch(() => ({}))
-    const { nome, descricao, dataInicio, dataFim, integraEstoque, locais, alimentos } = body
+    // 🆕 17.6 — lê obsRefugo do body
+    const { nome, descricao, dataInicio, dataFim, integraEstoque, locais, alimentos, obsRefugo } =
+      body
 
     if (!nome || !nome.trim()) {
       return NextResponse.json({ error: 'Nome do evento é obrigatório' }, { status: 400 })
@@ -193,8 +196,10 @@ export async function PUT(
       )
     }
 
-    // ── Alimentos (🔄 17.4 — agora por productId) ──
-    const alimentosInput: { productId?: string }[] = Array.isArray(alimentos) ? alimentos : []
+    // ── Alimentos (🔄 17.4 — productId; 🆕 17.6 — refugoKg) ──
+    const alimentosInput: { productId?: string; refugoKg?: number }[] = Array.isArray(alimentos)
+      ? alimentos
+      : []
     const productIdsValidos = alimentosInput
       .map((a) => (a && typeof a.productId === 'string' ? a.productId.trim() : ''))
       .filter((pid) => pid.length > 0)
@@ -210,6 +215,16 @@ export async function PUT(
         { error: 'Não é possível adicionar o mesmo alimento mais de uma vez' },
         { status: 400 },
       )
+    }
+
+    // 🆕 17.6 — mapa productId → refugoKg (sanitizado: número finito >= 0)
+    const refugoPorProduct = new Map<string, number>()
+    for (const a of alimentosInput) {
+      if (a && typeof a.productId === 'string') {
+        const pid = a.productId.trim()
+        const kg = Number(a.refugoKg)
+        refugoPorProduct.set(pid, Number.isFinite(kg) && kg > 0 ? kg : 0)
+      }
     }
 
     // 🛡️ Garante que todos os productIds existem (backend não confia no front)
@@ -252,7 +267,7 @@ export async function PUT(
 
     // ── Transação ──
     const atualizado = await prisma.$transaction(async (tx) => {
-      // dados base
+      // dados base (🆕 17.6 — grava obsRefugo geral)
       await tx.evento.update({
         where: { id },
         data: {
@@ -261,6 +276,7 @@ export async function PUT(
           dataInicio: new Date(dataInicio),
           dataFim: dataFim ? new Date(dataFim) : null,
           integraEstoque: integraEstoque ?? true,
+          obsRefugo: typeof obsRefugo === 'string' ? obsRefugo.trim() || null : null, // 🆕 17.6
         },
       })
 
@@ -279,7 +295,11 @@ export async function PUT(
           })
         } else {
           await tx.localColeta.create({
-            data: { eventoId: id, nome: l.nome!.trim(), endereco: l.endereco?.toString().trim() || null },
+            data: {
+              eventoId: id,
+              nome: l.nome!.trim(),
+              endereco: l.endereco?.toString().trim() || null,
+            },
           })
         }
       }
@@ -291,21 +311,21 @@ export async function PUT(
         })
       }
       // upsert alimentos por productId, preservando ordem do array
-      const existentesPorProduct = new Map(
-        evento.alimentos.map((a) => [a.productId, a]),
-      )
+      const existentesPorProduct = new Map(evento.alimentos.map((a) => [a.productId, a]))
       for (let i = 0; i < productIdsValidos.length; i++) {
         const pid = productIdsValidos[i]
         const existente = existentesPorProduct.get(pid)
+        const refugoKg = refugoPorProduct.get(pid) ?? 0 // 🆕 17.6
         if (existente) {
-          // só atualiza a ordem (refugo/obs preservados)
+          // 🆕 17.6 — atualiza ordem + refugoKg
           await tx.eventoAlimento.update({
             where: { id: existente.id },
-            data: { ordem: i },
+            data: { ordem: i, refugoKg },
           })
         } else {
+          // 🆕 17.6 — cria já com refugoKg
           await tx.eventoAlimento.create({
-            data: { eventoId: id, productId: pid, ordem: i },
+            data: { eventoId: id, productId: pid, ordem: i, refugoKg },
           })
         }
       }

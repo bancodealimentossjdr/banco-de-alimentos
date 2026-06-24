@@ -2,18 +2,12 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import toast from 'react-hot-toast'
+import { useRouter } from 'next/navigation'
 import GraficosEvento from './GraficosEvento'
 import ExportarEventoPdf from './ExportarEventoPdf'
 
 type EventoStatus = 'RASCUNHO' | 'ATIVO' | 'ENCERRADO'
-
-const MOTIVO_LABEL: Record<string, string> = {
-  VALIDADE_VENCIDA: 'Validade vencida',
-  EMBALAGEM_VIOLADA: 'Embalagem violada',
-  AVARIA: 'Avaria',
-  CONTAMINACAO: 'Contaminação',
-  OUTRO: 'Outro',
-}
 
 interface LocalView {
   id: string
@@ -28,8 +22,6 @@ interface AlimentoView {
   unit: string
   ordem: number
   refugoKg: number
-  motivoRefugo: string | null
-  obsRefugo: string | null
   recebimentos: number
 }
 interface OperadorView {
@@ -78,6 +70,7 @@ interface EventoView {
   dataFim: string | null
   status: EventoStatus
   integraEstoque: boolean
+  obsRefugo: string | null // 🆕 17.6
   encerradoEm: string | null
   encerradoPor: { id: string; name: string } | null
   criadoPor: { id: string; name: string } | null
@@ -109,8 +102,21 @@ export default function EventoDetalheClient({
   podeRegistrar: boolean
   isAdmin: boolean
 }) {
+  const router = useRouter()
   const [aba, setAba] = useState<Aba>('resumo')
   const badge = STATUS_BADGE[evento.status]
+
+  // 🆕 17.6 — estado local de edição de refugo
+  const podeEditarRefugo = isAdmin && evento.status !== 'ENCERRADO'
+  const [editandoRefugo, setEditandoRefugo] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [refugoDraft, setRefugoDraft] = useState<Record<string, string>>(() =>
+    Object.fromEntries(evento.alimentos.map((a) => [a.id, String(a.refugoKg ?? 0)])),
+  )
+  const [obsDraft, setObsDraft] = useState(evento.obsRefugo ?? '')
+
+  // 🆕 17.6 — estado do encerramento
+  const [encerrando, setEncerrando] = useState(false)
 
   const formatDate = (date: string) => {
     const raw = date.includes('T') ? date.split('T')[0] : date
@@ -125,14 +131,85 @@ export default function EventoDetalheClient({
   const fmtQtd = (n: number, unidade: string) =>
     `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unidade}`
 
-  const motivoLabel = (m: string | null) => (m ? MOTIVO_LABEL[m] ?? m : null)
-
   const tabBtn = (id: Aba) =>
     `px-4 py-2 text-sm font-medium rounded-lg transition whitespace-nowrap ${
       aba === id ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-100'
     }`
 
   const alimentosOrdenados = [...evento.alimentos].sort((a, b) => a.ordem - b.ordem)
+
+  // 🆕 17.6 — salva refugo + obs via PUT (reaproveita o endpoint existente)
+  const salvarRefugo = async () => {
+    setSalvando(true)
+    try {
+      const payload = {
+        // o PUT exige estes campos; reenviamos o estado atual do evento
+        nome: evento.nome,
+        descricao: evento.descricao,
+        dataInicio: evento.dataInicio,
+        dataFim: evento.dataFim,
+        integraEstoque: evento.integraEstoque,
+        obsRefugo: obsDraft, // 🆕
+        locais: evento.locais.map((l) => ({
+          id: l.id,
+          nome: l.nome,
+          endereco: l.endereco,
+        })),
+        // 🆕 reenvia alimentos por productId + refugoKg do draft
+        alimentos: alimentosOrdenados.map((a) => ({
+          productId: a.productId,
+          refugoKg: Number(refugoDraft[a.id]?.replace(',', '.')) || 0,
+        })),
+      }
+
+      const res = await fetch(`/api/eventos/${evento.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Erro ao salvar refugo')
+      }
+
+      toast.success('Refugo salvo com sucesso')
+      setEditandoRefugo(false)
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar refugo')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  // 🆕 17.6 — encerrar evento (PATCH action:'encerrar')
+  const encerrarEvento = async () => {
+    if (
+      !confirm(
+        'Encerrar este evento? Após encerrado, não será mais possível registrar doações nem editar o refugo.',
+      )
+    )
+      return
+    setEncerrando(true)
+    try {
+      const res = await fetch(`/api/eventos/${evento.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'encerrar' }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Erro ao encerrar evento')
+      }
+      toast.success('Evento encerrado')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao encerrar evento')
+    } finally {
+      setEncerrando(false)
+    }
+  }
 
   return (
     <div>
@@ -165,11 +242,21 @@ export default function EventoDetalheClient({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* 🆕 17.6 — botão Encerrar (só admin, só evento ATIVO) */}
+          {isAdmin && evento.status === 'ATIVO' && (
+            <button
+              onClick={encerrarEvento}
+              disabled={encerrando}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+            >
+              {encerrando ? 'Encerrando…' : '⏹️ Encerrar evento'}
+            </button>
+          )}
           <ExportarEventoPdf eventoId={evento.id} isAdmin={isAdmin} />
         </div>
       </div>
 
-      {/* 🗂️ Abas — ORDEM NOVA */}
+      {/* 🗂️ Abas */}
       <div className="flex gap-2 mb-6 border-b pb-3 overflow-x-auto">
         <button className={tabBtn('resumo')} onClick={() => setAba('resumo')}>
           📋 Resumo
@@ -193,7 +280,7 @@ export default function EventoDetalheClient({
         </button>
       </div>
 
-      {/* ════════════ ABA: RESUMO (intacta) ════════════ */}
+      {/* ════════════ ABA: RESUMO ════════════ */}
       {aba === 'resumo' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -226,6 +313,14 @@ export default function EventoDetalheClient({
             </div>
           )}
 
+          {/* 🆕 17.6 — observação geral de refugo (leitura no resumo) */}
+          {evento.obsRefugo && (
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs font-medium text-gray-500 mb-1">Observação de refugo</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{evento.obsRefugo}</p>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl shadow-sm border p-4 text-sm text-gray-500 space-y-1">
             {evento.criadoPor && <p>Criado por {evento.criadoPor.name}</p>}
             {evento.status === 'ENCERRADO' && evento.encerradoPor && evento.encerradoEm && (
@@ -240,7 +335,6 @@ export default function EventoDetalheClient({
       {/* ════════════ ABA: DOAÇÕES (ONDA B) ════════════ */}
       {aba === 'doacoes' && (
         <div className="space-y-4">
-          {/* Botão Registrar Doação */}
           {podeRegistrar && evento.status === 'ATIVO' && (
             <div className="flex justify-end">
               <Link
@@ -265,7 +359,6 @@ export default function EventoDetalheClient({
             </div>
           ) : (
             <>
-              {/* Cards por local */}
               {evento.doacoes.porLocal.map((local) => (
                 <div key={local.id} className="bg-white rounded-xl shadow-sm border p-4">
                   <p className="font-semibold text-gray-900 mb-3">📍 {local.nome}</p>
@@ -284,11 +377,8 @@ export default function EventoDetalheClient({
                     ))}
                   </div>
 
-                  {/* Subtotal do local (por unidade) */}
                   <div className="mt-3 pt-2 border-t flex items-center justify-between">
-                    <span className="text-xs font-medium text-gray-500 uppercase">
-                      Subtotal
-                    </span>
+                    <span className="text-xs font-medium text-gray-500 uppercase">Subtotal</span>
                     <span className="text-sm font-bold text-gray-900 tabular-nums">
                       {local.subtotais.map((s) => fmtQtd(s.quantidade, s.unidade)).join(' · ')}
                     </span>
@@ -296,11 +386,8 @@ export default function EventoDetalheClient({
                 </div>
               ))}
 
-              {/* Total geral */}
               <div className="bg-green-600 rounded-xl shadow-sm p-5 flex items-center justify-between text-white">
-                <span className="font-semibold uppercase tracking-wide text-sm">
-                  Total geral
-                </span>
+                <span className="font-semibold uppercase tracking-wide text-sm">Total geral</span>
                 <span className="text-xl font-bold tabular-nums">
                   {evento.doacoes.totalGeral
                     .map((t) => fmtQtd(t.quantidade, t.unidade))
@@ -353,65 +440,114 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: ALIMENTOS ════════════ */}
+      {/* ════════════ ABA: ALIMENTOS (🆕 17.6 — edição de refugo) ════════════ */}
       {aba === 'alimentos' && (
         <div className="space-y-3">
-          {isAdmin && (
-            <div className="flex justify-end">
-              <button
-                disabled
-                title="Função 'Adicionar alimento' chega na onda C"
-                className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + Adicionar alimento (em breve)
-              </button>
+          {/* Barra de ação de refugo (só admin, evento não encerrado) */}
+          {podeEditarRefugo && (
+            <div className="flex justify-end gap-2">
+              {!editandoRefugo ? (
+                <button
+                  onClick={() => setEditandoRefugo(true)}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition active:scale-95"
+                >
+                  ✏️ Lançar / editar refugo
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      // descarta alterações
+                      setRefugoDraft(
+                        Object.fromEntries(
+                          evento.alimentos.map((a) => [a.id, String(a.refugoKg ?? 0)]),
+                        ),
+                      )
+                      setObsDraft(evento.obsRefugo ?? '')
+                      setEditandoRefugo(false)
+                    }}
+                    disabled={salvando}
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={salvarRefugo}
+                    disabled={salvando}
+                    className="bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition active:scale-95"
+                  >
+                    {salvando ? 'Salvando…' : '💾 Salvar refugo'}
+                  </button>
+                </>
+              )}
             </div>
           )}
+
           {alimentosOrdenados.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">🥫</p>
               <p>Nenhum alimento cadastrado</p>
             </div>
           ) : (
-            alimentosOrdenados.map((a) => {
-              const motivo = motivoLabel(a.motivoRefugo)
-              return (
-                <div key={a.id} className="bg-white rounded-xl shadow-sm border p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-gray-900">
-                      🥫 {a.nome}{' '}
-                      <span className="text-xs uppercase text-gray-400">({a.unit})</span>
-                    </p>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
-                        {a.recebimentos}{' '}
-                        {a.recebimentos === 1 ? 'recebimento' : 'recebimentos'}
-                      </span>
-                      {a.refugoKg > 0 && (
+            alimentosOrdenados.map((a) => (
+              <div key={a.id} className="bg-white rounded-xl shadow-sm border p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium text-gray-900">
+                    🥫 {a.nome}{' '}
+                    <span className="text-xs uppercase text-gray-400">({a.unit})</span>
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
+                      {a.recebimentos}{' '}
+                      {a.recebimentos === 1 ? 'recebimento' : 'recebimentos'}
+                    </span>
+
+                    {editandoRefugo ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          value={refugoDraft[a.id] ?? '0'}
+                          onChange={(e) =>
+                            setRefugoDraft((prev) => ({ ...prev, [a.id]: e.target.value }))
+                          }
+                          className="w-24 px-2 py-1 border border-amber-300 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        />
+                        <span className="text-sm text-gray-500">kg</span>
+                      </div>
+                    ) : (
+                      a.refugoKg > 0 && (
                         <span className="px-3 py-1 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-700">
                           Refugo: {fmtKg(a.refugoKg)}
                         </span>
-                      )}
-                    </div>
+                      )
+                    )}
                   </div>
-
-                  {(motivo || a.obsRefugo) && (
-                    <div className="mt-2 pt-2 border-t text-sm text-gray-500 space-y-0.5">
-                      {motivo && (
-                        <p>
-                          <span className="font-medium text-gray-600">Motivo:</span> {motivo}
-                        </p>
-                      )}
-                      {a.obsRefugo && (
-                        <p>
-                          <span className="font-medium text-gray-600">Obs:</span> {a.obsRefugo}
-                        </p>
-                      )}
-                    </div>
-                  )}
                 </div>
-              )
-            })
+              </div>
+            ))
+          )}
+
+          {/* 🆕 17.6 — observação geral de refugo */}
+          {(editandoRefugo || evento.obsRefugo) && (
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">
+                Observação geral de refugo
+              </p>
+              {editandoRefugo ? (
+                <textarea
+                  value={obsDraft}
+                  onChange={(e) => setObsDraft(e.target.value)}
+                  rows={3}
+                  placeholder="Ex.: lote vencido descartado no local X, embalagens violadas no transporte…"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-y"
+                />
+              ) : (
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{evento.obsRefugo}</p>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -463,7 +599,7 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: GRÁFICOS (por último) ════════════ */}
+      {/* ════════════ ABA: GRÁFICOS ════════════ */}
       {aba === 'graficos' && <GraficosEvento metrics={evento.metrics} />}
     </div>
   )
