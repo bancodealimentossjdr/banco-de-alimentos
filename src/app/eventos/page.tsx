@@ -8,7 +8,7 @@ import BotaoVoltar from '@/components/ui/BotaoVoltar'
 export const dynamic = 'force-dynamic'
 
 type EventoStatus = 'RASCUNHO' | 'ATIVO' | 'ENCERRADO'
-<BotaoVoltar fallbackHref="/eventos" />
+
 export default async function EventosPage() {
   const session = await auth()
   const role = session?.user?.role
@@ -61,5 +61,10 @@ export default async function EventosPage() {
       return b.dataInicio.localeCompare(a.dataInicio)
     })
 
-  return <EventosListClient eventos={eventosView} podeGerenciar={podeGerenciar} />
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      <BotaoVoltar fallbackHref="/" />
+      <EventosListClient eventos={eventosView} podeGerenciar={podeGerenciar} />
+    </div>
+  )
 }
