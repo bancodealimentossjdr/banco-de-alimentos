@@ -393,14 +393,6 @@ enum EventoStatus {
   ENCERRADO
 }
 
-enum MotivoRefugo {
-  VALIDADE_VENCIDA
-  EMBALAGEM_VIOLADA
-  AVARIA
-  CONTAMINACAO
-  OUTRO
-}
-
 model Evento {
   id             String           @id @default(cuid())
   nome           String
@@ -409,14 +401,14 @@ model Evento {
   dataFim        DateTime?
   status         EventoStatus     @default(RASCUNHO)
   integraEstoque Boolean          @default(true)
+  obsRefugo      String?          // 🆕 17.6 — observação geral de refugo do evento
 
   // Relations
   locais         LocalColeta[]
   operadores     EventoOperador[]
   recebimentos   Recebimento[]
-  alimentos      EventoAlimento[] // 🆕 17.3
+  alimentos      EventoAlimento[]
 
-  // Auditoria mínima (Onda 17)
   criadoPorId    String
   criadoPor      User             @relation("EventosCriados", fields: [criadoPorId], references: [id])
   encerradoPorId String?
@@ -429,6 +421,7 @@ model Evento {
   @@index([status])
   @@index([criadoPorId])
 }
+
 
 model LocalColeta {
   id           String        @id @default(cuid())
@@ -456,27 +449,25 @@ model EventoAlimento {
   eventoId     String
   evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
-  // 🆕 17.4 — vínculo obrigatório ao catálogo global
   productId    String
   product      Product       @relation(fields: [productId], references: [id])
 
-  ordem        Int           @default(0) // ordem fixa na tela de campo
+  ordem        Int           @default(0)
 
   // Refugo (pós-evento, por alimento) — em kg (peso descartado)
   refugoKg     Float         @default(0)
-  motivoRefugo MotivoRefugo?
-  obsRefugo    String?
+  // ❌ 17.6 — motivoRefugo e obsRefugo REMOVIDOS do código.
+  //    Colunas físicas permanecem no banco (dívida técnica de limpeza).
 
   recebimentos Recebimento[]
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  @@unique([eventoId, productId]) // 🔄 não repetir o mesmo produto no evento
+  @@unique([eventoId, productId])
   @@index([eventoId])
-  @@index([productId])           // 🆕 p/ relatório por produto
+  @@index([productId])
 }
-
 
 model EventoOperador {
   id        String   @id @default(cuid())
