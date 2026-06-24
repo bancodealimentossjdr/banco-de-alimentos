@@ -129,6 +129,17 @@ export default async function EventoDetalhePage({
     .map(([dia, kg]) => ({ dia, kg: round(kg) }))
     .sort((a, b) => a.dia.localeCompare(b.dia))
 
+  // 🆕 objeto metrics consolidado p/ o Client Component
+const metrics = {
+  totalKg: round(totalKg),
+  totalRefugoKg: round(totalRefugoKg),
+  totalLiquidoKg: round(totalKg - totalRefugoKg), // 🔧 nome exigido pelo EventoMetrics
+  kgPorLocal,
+  kgPorTipo,
+  kgPorDia,
+}
+
+
   // ════════════ 🆕 ONDA B — AGREGAÇÃO DE DOAÇÕES ════════════
   // Estrutura: por local → por (produto + unidade) → quantidade
   // + subtotais por local (por unidade) + total geral (por unidade)
@@ -199,6 +210,7 @@ export default async function EventoDetalhePage({
     dataFim: evento.dataFim ? evento.dataFim.toISOString() : null,
     status: evento.status,
     integraEstoque: evento.integraEstoque,
+    obsRefugo: evento.obsRefugo, // 🆕 17.6
     encerradoEm: evento.encerradoEm ? evento.encerradoEm.toISOString() : null,
     encerradoPor: evento.encerradoPor,
     criadoPor: evento.criadoPor,
@@ -208,34 +220,24 @@ export default async function EventoDetalhePage({
       endereco: l.endereco,
       recebimentos: l._count.recebimentos,
     })),
-    // 🔄 17.4 — alimentos serializados (nome/unit via product)
     alimentos: evento.alimentos.map((a) => ({
       id: a.id,
       productId: a.productId,
-      nome: a.product.name,   // 🔄 nome derivado do catálogo
-      unit: a.product.unit,   // 🆕 unidade do catálogo
+      nome: a.product.name,
+      unit: a.product.unit,
       ordem: a.ordem,
       refugoKg: a.refugoKg ?? 0,
-      motivoRefugo: a.motivoRefugo,
-      obsRefugo: a.obsRefugo,
       recebimentos: a._count.recebimentos,
     })),
-    operadores: operadoresView,
+    operadores: operadoresView, // ✅ usa a variável já tratada (cast + guard isAdmin)
     counts: {
       recebimentos: evento._count.recebimentos,
       locais: evento._count.locais,
       operadores: evento._count.operadores,
       alimentos: evento._count.alimentos,
     },
-    metrics: {
-      totalKg: round(totalKg),
-      totalRefugoKg: round(totalRefugoKg),
-      totalLiquidoKg: round(totalKg - totalRefugoKg),
-      kgPorLocal,
-      kgPorTipo,
-      kgPorDia,
-    },
-    doacoes, // 🆕 ONDA B
+    metrics,
+    doacoes,
   }
 
   return (
