@@ -3,11 +3,12 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { canEdit } from '@/lib/permissions'
 import EventosListClient from './EventosListClient'
+import BotaoVoltar from '@/components/ui/BotaoVoltar'
 
 export const dynamic = 'force-dynamic'
 
 type EventoStatus = 'RASCUNHO' | 'ATIVO' | 'ENCERRADO'
-
+<BotaoVoltar fallbackHref="/eventos" />
 export default async function EventosPage() {
   const session = await auth()
   const role = session?.user?.role
