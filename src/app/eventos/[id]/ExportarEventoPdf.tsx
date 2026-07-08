@@ -32,25 +32,26 @@ export default function ExportarEventoPdf({
   }
 
   return (
-    <div className="flex flex-col sm:items-end gap-2 shrink-0">
+    // 🆕 17.6-e — min-w-0 permite encolher; sem shrink-0; largura máxima no mobile
+    <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:items-end">
       <button
         type="button"
         onClick={exportar}
         disabled={baixando}
-        className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
       >
         {baixando ? '⏳ Gerando...' : '📄 Exportar PDF'}
       </button>
 
       {isAdmin && (
-        <label className="flex items-center gap-2 text-sm text-gray-600 select-none cursor-pointer">
+        <label className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm text-gray-600 select-none cursor-pointer">
           <input
             type="checkbox"
             checked={semCensura}
             onChange={(e) => setSemCensura(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+            className="h-4 w-4 shrink-0 rounded border-gray-300 text-green-600 focus:ring-green-500"
           />
-          Exportar sem censura
+          <span>Exportar sem censura</span>
           <span className="text-xs text-amber-600">(dados sensíveis)</span>
         </label>
       )}

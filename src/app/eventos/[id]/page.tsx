@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { canEdit, canRegisterRecebimento } from '@/lib/permissions'
+import { canEdit, podeRegistrarNoEvento } from '@/lib/permissions'
 import EventoDetalheClient from './EventoDetalheClient'
 
 export const dynamic = 'force-dynamic'
@@ -21,10 +21,10 @@ export default async function EventoDetalhePage({
 
   const session = await auth()
   const role = session?.user?.role
-  if (!role) redirect('/login')
+  const userId = session?.user?.id
+  if (!role || !userId) redirect('/login')
 
   const podeGerenciar = canEdit(role, 'eventos')
-  const podeRegistrar = canRegisterRecebimento(role)
   const isAdmin = podeGerenciar
 
   const evento = await prisma.evento.findUnique({
@@ -78,6 +78,35 @@ export default async function EventoDetalhePage({
 
   if (!evento) notFound()
 
+  // 🆕 17.6-h (Decisão #18) — resolve vínculo ATIVO do usuário logado neste evento.
+  // admin/operador ignoram este flag; visualizador depende dele.
+  let temVinculoAtivo = false
+  if (role === 'visualizador') {
+    const vinculo = await prisma.eventoOperador.findUnique({
+      where: { eventoId_userId: { eventoId: id, userId } },
+      select: { ativo: true },
+    })
+    temVinculoAtivo = vinculo?.ativo === true
+  }
+
+  const podeRegistrar = podeRegistrarNoEvento(role, temVinculoAtivo)
+
+  // 🆕 17.6-g — lista de usuários visualizadores para o dropdown de vínculo (só admin).
+  // Nome real (é admin gerenciando); e-mail NÃO exposto cru — o Client não precisa dele aqui.
+  const usuariosVinculaveis = isAdmin
+    ? (
+        await prisma.user.findMany({
+          where: { role: 'visualizador' },
+          select: { id: true, name: true, email: true },
+          orderBy: { name: 'asc' },
+        })
+      ).map((u) => ({
+        id: u.id,
+        nome: u.name,
+        email: maskEmail(u.email),
+      }))
+    : []
+
   const operadoresView =
     isAdmin && evento.operadores
       ? (evento.operadores as unknown as OperadorComUser[]).map((eo) => ({
@@ -130,15 +159,14 @@ export default async function EventoDetalhePage({
     .sort((a, b) => a.dia.localeCompare(b.dia))
 
   // 🆕 objeto metrics consolidado p/ o Client Component
-const metrics = {
-  totalKg: round(totalKg),
-  totalRefugoKg: round(totalRefugoKg),
-  totalLiquidoKg: round(totalKg - totalRefugoKg), // 🔧 nome exigido pelo EventoMetrics
-  kgPorLocal,
-  kgPorTipo,
-  kgPorDia,
-}
-
+  const metrics = {
+    totalKg: round(totalKg),
+    totalRefugoKg: round(totalRefugoKg),
+    totalLiquidoKg: round(totalKg - totalRefugoKg), // 🔧 nome exigido pelo EventoMetrics
+    kgPorLocal,
+    kgPorTipo,
+    kgPorDia,
+  }
 
   // ════════════ 🆕 ONDA B — AGREGAÇÃO DE DOAÇÕES ════════════
   // Estrutura: por local → por (produto + unidade) → quantidade
@@ -246,6 +274,7 @@ const metrics = {
       podeGerenciar={podeGerenciar}
       podeRegistrar={podeRegistrar}
       isAdmin={isAdmin}
+      usuariosVinculaveis={usuariosVinculaveis} // 🆕 17.6-g
     />
   )
 }

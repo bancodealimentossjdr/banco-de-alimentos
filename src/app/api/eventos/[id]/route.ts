@@ -47,8 +47,9 @@ export async function GET(
 }
 
 // ──────────────────────────────────────────────
-// PATCH — Transição de status (ativar / encerrar)
-// Body: { action: 'ativar' | 'encerrar' }
+// PATCH — Transição de status (ativar / encerrar / reverter)
+// Body: { action: 'ativar' | 'encerrar' | 'reverter' }
+// 🆕 reverter: ATIVO → RASCUNHO (só admin, só sem recebimentos)
 // ──────────────────────────────────────────────
 export async function PATCH(
   request: NextRequest,
@@ -61,15 +62,19 @@ export async function PATCH(
 
   try {
     const body = await request.json().catch(() => ({}))
-    const { action } = body as { action?: 'ativar' | 'encerrar' }
+    const { action } = body as { action?: 'ativar' | 'encerrar' | 'reverter' }
 
-    if (action !== 'ativar' && action !== 'encerrar') {
+    if (action !== 'ativar' && action !== 'encerrar' && action !== 'reverter') {
       return NextResponse.json({ error: 'Ação inválida' }, { status: 400 })
     }
 
     const evento = await prisma.evento.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        _count: { select: { recebimentos: true } }, // 🆕 usado no reverter
+      },
     })
     if (!evento) {
       return NextResponse.json({ error: 'Evento não encontrado' }, { status: 404 })
@@ -87,6 +92,31 @@ export async function PATCH(
       const atualizado = await prisma.evento.update({
         where: { id },
         data: { status: 'ATIVO' },
+      })
+      return NextResponse.json(atualizado)
+    }
+
+    // ── 🆕 REVERTER: só ATIVO → RASCUNHO, e só sem recebimentos ──
+    if (action === 'reverter') {
+      if (evento.status !== 'ATIVO') {
+        return NextResponse.json(
+          { error: 'Apenas eventos ativos podem voltar a rascunho' },
+          { status: 400 },
+        )
+      }
+      if (evento._count.recebimentos > 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Evento com doações registradas não pode voltar a rascunho',
+          },
+          { status: 400 },
+        )
+      }
+
+      const atualizado = await prisma.evento.update({
+        where: { id },
+        data: { status: 'RASCUNHO' },
       })
       return NextResponse.json(atualizado)
     }

@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireRegisterRecebimento } from '@/lib/auth-helpers'
+import { requireAuth } from '@/lib/auth-helpers'
+import { podeRegistrarNoEvento } from '@/lib/permissions'
 
 /**
  * 🆕 ONDA 17.4 — Registro EM LOTE de recebimentos num local do evento.
+ * 🔄 17.6-h (Decisão #18) — Gate de registro por evento:
+ *   - admin / operador → registram em qualquer evento ATIVO
+ *   - visualizador     → SÓ se tiver vínculo ATIVO (EventoOperador { ativo:true })
  *
  * Fluxo do voluntário no portão:
  *   - escolhe um Local do evento
@@ -11,20 +15,22 @@ import { requireRegisterRecebimento } from '@/lib/auth-helpers'
  *   - SALVA → cria 1 Recebimento por alimento com quantidade > 0
  *
  * Defesa em profundidade:
- *   1. requireRegisterRecebimento() → admin OU operador (Opção A)
+ *   1. requireAuth() → precisa estar logado
  *   2. evento precisa existir e estar ATIVO
- *   3. local precisa pertencer AO evento
- *   4. cada alimento precisa pertencer AO evento
- *   5. unidade = snapshot de product.unit (frontend NÃO escolhe unidade)
+ *   3. 🆕 gate por role + vínculo (podeRegistrarNoEvento)
+ *   4. local precisa pertencer AO evento
+ *   5. cada alimento precisa pertencer AO evento
+ *   6. unidade = snapshot de product.unit (frontend NÃO escolhe unidade)
  */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  // 1️⃣ Permissão (admin ou operador)
-  const result = await requireRegisterRecebimento()
+  // 1️⃣ Autenticação
+  const result = await requireAuth()
   if (result instanceof NextResponse) return result
   const operadorId = result.user.id
+  const role = result.user.role
 
   const { id: eventoId } = await params
 
@@ -92,6 +98,24 @@ export async function POST(
     return NextResponse.json(
       { error: 'Só é possível registrar recebimentos em eventos ATIVOS' },
       { status: 409 },
+    )
+  }
+
+  // 3️⃣.5 🆕 17.6-h (Decisão #18) — Gate de registro por evento.
+  // admin/operador ignoram o vínculo; visualizador depende dele.
+  let temVinculoAtivo = false
+  if (role === 'visualizador') {
+    const vinculo = await prisma.eventoOperador.findUnique({
+      where: { eventoId_userId: { eventoId, userId: operadorId } },
+      select: { ativo: true },
+    })
+    temVinculoAtivo = vinculo?.ativo === true
+  }
+
+  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
+    return NextResponse.json(
+      { error: 'Você não tem permissão para registrar doações neste evento' },
+      { status: 403 },
     )
   }
 

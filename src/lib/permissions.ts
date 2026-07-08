@@ -99,19 +99,40 @@ export function canEdit(role: UserRole, module: Module): boolean {
 /**
  * 🆕 ONDA 17.3 — Registro de recebimentos em eventos (Opção A).
  *
- * Diferente de canEdit('eventos') (gestão do evento = só admin),
- * o REGISTRO de alimentos é liberado a qualquer admin ou operador
- * em evento ATIVO. O vínculo EventoOperador é apenas organizacional
- * (rótulo "quem está associado a este evento"), NÃO um gate de registro.
+ * ⚠️ REVOGADO PARCIALMENTE PELA DECISÃO #18 (08/07) — NÃO USE ISOLADAMENTE
+ * COMO GATE FINAL. Esta função responde apenas à pergunta "a role, por si só,
+ * já pode registrar em QUALQUER evento?". Isso vale para admin e operador.
  *
- * A trava de status (evento precisa estar ATIVO) é verificada na
- * própria rota de recebimento, pois depende do estado no banco.
+ * Para o perfil VISUALIZADOR, o gate real depende do VÍNCULO no evento
+ * (EventoOperador { ativo:true }), que só pode ser avaliado com acesso ao
+ * banco. Portanto, o gate definitivo é podeRegistrarNoEvento() abaixo.
  *
- * Quem pode CADASTRAR alimento no catálogo / criar local novo no
- * evento continua sendo SÓ admin (via canEdit('eventos')).
+ * A trava de status (evento precisa estar ATIVO) continua na rota de recebimento.
  */
 export function canRegisterRecebimento(role: UserRole): boolean {
   return role === 'admin' || role === 'operador'
+}
+
+/**
+ * 🆕 17.6-h (Decisão #18) — Gate DEFINITIVO de registro de recebimento por evento.
+ *
+ * - admin      → sempre pode (qualquer evento ativo)
+ * - operador   → sempre pode (qualquer evento ativo)
+ * - visualizador → SÓ se tiver vínculo ATIVO no evento (EventoOperador { ativo:true })
+ *
+ * O parâmetro `temVinculoAtivo` deve ser resolvido pela camada que tem acesso
+ * ao banco (page.tsx / rota de recebimento). A trava de status ATIVO é separada.
+ *
+ * ⚠️ Cada evento é uma unidade INDEPENDENTE de autorização para o visualizador:
+ * vínculo em um evento NÃO libera outro.
+ */
+export function podeRegistrarNoEvento(
+  role: UserRole,
+  temVinculoAtivo: boolean,
+): boolean {
+  if (role === 'admin' || role === 'operador') return true
+  if (role === 'visualizador') return temVinculoAtivo
+  return false
 }
 
 /**

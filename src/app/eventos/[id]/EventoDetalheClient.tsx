@@ -32,6 +32,12 @@ interface OperadorView {
   email: string
   role: string
 }
+// 🆕 17.6-g — usuário candidato ao vínculo (dropdown)
+interface UsuarioVinculavel {
+  id: string
+  nome: string | null
+  email: string
+}
 export interface EventoMetrics {
   totalKg: number
   totalRefugoKg: number
@@ -96,11 +102,13 @@ export default function EventoDetalheClient({
   podeGerenciar,
   podeRegistrar,
   isAdmin,
+  usuariosVinculaveis = [], // 🆕 17.6-g
 }: {
   evento: EventoView
   podeGerenciar: boolean
   podeRegistrar: boolean
   isAdmin: boolean
+  usuariosVinculaveis?: UsuarioVinculavel[] // 🆕 17.6-g
 }) {
   const router = useRouter()
   const [aba, setAba] = useState<Aba>('resumo')
@@ -117,6 +125,26 @@ export default function EventoDetalheClient({
 
   // 🆕 17.6 — estado do encerramento
   const [encerrando, setEncerrando] = useState(false)
+
+  // 🆕 estados das transições de status
+  const [ativando, setAtivando] = useState(false)
+  const [revertendo, setRevertendo] = useState(false)
+
+  // 🆕 17.6-g — estado do vínculo de operadores
+  const podeGerenciarOperadores = isAdmin && evento.status !== 'ENCERRADO'
+  const [selUserId, setSelUserId] = useState('')
+  const [vinculando, setVinculando] = useState(false)
+  const [removendoId, setRemovendoId] = useState<string | null>(null)
+
+  // ids já vinculados e ATIVOS → some do dropdown
+  const idsAtivos = new Set(
+    evento.operadores.filter((o) => o.ativo).map((o) => o.userId),
+  )
+  const candidatos = usuariosVinculaveis.filter((u) => !idsAtivos.has(u.id))
+
+  // 🆕 pode voltar para rascunho? (só admin, ATIVO, sem doações)
+  const podeReverter =
+    isAdmin && evento.status === 'ATIVO' && evento.counts.recebimentos === 0
 
   const formatDate = (date: string) => {
     const raw = date.includes('T') ? date.split('T')[0] : date
@@ -183,6 +211,116 @@ export default function EventoDetalheClient({
     }
   }
 
+  // 🆕 17.6-g — vincular operador
+  const vincularOperador = async () => {
+    if (!selUserId) {
+      toast.error('Selecione um usuário')
+      return
+    }
+    setVinculando(true)
+    try {
+      const res = await fetch(`/api/eventos/${evento.id}/operadores`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: selUserId }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Erro ao vincular operador')
+      }
+      toast.success('Operador vinculado')
+      setSelUserId('')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao vincular operador')
+    } finally {
+      setVinculando(false)
+    }
+  }
+
+  // 🆕 17.6-g — desvincular operador (soft: ativo:false)
+  const desvincularOperador = async (userId: string, nome: string | null) => {
+    if (
+      !confirm(
+        `Desvincular ${nome ?? 'este usuário'}? Ele deixará de poder registrar doações neste evento.`,
+      )
+    )
+      return
+    setRemovendoId(userId)
+    try {
+      const res = await fetch(
+        `/api/eventos/${evento.id}/operadores/${userId}`,
+        { method: 'DELETE' },
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Erro ao desvincular operador')
+      }
+      toast.success('Operador desvinculado')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao desvincular operador')
+    } finally {
+      setRemovendoId(null)
+    }
+  }
+
+  // 🆕 ativar evento (PATCH action:'ativar' → RASCUNHO → ATIVO)
+  const ativarEvento = async () => {
+    if (
+      !confirm(
+        'Ativar este evento? A partir daí, operadores poderão registrar doações.',
+      )
+    )
+      return
+    setAtivando(true)
+    try {
+      const res = await fetch(`/api/eventos/${evento.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ativar' }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Erro ao ativar evento')
+      }
+      toast.success('Evento ativado')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao ativar evento')
+    } finally {
+      setAtivando(false)
+    }
+  }
+
+  // 🆕 reverter evento (PATCH action:'reverter' → ATIVO → RASCUNHO)
+  const reverterEvento = async () => {
+    if (
+      !confirm(
+        'Voltar este evento para rascunho? Isso só é possível enquanto não houver doações registradas.',
+      )
+    )
+      return
+    setRevertendo(true)
+    try {
+      const res = await fetch(`/api/eventos/${evento.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reverter' }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Erro ao voltar para rascunho')
+      }
+      toast.success('Evento voltou para rascunho')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao voltar para rascunho')
+    } finally {
+      setRevertendo(false)
+    }
+  }
+
   // 🆕 17.6 — encerrar evento (PATCH action:'encerrar')
   const encerrarEvento = async () => {
     if (
@@ -241,7 +379,29 @@ export default function EventoDetalheClient({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {/* 🆕 Ativar (só admin, só RASCUNHO) */}
+          {isAdmin && evento.status === 'RASCUNHO' && (
+            <button
+              onClick={ativarEvento}
+              disabled={ativando}
+              className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+            >
+              {ativando ? 'Ativando…' : '▶️ Ativar evento'}
+            </button>
+          )}
+
+          {/* 🆕 Voltar para rascunho (só admin, ATIVO, sem doações) */}
+          {podeReverter && (
+            <button
+              onClick={reverterEvento}
+              disabled={revertendo}
+              className="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-60 text-gray-700 font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+            >
+              {revertendo ? 'Revertendo…' : '↩️ Voltar para rascunho'}
+            </button>
+          )}
+
           {/* 🆕 17.6 — botão Encerrar (só admin, só evento ATIVO) */}
           {isAdmin && evento.status === 'ATIVO' && (
             <button
@@ -552,27 +712,56 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: OPERADORES (SÓ ADMIN) ════════════ */}
+      {/* ════════════ ABA: OPERADORES (SÓ ADMIN — 🆕 17.6-g) ════════════ */}
       {aba === 'operadores' && isAdmin && (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            <button
-              disabled
-              title="Função 'Vincular operador' chega na onda C"
-              className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
-            >
-              + Vincular operador (em breve)
-            </button>
-          </div>
+          {/* 🆕 17.6-g — vincular operador (só admin, evento não encerrado) */}
+          {podeGerenciarOperadores ? (
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">
+                Vincular usuário visualizador como operador deste evento
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={selUserId}
+                  onChange={(e) => setSelUserId(e.target.value)}
+                  className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                >
+                  <option value="">— selecione um usuário —</option>
+                  {candidatos.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nome ?? u.email}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={vincularOperador}
+                  disabled={vinculando || !selUserId}
+                  className="shrink-0 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition active:scale-95"
+                >
+                  {vinculando ? 'Vinculando…' : '+ Vincular'}
+                </button>
+              </div>
+              {candidatos.length === 0 && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Nenhum usuário visualizador disponível para vincular.
+                </p>
+              )}
+              <p className="text-xs text-gray-400 mt-2">
+                ℹ️ Visualizadores só registram doações nos eventos em que estão vinculados.
+                Admin e operador registram em qualquer evento ativo.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">
+              ℹ️ Evento encerrado não permite alterar operadores.
+            </p>
+          )}
 
           {evento.operadores.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">👥</p>
               <p>Nenhum operador vinculado a este evento</p>
-              <p className="text-xs mt-1">
-                O vínculo é apenas organizacional — qualquer operador pode registrar recebimentos
-                em eventos ativos.
-              </p>
             </div>
           ) : (
             evento.operadores.map((op) => (
@@ -584,15 +773,27 @@ export default function EventoDetalheClient({
                   <p className="font-medium text-gray-900 truncate">{op.nome ?? '—'}</p>
                   <p className="text-sm text-gray-500 truncate">{op.email}</p>
                 </div>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
-                    op.ativo
-                      ? 'bg-green-100 text-green-700 border-green-200'
-                      : 'bg-gray-100 text-gray-500 border-gray-200'
-                  }`}
-                >
-                  {op.ativo ? 'Ativo' : 'Inativo'}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
+                      op.ativo
+                        ? 'bg-green-100 text-green-700 border-green-200'
+                        : 'bg-gray-100 text-gray-500 border-gray-200'
+                    }`}
+                  >
+                    {op.ativo ? 'Ativo' : 'Inativo'}
+                  </span>
+                  {/* 🆕 17.6-g — desvincular (só ativos, evento não encerrado) */}
+                  {podeGerenciarOperadores && op.ativo && (
+                    <button
+                      onClick={() => desvincularOperador(op.userId, op.nome)}
+                      disabled={removendoId === op.userId}
+                      className="text-red-500 hover:text-red-700 disabled:opacity-50 text-sm font-medium px-2 py-1 rounded-lg hover:bg-red-50 transition"
+                    >
+                      {removendoId === op.userId ? '…' : '🗑️ Desvincular'}
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}
