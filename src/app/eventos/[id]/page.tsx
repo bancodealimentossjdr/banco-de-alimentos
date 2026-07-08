@@ -269,13 +269,15 @@ export default async function EventoDetalhePage({
   }
 
   return (
-    <EventoDetalheClient
-      evento={eventoView}
-      podeGerenciar={podeGerenciar}
-      podeRegistrar={podeRegistrar}
-      isAdmin={isAdmin}
-      usuariosVinculaveis={usuariosVinculaveis} // 🆕 17.6-g
-    />
+    <div className="p-4 md:p-6 max-w-5xl mx-auto w-full overflow-x-hidden">
+      <EventoDetalheClient
+        evento={eventoView}
+        podeGerenciar={podeGerenciar}
+        podeRegistrar={podeRegistrar}
+        isAdmin={isAdmin}
+        usuariosVinculaveis={usuariosVinculaveis} // 🆕 17.6-g
+      />
+    </div>
   )
 }
 

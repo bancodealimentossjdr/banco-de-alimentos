@@ -467,11 +467,11 @@ export default function EventoDetalheClient({
       {/* ════════════ ABA: RESUMO ════════════ */}
       {aba === 'resumo' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Total recebido</p>
-              <p className="text-2xl font-bold text-gray-900">{fmtKg(evento.metrics.totalKg)}</p>
-            </div>
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-3">
+  <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
+    <p className="text-xs text-gray-500">Total recebido</p>
+    <p className="text-2xl font-bold text-gray-900 truncate">{fmtKg(evento.metrics.totalKg)}</p>
+  </div>
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Líquido (s/ refugo)</p>
               <p className="text-2xl font-bold text-green-700">
