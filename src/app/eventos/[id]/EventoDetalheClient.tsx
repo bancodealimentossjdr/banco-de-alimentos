@@ -175,7 +175,6 @@ export default function EventoDetalheClient({
     setSalvando(true)
     try {
       const payload = {
-        // o PUT exige estes campos; reenviamos o estado atual do evento
         nome: evento.nome,
         descricao: evento.descricao,
         dataInicio: evento.dataInicio,
@@ -187,7 +186,6 @@ export default function EventoDetalheClient({
           nome: l.nome,
           endereco: l.endereco,
         })),
-        // 🆕 reenvia alimentos por productId + refugoKg do draft
         alimentos: alimentosOrdenados.map((a) => ({
           productId: a.productId,
           refugoKg: Number(refugoDraft[a.id]?.replace(',', '.')) || 0,
@@ -387,7 +385,7 @@ export default function EventoDetalheClient({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-6">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl md:text-2xl font-bold text-gray-900">{evento.nome}</h2>
+            <h2 className="text-xl md:text-2xl font-bold text-gray-900 break-words">{evento.nome}</h2>
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}>
               {badge.label}
             </span>
@@ -403,7 +401,7 @@ export default function EventoDetalheClient({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+        <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end w-full sm:w-auto">
           {/* 🆕 Ativar (só admin, só RASCUNHO) */}
           {isAdmin && evento.status === 'RASCUNHO' && (
             <button
@@ -467,33 +465,33 @@ export default function EventoDetalheClient({
       {/* ════════════ ABA: RESUMO ════════════ */}
       {aba === 'resumo' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-3">
-  <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
-    <p className="text-xs text-gray-500">Total recebido</p>
-    <p className="text-2xl font-bold text-gray-900 truncate">{fmtKg(evento.metrics.totalKg)}</p>
-  </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs text-gray-500">Total recebido</p>
+              <p className="text-2xl font-bold text-gray-900 truncate">{fmtKg(evento.metrics.totalKg)}</p>
+            </div>
+            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Líquido (s/ refugo)</p>
-              <p className="text-2xl font-bold text-green-700">
+              <p className="text-2xl font-bold text-green-700 truncate">
                 {fmtKg(evento.metrics.totalLiquidoKg)}
               </p>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Refugo</p>
-              <p className="text-2xl font-bold text-amber-600">
+              <p className="text-2xl font-bold text-amber-600 truncate">
                 {fmtKg(evento.metrics.totalRefugoKg)}
               </p>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Recebimentos</p>
-              <p className="text-2xl font-bold text-gray-900">{evento.counts.recebimentos}</p>
+              <p className="text-2xl font-bold text-gray-900 truncate">{evento.counts.recebimentos}</p>
             </div>
           </div>
 
           {evento.descricao && (
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs font-medium text-gray-500 mb-1">Descrição</p>
-              <p className="text-sm text-gray-700">{evento.descricao}</p>
+              <p className="text-sm text-gray-700 break-words">{evento.descricao}</p>
             </div>
           )}
 
@@ -501,7 +499,7 @@ export default function EventoDetalheClient({
           {evento.obsRefugo && (
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs font-medium text-gray-500 mb-1">Observação de refugo</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{evento.obsRefugo}</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{evento.obsRefugo}</p>
             </div>
           )}
 
@@ -551,28 +549,28 @@ export default function EventoDetalheClient({
                     {local.produtos.map((p, i) => (
                       <div
                         key={`${p.nome}-${p.unidade}-${i}`}
-                        className="flex items-center justify-between text-sm border-b border-dashed border-gray-100 pb-1.5"
+                        className="flex items-center justify-between gap-2 text-sm border-b border-dashed border-gray-100 pb-1.5"
                       >
-                        <span className="text-gray-700">🥫 {p.nome}</span>
-                        <span className="font-medium text-gray-900 tabular-nums">
+                        <span className="text-gray-700 min-w-0 truncate">🥫 {p.nome}</span>
+                        <span className="font-medium text-gray-900 tabular-nums shrink-0">
                           {fmtQtd(p.quantidade, p.unidade)}
                         </span>
                       </div>
                     ))}
                   </div>
 
-                  <div className="mt-3 pt-2 border-t flex items-center justify-between">
+                  <div className="mt-3 pt-2 border-t flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-gray-500 uppercase">Subtotal</span>
-                    <span className="text-sm font-bold text-gray-900 tabular-nums">
+                    <span className="text-sm font-bold text-gray-900 tabular-nums shrink-0">
                       {local.subtotais.map((s) => fmtQtd(s.quantidade, s.unidade)).join(' · ')}
                     </span>
                   </div>
                 </div>
               ))}
 
-              <div className="bg-green-600 rounded-xl shadow-sm p-5 flex items-center justify-between text-white">
+              <div className="bg-green-600 rounded-xl shadow-sm p-5 flex items-center justify-between gap-2 text-white">
                 <span className="font-semibold uppercase tracking-wide text-sm">Total geral</span>
-                <span className="text-xl font-bold tabular-nums">
+                <span className="text-xl font-bold tabular-nums shrink-0">
                   {evento.doacoes.totalGeral
                     .map((t) => fmtQtd(t.quantidade, t.unidade))
                     .join(' · ')}
@@ -609,7 +607,7 @@ export default function EventoDetalheClient({
                 className="bg-white rounded-xl shadow-sm border p-4 flex items-center justify-between gap-3"
               >
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900">📍 {local.nome}</p>
+                  <p className="font-medium text-gray-900 truncate">📍 {local.nome}</p>
                   {local.endereco && (
                     <p className="text-sm text-gray-500 truncate">{local.endereco}</p>
                   )}
@@ -629,7 +627,7 @@ export default function EventoDetalheClient({
         <div className="space-y-3">
           {/* Barra de ação de refugo (só admin, evento não encerrado) */}
           {podeEditarRefugo && (
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 flex-wrap">
               {!editandoRefugo ? (
                 <button
                   onClick={() => setEditandoRefugo(true)}
@@ -641,7 +639,6 @@ export default function EventoDetalheClient({
                 <>
                   <button
                     onClick={() => {
-                      // descarta alterações
                       setRefugoDraft(
                         Object.fromEntries(
                           evento.alimentos.map((a) => [a.id, String(a.refugoKg ?? 0)]),
@@ -675,12 +672,12 @@ export default function EventoDetalheClient({
           ) : (
             alimentosOrdenados.map((a) => (
               <div key={a.id} className="bg-white rounded-xl shadow-sm border p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-medium text-gray-900">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <p className="font-medium text-gray-900 min-w-0">
                     🥫 {a.nome}{' '}
                     <span className="text-xs uppercase text-gray-400">({a.unit})</span>
                   </p>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
                     <span className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
                       {a.recebimentos}{' '}
                       {a.recebimentos === 1 ? 'recebimento' : 'recebimentos'}
@@ -745,7 +742,7 @@ export default function EventoDetalheClient({
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-y"
                 />
               ) : (
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">{evento.obsRefugo}</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{evento.obsRefugo}</p>
               )}
             </div>
           )}
