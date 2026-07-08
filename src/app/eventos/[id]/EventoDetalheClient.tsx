@@ -136,6 +136,10 @@ export default function EventoDetalheClient({
   const [vinculando, setVinculando] = useState(false)
   const [removendoId, setRemovendoId] = useState<string | null>(null)
 
+  // 🆕 17.6-f — exclusão de alimento do evento
+  const podeExcluirAlimento = isAdmin && evento.status !== 'ENCERRADO'
+  const [excluindoAlimId, setExcluindoAlimId] = useState<string | null>(null)
+
   // ids já vinculados e ATIVOS → some do dropdown
   const idsAtivos = new Set(
     evento.operadores.filter((o) => o.ativo).map((o) => o.userId),
@@ -208,6 +212,26 @@ export default function EventoDetalheClient({
       toast.error(err instanceof Error ? err.message : 'Erro ao salvar refugo')
     } finally {
       setSalvando(false)
+    }
+  }
+
+  // 🆕 17.6-f — excluir alimento do evento (backend bloqueia com 409 se houver recebimento)
+  const excluirAlimento = async (idAlimento: string, nome: string) => {
+    if (!confirm(`Remover "${nome}" deste evento?`)) return
+    setExcluindoAlimId(idAlimento)
+    try {
+      const res = await fetch(
+        `/api/eventos/${evento.id}/alimentos/${idAlimento}`,
+        { method: 'DELETE' },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Erro ao remover alimento')
+      toast.success('Alimento removido')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao remover alimento')
+    } finally {
+      setExcluindoAlimId(null)
     }
   }
 
@@ -600,7 +624,7 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: ALIMENTOS (🆕 17.6 — edição de refugo) ════════════ */}
+      {/* ════════════ ABA: ALIMENTOS (🆕 17.6 — refugo · 🆕 17.6-f — excluir) ════════════ */}
       {aba === 'alimentos' && (
         <div className="space-y-3">
           {/* Barra de ação de refugo (só admin, evento não encerrado) */}
@@ -683,6 +707,22 @@ export default function EventoDetalheClient({
                           Refugo: {fmtKg(a.refugoKg)}
                         </span>
                       )
+                    )}
+
+                    {/* 🆕 17.6-f — excluir alimento (só admin, evento não encerrado, fora do modo refugo) */}
+                    {podeExcluirAlimento && !editandoRefugo && (
+                      <button
+                        onClick={() => excluirAlimento(a.id, a.nome)}
+                        disabled={excluindoAlimId === a.id}
+                        title={
+                          a.recebimentos > 0
+                            ? 'Não é possível remover: há recebimentos registrados'
+                            : 'Remover alimento do evento'
+                        }
+                        className="px-3 py-1 bg-red-50 hover:bg-red-100 disabled:opacity-60 border border-red-100 rounded-lg text-sm text-red-600 transition active:scale-95"
+                      >
+                        {excluindoAlimId === a.id ? '…' : '🗑️'}
+                      </button>
                     )}
                   </div>
                 </div>
