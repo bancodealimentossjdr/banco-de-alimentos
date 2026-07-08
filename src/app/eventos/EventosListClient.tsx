@@ -118,14 +118,13 @@ export default function EventosListClient({
         </div>
 
         {podeGerenciar && (
-          <button
-            disabled
-            title="Função 'Novo evento' chega na próxima onda"
-            className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium shrink-0"
-          >
-            + Novo evento (em breve)
-          </button>
-        )}
+  <Link
+    href="/eventos/novo"
+    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shrink-0 transition active:scale-95"
+  >
+    + Novo evento
+  </Link>
+)}
       </div>
 
       {/* ════════════ FILTROS + BUSCA ════════════ */}
