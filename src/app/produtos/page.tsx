@@ -14,15 +14,20 @@ interface Product {
 }
 
 const CATEGORIES = [
-  { value: 'hortifruti', label: 'Hortifruti' },
-  { value: 'laticinios', label: 'Laticínios' },
-  { value: 'graos', label: 'Grãos e Cereais' },
-  { value: 'carnes', label: 'Carnes' },
-  { value: 'padaria', label: 'Padaria' },
-  { value: 'enlatados', label: 'Enlatados' },
   { value: 'bebidas', label: 'Bebidas' },
+  { value: 'carnes', label: 'Carnes' },
+  { value: 'enlatados', label: 'Enlatados' },
+  { value: 'fruta', label: 'Fruta' },
+  { value: 'graos', label: 'Grãos e Cereais' },
   { value: 'higiene', label: 'Higiene' },
+  { value: 'hortifruti', label: 'Hortifruti' },
+  { value: 'ingredientes', label: 'Ingredientes Culinários' },
+  { value: 'laticinios', label: 'Laticínios' },
   { value: 'limpeza', label: 'Limpeza' },
+  { value: 'massa', label: 'Massa' },
+  { value: 'padaria', label: 'Padaria' },
+  { value: 'tuberculos', label: 'Tubérculos/Raízes' },
+  { value: 'verdura', label: 'Verdura' },
   { value: 'outros', label: 'Outros' },
 ]
 
@@ -58,6 +63,12 @@ const CATEGORY_ICONS: Record<string, string> = {
   bebidas: '🥤',
   higiene: '🧴',
   limpeza: '🧹',
+  // 🆕 Categorias novas
+  massa: '🍝',
+  tuberculos: '🥔',
+  fruta: '🍎',
+  verdura: '🥗',
+  ingredientes: '🧂',
   outros: '📦',
 }
 
@@ -156,6 +167,18 @@ export default function ProdutosPage() {
   const getCategoryIcon = (value: string) =>
     CATEGORY_ICONS[value] || '📦'
 
+  // 🆕 Injeta categoria legada se não estiver na lista (protege produtos antigos)
+  const getCategoryOptions = (currentCategory: string) => {
+    const options = [...CATEGORIES]
+    if (currentCategory && !CATEGORIES.some(c => c.value === currentCategory)) {
+      options.push({
+        value: currentCategory,
+        label: `${currentCategory} (legado)`,
+      })
+    }
+    return options
+  }
+
   // Lista de unidades a exibir no select — inclui legado se o produto usar
   const getUnitOptions = (currentUnit: string) => {
     const options = [...UNITS]
@@ -206,7 +229,7 @@ export default function ProdutosPage() {
                 onChange={e => setForm({ ...form, category: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               >
-                {CATEGORIES.map(c => (
+                {getCategoryOptions(form.category).map(c => (
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>

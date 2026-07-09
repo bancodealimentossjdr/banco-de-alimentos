@@ -372,7 +372,7 @@ export default function EventoDetalheClient({
   }
 
   return (
-    <div>
+    <div className="min-w-0">
       {/* 🔙 Voltar */}
       <Link
         href="/eventos"
@@ -438,28 +438,30 @@ export default function EventoDetalheClient({
         </div>
       </div>
 
-      {/* 🗂️ Abas */}
-      <div className="flex gap-2 mb-6 border-b pb-3 overflow-x-auto">
-        <button className={tabBtn('resumo')} onClick={() => setAba('resumo')}>
-          📋 Resumo
-        </button>
-        <button className={tabBtn('doacoes')} onClick={() => setAba('doacoes')}>
-          📥 Doações ({evento.counts.recebimentos})
-        </button>
-        <button className={tabBtn('locais')} onClick={() => setAba('locais')}>
-          🏠 Locais ({evento.counts.locais})
-        </button>
-        <button className={tabBtn('alimentos')} onClick={() => setAba('alimentos')}>
-          🥫 Alimentos ({evento.counts.alimentos})
-        </button>
-        {isAdmin && (
-          <button className={tabBtn('operadores')} onClick={() => setAba('operadores')}>
-            👥 Operadores ({evento.counts.operadores})
+      {/* 🗂️ Abas — 🔧 FIX: scroll horizontal real no mobile (-mx sangra o padding do pai) */}
+      <div className="-mx-4 md:-mx-6 mb-6 border-b">
+        <div className="flex gap-2 px-4 md:px-6 pb-3 overflow-x-auto no-scrollbar">
+          <button className={tabBtn('resumo')} onClick={() => setAba('resumo')}>
+            📋 Resumo
           </button>
-        )}
-        <button className={tabBtn('graficos')} onClick={() => setAba('graficos')}>
-          📊 Gráficos
-        </button>
+          <button className={tabBtn('doacoes')} onClick={() => setAba('doacoes')}>
+            📥 Doações ({evento.counts.recebimentos})
+          </button>
+          <button className={tabBtn('locais')} onClick={() => setAba('locais')}>
+            🏠 Locais ({evento.counts.locais})
+          </button>
+          <button className={tabBtn('alimentos')} onClick={() => setAba('alimentos')}>
+            🥫 Alimentos ({evento.counts.alimentos})
+          </button>
+          {isAdmin && (
+            <button className={tabBtn('operadores')} onClick={() => setAba('operadores')}>
+              👥 Operadores ({evento.counts.operadores})
+            </button>
+          )}
+          <button className={tabBtn('graficos')} onClick={() => setAba('graficos')}>
+            📊 Gráficos
+          </button>
+        </div>
       </div>
 
       {/* ════════════ ABA: RESUMO ════════════ */}
@@ -542,8 +544,8 @@ export default function EventoDetalheClient({
           ) : (
             <>
               {evento.doacoes.porLocal.map((local) => (
-                <div key={local.id} className="bg-white rounded-xl shadow-sm border p-4">
-                  <p className="font-semibold text-gray-900 mb-3">📍 {local.nome}</p>
+                <div key={local.id} className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
+                  <p className="font-semibold text-gray-900 mb-3 break-words">📍 {local.nome}</p>
 
                   <div className="space-y-1.5">
                     {local.produtos.map((p, i) => (
@@ -552,7 +554,8 @@ export default function EventoDetalheClient({
                         className="flex items-center justify-between gap-2 text-sm border-b border-dashed border-gray-100 pb-1.5"
                       >
                         <span className="text-gray-700 min-w-0 truncate">🥫 {p.nome}</span>
-                        <span className="font-medium text-gray-900 tabular-nums shrink-0">
+                        {/* 🔧 FIX: min-w-0 + break-words + text-right (removido shrink-0) */}
+                        <span className="min-w-0 font-medium text-gray-900 tabular-nums text-right break-words">
                           {fmtQtd(p.quantidade, p.unidade)}
                         </span>
                       </div>
@@ -560,17 +563,19 @@ export default function EventoDetalheClient({
                   </div>
 
                   <div className="mt-3 pt-2 border-t flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-gray-500 uppercase">Subtotal</span>
-                    <span className="text-sm font-bold text-gray-900 tabular-nums shrink-0">
+                    <span className="text-xs font-medium text-gray-500 uppercase shrink-0">Subtotal</span>
+                    {/* 🔧 FIX: min-w-0 + break-words + text-right (removido shrink-0) */}
+                    <span className="min-w-0 text-sm font-bold text-gray-900 tabular-nums text-right break-words">
                       {local.subtotais.map((s) => fmtQtd(s.quantidade, s.unidade)).join(' · ')}
                     </span>
                   </div>
                 </div>
               ))}
 
-              <div className="bg-green-600 rounded-xl shadow-sm p-5 flex items-center justify-between gap-2 text-white">
-                <span className="font-semibold uppercase tracking-wide text-sm">Total geral</span>
-                <span className="text-xl font-bold tabular-nums shrink-0">
+              {/* 🔧 FIX: flex-col no mobile → total longo não estoura */}
+              <div className="min-w-0 bg-green-600 rounded-xl shadow-sm p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-white">
+                <span className="font-semibold uppercase tracking-wide text-sm shrink-0">Total geral</span>
+                <span className="min-w-0 text-xl font-bold tabular-nums break-words sm:text-right">
                   {evento.doacoes.totalGeral
                     .map((t) => fmtQtd(t.quantidade, t.unidade))
                     .join(' · ')}
@@ -673,7 +678,7 @@ export default function EventoDetalheClient({
             alimentosOrdenados.map((a) => (
               <div key={a.id} className="bg-white rounded-xl shadow-sm border p-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <p className="font-medium text-gray-900 min-w-0">
+                  <p className="font-medium text-gray-900 min-w-0 break-words">
                     🥫 {a.nome}{' '}
                     <span className="text-xs uppercase text-gray-400">({a.unit})</span>
                   </p>

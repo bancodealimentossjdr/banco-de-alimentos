@@ -85,6 +85,19 @@ export default function CampoCliente({
   const temAlgoParaSalvar = itensComQtd.length > 0
 
   // ----------------------------------------
+  // 🆕 Voltar ao detalhe do evento (com proteção de dados não salvos)
+  // ----------------------------------------
+  function voltarAoEvento() {
+    if (temAlgoParaSalvar) {
+      const ok = window.confirm(
+        'Você tem quantidades não salvas. Sair mesmo assim?',
+      )
+      if (!ok) return
+    }
+    router.push(`/eventos/${eventoId}`)
+  }
+
+  // ----------------------------------------
   // Handlers de quantidade
   // ----------------------------------------
   function setQtd(alimentoId: string, novo: number, decimais: number) {
@@ -169,6 +182,30 @@ export default function CampoCliente({
     <div className="mx-auto max-w-2xl px-4 py-6">
       {/* Cabeçalho */}
       <header className="mb-6">
+        {/* 🆕 Botão voltar ao evento */}
+        <button
+          type="button"
+          onClick={voltarAoEvento}
+          className="mb-3 inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-green-700"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m12 19-7-7 7-7" />
+            <path d="M19 12H5" />
+          </svg>
+          Voltar ao evento
+        </button>
+
         <p className="text-sm text-gray-500">Registro de campo</p>
         <h1 className="text-2xl font-bold text-gray-900">{eventoNome}</h1>
       </header>

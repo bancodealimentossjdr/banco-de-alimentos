@@ -28,10 +28,8 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Se está na tela de login, renderiza só o children (sem sidebar/navbar)
   const isLoginPage = pathname === '/login'
 
-  // Enquanto carrega a sessão, mostra loading
   if (status === 'loading' && !isLoginPage) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -43,13 +41,13 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     )
   }
 
-  // Tela de login: sem layout
   if (isLoginPage) {
     return <>{children}</>
   }
 
   return (
-    <div className="flex min-h-screen">
+    // 🔧 overflow-x-hidden na raiz = trava de segurança contra qualquer estouro horizontal
+    <div className="flex min-h-screen overflow-x-hidden">
       <Sidebar
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
@@ -57,14 +55,15 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
         setCollapsed={setCollapsed}
       />
 
-      {/* Área principal */}
+      {/* Área principal — 🔧 min-w-0 permite encolher abaixo do conteúdo (fix do overflow em flex) */}
       <div
-        className={`flex-1 transition-all duration-300 ${
+        className={`flex-1 min-w-0 transition-all duration-300 ${
           collapsed ? 'lg:ml-16' : 'lg:ml-64'
         }`}
       >
         <Navbar onMenuClick={() => setSidebarOpen(true)} />
-        <main className="p-4 md:p-6">{children}</main>
+        {/* 🔧 min-w-0 + overflow-x-hidden no main também */}
+        <main className="min-w-0 overflow-x-hidden p-4 md:p-6">{children}</main>
       </div>
     </div>
   )
