@@ -52,73 +52,84 @@ export default function GraficosEvento({ metrics }: { metrics: EventoMetrics }) 
       : tipoTop
 
   return (
-    <div className="space-y-6">
+    // 🔧 FIX overflow: w-full + min-w-0 no wrapper raiz impede o Recharts de empurrar a página
+    <div className="w-full min-w-0 space-y-6">
       {/* 📊 Barras — kg por local */}
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="w-full min-w-0 overflow-hidden bg-white rounded-xl shadow-sm border p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-4">
           📊 Quantidade recebida por local
         </h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={metrics.kgPorLocal} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="nome" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip formatter={(v) => fmtKg(Number(v) || 0)} />
-            <Bar dataKey="kg" name="Recebido" radius={[6, 6, 0, 0]} fill="#22c55e" />
-          </BarChart>
-        </ResponsiveContainer>
+        {/* 🔧 wrapper com largura explícita + overflow-hidden força o ResponsiveContainer a medir certo */}
+        <div className="w-full min-w-0 overflow-hidden">
+          <ResponsiveContainer width="100%" height={300} minWidth={0}>
+            <BarChart data={metrics.kgPorLocal} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="nome" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(v) => fmtKg(Number(v) || 0)} />
+              <Bar dataKey="kg" name="Recebido" radius={[6, 6, 0, 0]} fill="#22c55e" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* 📈 Linha — evolução diária */}
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="w-full min-w-0 overflow-hidden bg-white rounded-xl shadow-sm border p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-4">
           📈 Evolução diária dos recebimentos
         </h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={metrics.kgPorDia} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="dia" tickFormatter={fmtDia} tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip
-              formatter={(v) => fmtKg(Number(v))}
-              labelFormatter={(l) => `Dia ${fmtDia(String(l))}`}
-            />
-            <Line type="monotone" dataKey="kg" name="Recebido" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
-          </LineChart>
-        </ResponsiveContainer>
+        <div className="w-full min-w-0 overflow-hidden">
+          <ResponsiveContainer width="100%" height={300} minWidth={0}>
+            <LineChart data={metrics.kgPorDia} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="dia" tickFormatter={fmtDia} tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip
+                formatter={(v) => fmtKg(Number(v))}
+                labelFormatter={(l) => `Dia ${fmtDia(String(l))}`}
+              />
+              <Line type="monotone" dataKey="kg" name="Recebido" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
-      {/* 🥧 Pizza — kg por tipo (texto livre até a 17.4) */}
-      <div className="bg-white rounded-xl shadow-sm border p-4">
-        <div className="flex items-center justify-between mb-4">
+      {/* 🥧 Pizza — kg por tipo */}
+      <div className="w-full min-w-0 overflow-hidden bg-white rounded-xl shadow-sm border p-4">
+        <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <h3 className="text-sm font-semibold text-gray-700">🥧 Distribuição por tipo</h3>
-          <span className="text-[11px] text-gray-400">
-            agrupado por descrição (catálogo na Onda 17.4)
+          <span className="text-[11px] text-gray-400 shrink-0">
+            agrupado por catálogo
           </span>
         </div>
-        <ResponsiveContainer width="100%" height={320}>
-          <PieChart>
-            <Pie
-              data={pizzaData}
-              dataKey="kg"
-              nameKey="tipo"
-              cx="50%"
-              cy="50%"
-              outerRadius={110}
-              label={(p) => {
-  const { tipo, percent } = p as { tipo?: string; percent?: number };
-  return `${tipo} (${((percent ?? 0) * 100).toFixed(0)}%)`;
-}}
-              labelLine={false}
-            >
-              {pizzaData.map((_, i) => (
-                <Cell key={i} fill={CORES[i % CORES.length]} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(v) => fmtKg(Number(v))} />
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
+        <div className="w-full min-w-0 overflow-hidden">
+          <ResponsiveContainer width="100%" height={320} minWidth={0}>
+            <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+              <Pie
+                data={pizzaData}
+                dataKey="kg"
+                nameKey="tipo"
+                cx="50%"
+                cy="50%"
+                // 🔧 raio relativo (%) em vez de fixo (110px) → nunca estoura em telas estreitas
+                outerRadius="70%"
+                // 🔧 labels fora da pizza são o principal vilão do overflow no mobile → só %
+                label={(p) => {
+                  const { percent } = p as { percent?: number }
+                  return `${((percent ?? 0) * 100).toFixed(0)}%`
+                }}
+                labelLine={false}
+              >
+                {pizzaData.map((_, i) => (
+                  <Cell key={i} fill={CORES[i % CORES.length]} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(v) => fmtKg(Number(v))} />
+              {/* 🔧 legend com wrap + fonte menor não empurra largura */}
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   )
