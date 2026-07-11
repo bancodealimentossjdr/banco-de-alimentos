@@ -32,7 +32,6 @@ interface OperadorView {
   email: string
   role: string
 }
-// 🆕 17.6-g — usuário candidato ao vínculo (dropdown)
 interface UsuarioVinculavel {
   id: string
   nome: string | null
@@ -47,7 +46,6 @@ export interface EventoMetrics {
   kgPorDia: { dia: string; kg: number }[]
 }
 
-// 🆕 ONDA B
 interface DoacaoProduto {
   nome: string
   unidade: string
@@ -76,7 +74,7 @@ interface EventoView {
   dataFim: string | null
   status: EventoStatus
   integraEstoque: boolean
-  obsRefugo: string | null // 🆕 17.6
+  obsRefugo: string | null
   encerradoEm: string | null
   encerradoPor: { id: string; name: string } | null
   criadoPor: { id: string; name: string } | null
@@ -85,7 +83,7 @@ interface EventoView {
   operadores: OperadorView[]
   counts: { recebimentos: number; locais: number; operadores: number; alimentos: number }
   metrics: EventoMetrics
-  doacoes: DoacoesView // 🆕 ONDA B
+  doacoes: DoacoesView
 }
 
 const STATUS_BADGE: Record<EventoStatus, { label: string; cls: string }> = {
@@ -94,27 +92,26 @@ const STATUS_BADGE: Record<EventoStatus, { label: string; cls: string }> = {
   ENCERRADO: { label: '⏹️ Encerrado', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
 }
 
-// 🔄 ORDEM: Resumo · Doações · Locais · Alimentos · Operadores · Gráficos
-type Aba = 'resumo' | 'doacoes' | 'locais' | 'alimentos' | 'operadores' | 'graficos'
+// 🚧 17.8-h — aba "resumo" removida
+type Aba = 'doacoes' | 'locais' | 'alimentos' | 'operadores' | 'graficos'
 
 export default function EventoDetalheClient({
   evento,
   podeGerenciar,
   podeRegistrar,
   isAdmin,
-  usuariosVinculaveis = [], // 🆕 17.6-g
+  usuariosVinculaveis = [],
 }: {
   evento: EventoView
   podeGerenciar: boolean
   podeRegistrar: boolean
   isAdmin: boolean
-  usuariosVinculaveis?: UsuarioVinculavel[] // 🆕 17.6-g
+  usuariosVinculaveis?: UsuarioVinculavel[]
 }) {
   const router = useRouter()
-  const [aba, setAba] = useState<Aba>('resumo')
+  const [aba, setAba] = useState<Aba>('doacoes')
   const badge = STATUS_BADGE[evento.status]
 
-  // 🆕 17.6 — estado local de edição de refugo
   const podeEditarRefugo = isAdmin && evento.status !== 'ENCERRADO'
   const [editandoRefugo, setEditandoRefugo] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -123,30 +120,31 @@ export default function EventoDetalheClient({
   )
   const [obsDraft, setObsDraft] = useState(evento.obsRefugo ?? '')
 
-  // 🆕 17.6 — estado do encerramento
   const [encerrando, setEncerrando] = useState(false)
-
-  // 🆕 estados das transições de status
   const [ativando, setAtivando] = useState(false)
   const [revertendo, setRevertendo] = useState(false)
 
-  // 🆕 17.6-g — estado do vínculo de operadores
+  // 🆕 17.8-g — atualizar totais da aba Doações
+  const [atualizando, setAtualizando] = useState(false)
+
   const podeGerenciarOperadores = isAdmin && evento.status !== 'ENCERRADO'
   const [selUserId, setSelUserId] = useState('')
   const [vinculando, setVinculando] = useState(false)
   const [removendoId, setRemovendoId] = useState<string | null>(null)
 
-  // 🆕 17.6-f — exclusão de alimento do evento
   const podeExcluirAlimento = isAdmin && evento.status !== 'ENCERRADO'
   const [excluindoAlimId, setExcluindoAlimId] = useState<string | null>(null)
 
-  // ids já vinculados e ATIVOS → some do dropdown
-  const idsAtivos = new Set(
-    evento.operadores.filter((o) => o.ativo).map((o) => o.userId),
-  )
+  // 🆕 17.8-f — gestão de locais (adicionar + excluir); só admin, fora de ENCERRADO
+  const podeGerenciarLocais = isAdmin && evento.status !== 'ENCERRADO'
+  const [novoLocalNome, setNovoLocalNome] = useState('')
+  const [novoLocalEndereco, setNovoLocalEndereco] = useState('')
+  const [adicionandoLocal, setAdicionandoLocal] = useState(false)
+  const [excluindoLocalId, setExcluindoLocalId] = useState<string | null>(null)
+
+  const idsAtivos = new Set(evento.operadores.filter((o) => o.ativo).map((o) => o.userId))
   const candidatos = usuariosVinculaveis.filter((u) => !idsAtivos.has(u.id))
 
-  // 🆕 pode voltar para rascunho? (só admin, ATIVO, sem doações)
   const podeReverter =
     isAdmin && evento.status === 'ATIVO' && evento.counts.recebimentos === 0
 
@@ -159,18 +157,26 @@ export default function EventoDetalheClient({
   const fmtKg = (n: number) =>
     `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
 
-  // 🆕 ONDA B
   const fmtQtd = (n: number, unidade: string) =>
     `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unidade}`
 
-  const tabBtn = (id: Aba) =>
-    `px-4 py-2 text-sm font-medium rounded-lg transition whitespace-nowrap ${
-      aba === id ? 'bg-green-500 text-white' : 'text-gray-600 hover:bg-gray-100'
-    }`
-
   const alimentosOrdenados = [...evento.alimentos].sort((a, b) => a.ordem - b.ordem)
 
-  // 🆕 17.6 — salva refugo + obs via PUT (reaproveita o endpoint existente)
+  // 🆕 17.8-h — top 3 locais
+  const top3Locais = [...evento.metrics.kgPorLocal]
+    .sort((a, b) => b.kg - a.kg)
+    .slice(0, 3)
+  const medalhas = ['🥇', '🥈', '🥉']
+
+  // 🆕 17.8-g — atualizar totais (server component via router.refresh)
+  const atualizarDoacoes = () => {
+    setAtualizando(true)
+    router.refresh()
+    toast.success('Totais atualizados')
+    // refresh é assíncrono no server component — delay só para o feedback visual
+    setTimeout(() => setAtualizando(false), 600)
+  }
+
   const salvarRefugo = async () => {
     setSalvando(true)
     try {
@@ -180,7 +186,7 @@ export default function EventoDetalheClient({
         dataInicio: evento.dataInicio,
         dataFim: evento.dataFim,
         integraEstoque: evento.integraEstoque,
-        obsRefugo: obsDraft, // 🆕
+        obsRefugo: obsDraft,
         locais: evento.locais.map((l) => ({
           id: l.id,
           nome: l.nome,
@@ -213,7 +219,6 @@ export default function EventoDetalheClient({
     }
   }
 
-  // 🆕 17.6-f — excluir alimento do evento (backend bloqueia com 409 se houver recebimento)
   const excluirAlimento = async (idAlimento: string, nome: string) => {
     if (!confirm(`Remover "${nome}" deste evento?`)) return
     setExcluindoAlimId(idAlimento)
@@ -233,7 +238,57 @@ export default function EventoDetalheClient({
     }
   }
 
-  // 🆕 17.6-g — vincular operador
+  // 🆕 17.8-f — adicionar local
+  const adicionarLocal = async () => {
+    const nome = novoLocalNome.trim()
+    if (!nome) {
+      toast.error('Informe o nome do local')
+      return
+    }
+    setAdicionandoLocal(true)
+    try {
+      const res = await fetch(`/api/eventos/${evento.id}/locais`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome, endereco: novoLocalEndereco.trim() || null }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Erro ao adicionar local')
+      toast.success('Local adicionado')
+      setNovoLocalNome('')
+      setNovoLocalEndereco('')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao adicionar local')
+    } finally {
+      setAdicionandoLocal(false)
+    }
+  }
+
+  // 🆕 17.8-f — excluir local
+  const excluirLocal = async (localId: string, nome: string, recebimentos: number) => {
+    if (recebimentos > 0) {
+      toast.error(`"${nome}" possui ${recebimentos} recebimento(s) e não pode ser removido.`)
+      return
+    }
+    if (!confirm(`Remover o local "${nome}" deste evento?`)) return
+    setExcluindoLocalId(localId)
+    try {
+      const res = await fetch(
+        `/api/eventos/${evento.id}/locais/${localId}`,
+        { method: 'DELETE' },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Erro ao remover local')
+      toast.success('Local removido')
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao remover local')
+    } finally {
+      setExcluindoLocalId(null)
+    }
+  }
+
   const vincularOperador = async () => {
     if (!selUserId) {
       toast.error('Selecione um usuário')
@@ -260,7 +315,6 @@ export default function EventoDetalheClient({
     }
   }
 
-  // 🆕 17.6-g — desvincular operador (soft: ativo:false)
   const desvincularOperador = async (userId: string, nome: string | null) => {
     if (
       !confirm(
@@ -287,13 +341,8 @@ export default function EventoDetalheClient({
     }
   }
 
-  // 🆕 ativar evento (PATCH action:'ativar' → RASCUNHO → ATIVO)
   const ativarEvento = async () => {
-    if (
-      !confirm(
-        'Ativar este evento? A partir daí, operadores poderão registrar doações.',
-      )
-    )
+    if (!confirm('Ativar este evento? A partir daí, operadores poderão registrar doações.'))
       return
     setAtivando(true)
     try {
@@ -315,7 +364,6 @@ export default function EventoDetalheClient({
     }
   }
 
-  // 🆕 reverter evento (PATCH action:'reverter' → ATIVO → RASCUNHO)
   const reverterEvento = async () => {
     if (
       !confirm(
@@ -343,7 +391,6 @@ export default function EventoDetalheClient({
     }
   }
 
-  // 🆕 17.6 — encerrar evento (PATCH action:'encerrar')
   const encerrarEvento = async () => {
     if (
       !confirm(
@@ -371,6 +418,32 @@ export default function EventoDetalheClient({
     }
   }
 
+  // 🆕 17.8-i — abas SEM contadores no rótulo
+  const abasDisponiveis: { id: Aba; label: string; icon: string }[] = [
+    { id: 'doacoes', label: 'Doações', icon: '📥' },
+    { id: 'locais', label: 'Locais', icon: '🏠' },
+    { id: 'alimentos', label: 'Alimentos', icon: '🥫' },
+    ...(isAdmin ? [{ id: 'operadores' as Aba, label: 'Operadores', icon: '👥' }] : []),
+    { id: 'graficos', label: 'Gráficos', icon: '📊' },
+  ]
+
+  const tabCardCls = (id: Aba) =>
+    `flex flex-col items-center justify-center gap-1 h-20 rounded-xl border text-sm font-medium transition active:scale-95 ${
+      aba === id
+        ? 'bg-green-500 text-white border-green-500 shadow-sm'
+        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-green-200'
+    }`
+
+  // 🆕 17.8-i — card de contexto abaixo das abas (com shift; só 3 abas)
+  const contexto: Record<string, string | null> = {
+    doacoes: null,
+    graficos: null,
+    locais: `Locais cadastrados: ${evento.counts.locais}`,
+    alimentos: `Alimentos cadastrados: ${evento.counts.alimentos}`,
+    operadores: `Operadores vinculados: ${evento.counts.operadores}`,
+  }
+  const textoContexto = contexto[aba]
+
   return (
     <div className="min-w-0">
       {/* 🔙 Voltar */}
@@ -382,153 +455,132 @@ export default function EventoDetalheClient({
       </Link>
 
       {/* Cabeçalho */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-6">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl md:text-2xl font-bold text-gray-900 break-words">{evento.nome}</h2>
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}>
-              {badge.label}
+      <div className="mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900 break-words">{evento.nome}</h2>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}>
+            {badge.label}
+          </span>
+          {evento.integraEstoque && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100">
+              📦 Integra estoque
             </span>
-            {evento.integraEstoque && (
-              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100">
-                📦 Integra estoque
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-gray-500 mt-1">
-            {formatDate(evento.dataInicio)}
-            {evento.dataFim ? ` — ${formatDate(evento.dataFim)}` : ''}
-          </p>
+          )}
         </div>
-
-        <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end w-full sm:w-auto">
-          {/* 🆕 Ativar (só admin, só RASCUNHO) */}
-          {isAdmin && evento.status === 'RASCUNHO' && (
-            <button
-              onClick={ativarEvento}
-              disabled={ativando}
-              className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-            >
-              {ativando ? 'Ativando…' : '▶️ Ativar evento'}
-            </button>
-          )}
-
-          {/* 🆕 Voltar para rascunho (só admin, ATIVO, sem doações) */}
-          {podeReverter && (
-            <button
-              onClick={reverterEvento}
-              disabled={revertendo}
-              className="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-60 text-gray-700 font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-            >
-              {revertendo ? 'Revertendo…' : '↩️ Voltar para rascunho'}
-            </button>
-          )}
-
-          {/* 🆕 17.6 — botão Encerrar (só admin, só evento ATIVO) */}
-          {isAdmin && evento.status === 'ATIVO' && (
-            <button
-              onClick={encerrarEvento}
-              disabled={encerrando}
-              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-            >
-              {encerrando ? 'Encerrando…' : '⏹️ Encerrar evento'}
-            </button>
-          )}
-          <ExportarEventoPdf eventoId={evento.id} isAdmin={isAdmin} />
-        </div>
+        <p className="text-sm text-gray-500 mt-1">
+          {formatDate(evento.dataInicio)}
+          {evento.dataFim ? ` — ${formatDate(evento.dataFim)}` : ''}
+        </p>
       </div>
 
-      {/* 🗂️ Abas — 🔧 FIX: scroll horizontal real no mobile (-mx sangra o padding do pai) */}
-      <div className="-mx-4 md:-mx-6 mb-6 border-b">
-        <div className="flex gap-2 px-4 md:px-6 pb-3 overflow-x-auto no-scrollbar">
-          <button className={tabBtn('resumo')} onClick={() => setAba('resumo')}>
-            📋 Resumo
+      {/* 🆕 17.8-c/#23 — botões de ação lado a lado, altura NORMAL (sem esticar) */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {isAdmin && evento.status === 'RASCUNHO' && (
+          <button
+            onClick={ativarEvento}
+            disabled={ativando}
+            className="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+          >
+            {ativando ? 'Ativando…' : '▶️ Ativar evento'}
           </button>
-          <button className={tabBtn('doacoes')} onClick={() => setAba('doacoes')}>
-            📥 Doações ({evento.counts.recebimentos})
+        )}
+
+        {podeReverter && (
+          <button
+            onClick={reverterEvento}
+            disabled={revertendo}
+            className="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-60 text-gray-700 font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+          >
+            {revertendo ? 'Revertendo…' : '↩️ Voltar p/ rascunho'}
           </button>
-          <button className={tabBtn('locais')} onClick={() => setAba('locais')}>
-            🏠 Locais ({evento.counts.locais})
+        )}
+
+        {isAdmin && evento.status === 'ATIVO' && (
+          <button
+            onClick={encerrarEvento}
+            disabled={encerrando}
+            className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+          >
+            {encerrando ? 'Encerrando…' : '⏹️ Encerrar evento'}
           </button>
-          <button className={tabBtn('alimentos')} onClick={() => setAba('alimentos')}>
-            🥫 Alimentos ({evento.counts.alimentos})
-          </button>
-          {isAdmin && (
-            <button className={tabBtn('operadores')} onClick={() => setAba('operadores')}>
-              👥 Operadores ({evento.counts.operadores})
-            </button>
-          )}
-          <button className={tabBtn('graficos')} onClick={() => setAba('graficos')}>
-            📊 Gráficos
-          </button>
-        </div>
+        )}
       </div>
 
-      {/* ════════════ ABA: RESUMO ════════════ */}
-      {aba === 'resumo' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Total recebido</p>
-              <p className="text-2xl font-bold text-gray-900 truncate">{fmtKg(evento.metrics.totalKg)}</p>
-            </div>
-            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Líquido (s/ refugo)</p>
-              <p className="text-2xl font-bold text-green-700 truncate">
-                {fmtKg(evento.metrics.totalLiquidoKg)}
-              </p>
-            </div>
-            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Refugo</p>
-              <p className="text-2xl font-bold text-amber-600 truncate">
-                {fmtKg(evento.metrics.totalRefugoKg)}
-              </p>
-            </div>
-            <div className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Recebimentos</p>
-              <p className="text-2xl font-bold text-gray-900 truncate">{evento.counts.recebimentos}</p>
-            </div>
-          </div>
+      {/* 🆕 17.8-h/#23 — card de resumo: total arrecadado AO LADO + top 3 locais */}
+      <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-gray-500 flex items-center gap-1">
+            📊 Total arrecadado
+          </span>
+          <span className="text-2xl font-bold text-green-700 tabular-nums">
+            {fmtKg(evento.metrics.totalKg)}
+          </span>
+        </div>
 
-          {evento.descricao && (
-            <div className="bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs font-medium text-gray-500 mb-1">Descrição</p>
-              <p className="text-sm text-gray-700 break-words">{evento.descricao}</p>
+        {top3Locais.length > 0 && (
+          <>
+            <div className="border-t my-3" />
+            <p className="text-xs text-gray-400 mb-2">Locais que mais arrecadaram</p>
+            <div className="space-y-1.5">
+              {top3Locais.map((l, i) => (
+                <div
+                  key={l.nome}
+                  className="flex items-center justify-between gap-2 text-sm"
+                >
+                  <span className="text-gray-700 min-w-0 truncate">
+                    {medalhas[i]} {l.nome}
+                  </span>
+                  <span className="font-semibold text-gray-900 tabular-nums shrink-0">
+                    {fmtKg(l.kg)}
+                  </span>
+                </div>
+              ))}
             </div>
-          )}
+          </>
+        )}
+      </div>
 
-          {/* 🆕 17.6 — observação geral de refugo (leitura no resumo) */}
-          {evento.obsRefugo && (
-            <div className="bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs font-medium text-gray-500 mb-1">Observação de refugo</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{evento.obsRefugo}</p>
-            </div>
-          )}
+      {/* 🆕 17.8-b — grid de cards das abas */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
+        {abasDisponiveis.map((t) => (
+          <button key={t.id} className={tabCardCls(t.id)} onClick={() => setAba(t.id)}>
+            <span className="text-lg leading-none">{t.icon}</span>
+            <span className="leading-tight">{t.label}</span>
+          </button>
+        ))}
+      </div>
 
-          <div className="bg-white rounded-xl shadow-sm border p-4 text-sm text-gray-500 space-y-1">
-            {evento.criadoPor && <p>Criado por {evento.criadoPor.name}</p>}
-            {evento.status === 'ENCERRADO' && evento.encerradoPor && evento.encerradoEm && (
-              <p>
-                Encerrado por {evento.encerradoPor.name} em {formatDate(evento.encerradoEm)}
-              </p>
-            )}
-          </div>
+      {/* 🆕 17.8-i/#25 — card de contexto (com shift; só Locais/Alimentos/Operadores) */}
+      {textoContexto && (
+        <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 mb-6 text-sm font-medium text-gray-600">
+          {textoContexto}
         </div>
       )}
+      {!textoContexto && <div className="mb-6" />}
 
-      {/* ════════════ ABA: DOAÇÕES (ONDA B) ════════════ */}
+      {/* ════════════ ABA: DOAÇÕES ════════════ */}
       {aba === 'doacoes' && (
         <div className="space-y-4">
-          {podeRegistrar && evento.status === 'ATIVO' && (
-            <div className="flex justify-end">
+          {/* 🆕 17.8-g — barra de ações: Atualizar + Registrar */}
+          <div className="flex justify-end items-center gap-2 flex-wrap">
+            <button
+              onClick={atualizarDoacoes}
+              disabled={atualizando}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
+            >
+              <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
+              {atualizando ? 'Atualizando…' : 'Atualizar'}
+            </button>
+
+            {podeRegistrar && evento.status === 'ATIVO' && (
               <Link
                 href={`/eventos/${evento.id}/campo`}
                 className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
               >
                 📥 Registrar Doação
               </Link>
-            </div>
-          )}
+            )}
+          </div>
 
           {evento.status !== 'ATIVO' && (
             <p className="text-xs text-gray-400">
@@ -542,46 +594,34 @@ export default function EventoDetalheClient({
               <p>Nenhuma doação registrada ainda</p>
             </div>
           ) : (
-            <>
-              {evento.doacoes.porLocal.map((local) => (
-                <div key={local.id} className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
-                  <p className="font-semibold text-gray-900 mb-3 break-words">📍 {local.nome}</p>
+            evento.doacoes.porLocal.map((local) => (
+              <div key={local.id} className="min-w-0 bg-white rounded-xl shadow-sm border p-4">
+                <p className="font-semibold text-gray-900 mb-3 break-words">📍 {local.nome}</p>
 
-                  <div className="space-y-1.5">
-                    {local.produtos.map((p, i) => (
-                      <div
-                        key={`${p.nome}-${p.unidade}-${i}`}
-                        className="flex items-center justify-between gap-2 text-sm border-b border-dashed border-gray-100 pb-1.5"
-                      >
-                        <span className="text-gray-700 min-w-0 truncate">🥫 {p.nome}</span>
-                        {/* 🔧 FIX: min-w-0 + break-words + text-right (removido shrink-0) */}
-                        <span className="min-w-0 font-medium text-gray-900 tabular-nums text-right break-words">
-                          {fmtQtd(p.quantidade, p.unidade)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 pt-2 border-t flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-gray-500 uppercase shrink-0">Subtotal</span>
-                    {/* 🔧 FIX: min-w-0 + break-words + text-right (removido shrink-0) */}
-                    <span className="min-w-0 text-sm font-bold text-gray-900 tabular-nums text-right break-words">
-                      {local.subtotais.map((s) => fmtQtd(s.quantidade, s.unidade)).join(' · ')}
-                    </span>
-                  </div>
+                <div className="space-y-1.5">
+                  {local.produtos.map((p, i) => (
+                    <div
+                      key={`${p.nome}-${p.unidade}-${i}`}
+                      className="flex items-center justify-between gap-2 text-sm border-b border-dashed border-gray-100 pb-1.5"
+                    >
+                      <span className="text-gray-700 min-w-0 truncate">🥫 {p.nome}</span>
+                      <span className="min-w-0 font-medium text-gray-900 tabular-nums text-right break-words">
+                        {fmtQtd(p.quantidade, p.unidade)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
 
-              {/* 🔧 FIX: flex-col no mobile → total longo não estoura */}
-              <div className="min-w-0 bg-green-600 rounded-xl shadow-sm p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-white">
-                <span className="font-semibold uppercase tracking-wide text-sm shrink-0">Total geral</span>
-                <span className="min-w-0 text-xl font-bold tabular-nums break-words sm:text-right">
-                  {evento.doacoes.totalGeral
-                    .map((t) => fmtQtd(t.quantidade, t.unidade))
-                    .join(' · ')}
-                </span>
+                <div className="mt-3 pt-2 border-t flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-gray-500 uppercase shrink-0">Subtotal</span>
+                  <span className="min-w-0 text-sm font-bold text-gray-900 tabular-nums text-right break-words">
+                    {local.subtotais
+                      .map((s) => fmtQtd(s.quantidade, s.unidade))
+                      .join(' · ')}
+                  </span>
+                </div>
               </div>
-            </>
+            ))
           )}
         </div>
       )}
@@ -589,17 +629,43 @@ export default function EventoDetalheClient({
       {/* ════════════ ABA: LOCAIS ════════════ */}
       {aba === 'locais' && (
         <div className="space-y-3">
-          {isAdmin && (
-            <div className="flex justify-end">
-              <button
-                disabled
-                title="Função 'Adicionar local' chega na onda C"
-                className="bg-green-300 cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                + Adicionar local (em breve)
-              </button>
+          {/* 🆕 17.8-f — form adicionar local (só admin, fora de ENCERRADO) */}
+          {podeGerenciarLocais && (
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">
+                Adicionar novo local de coleta
+              </p>
+              <div className="flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={novoLocalNome}
+                  onChange={(e) => setNovoLocalNome(e.target.value)}
+                  placeholder="Nome do local (obrigatório)"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={novoLocalEndereco}
+                    onChange={(e) => setNovoLocalEndereco(e.target.value)}
+                    placeholder="Endereço (opcional)"
+                    className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') adicionarLocal()
+                    }}
+                  />
+                  <button
+                    onClick={adicionarLocal}
+                    disabled={adicionandoLocal || !novoLocalNome.trim()}
+                    className="shrink-0 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition active:scale-95"
+                  >
+                    {adicionandoLocal ? 'Adicionando…' : '+ Adicionar'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
+
           {evento.locais.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">🏠</p>
@@ -617,20 +683,36 @@ export default function EventoDetalheClient({
                     <p className="text-sm text-gray-500 truncate">{local.endereco}</p>
                   )}
                 </div>
-                <span className="shrink-0 px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
-                  {local.recebimentos}{' '}
-                  {local.recebimentos === 1 ? 'recebimento' : 'recebimentos'}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
+                    {local.recebimentos}{' '}
+                    {local.recebimentos === 1 ? 'recebimento' : 'recebimentos'}
+                  </span>
+
+                  {podeGerenciarLocais && (
+                    <button
+                      onClick={() => excluirLocal(local.id, local.nome, local.recebimentos)}
+                      disabled={excluindoLocalId === local.id || local.recebimentos > 0}
+                      title={
+                        local.recebimentos > 0
+                          ? 'Não é possível remover: há recebimentos registrados'
+                          : 'Remover local do evento'
+                      }
+                      className="px-3 py-1 bg-red-50 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed border border-red-100 rounded-lg text-sm text-red-600 transition active:scale-95"
+                    >
+                      {excluindoLocalId === local.id ? '…' : '🗑️'}
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}
         </div>
       )}
 
-      {/* ════════════ ABA: ALIMENTOS (🆕 17.6 — refugo · 🆕 17.6-f — excluir) ════════════ */}
+      {/* ════════════ ABA: ALIMENTOS (total em Kg abaixo do nome) ════════════ */}
       {aba === 'alimentos' && (
         <div className="space-y-3">
-          {/* Barra de ação de refugo (só admin, evento não encerrado) */}
           {podeEditarRefugo && (
             <div className="flex justify-end gap-2 flex-wrap">
               {!editandoRefugo ? (
@@ -678,16 +760,16 @@ export default function EventoDetalheClient({
             alimentosOrdenados.map((a) => (
               <div key={a.id} className="bg-white rounded-xl shadow-sm border p-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <p className="font-medium text-gray-900 min-w-0 break-words">
-                    🥫 {a.nome}{' '}
-                    <span className="text-xs uppercase text-gray-400">({a.unit})</span>
-                  </p>
+                  <div className="min-w-0">
+                    <p className="font-medium text-gray-900 break-words">
+                      🥫 {a.nome}{' '}
+                      <span className="text-xs uppercase text-gray-400">({a.unit})</span>
+                    </p>
+                    <p className="text-sm text-gray-500 mt-0.5 tabular-nums">
+                      {fmtKg(a.recebimentos)}
+                    </p>
+                  </div>
                   <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    <span className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-600">
-                      {a.recebimentos}{' '}
-                      {a.recebimentos === 1 ? 'recebimento' : 'recebimentos'}
-                    </span>
-
                     {editandoRefugo ? (
                       <div className="flex items-center gap-1">
                         <input
@@ -711,7 +793,6 @@ export default function EventoDetalheClient({
                       )
                     )}
 
-                    {/* 🆕 17.6-f — excluir alimento (só admin, evento não encerrado, fora do modo refugo) */}
                     {podeExcluirAlimento && !editandoRefugo && (
                       <button
                         onClick={() => excluirAlimento(a.id, a.nome)}
@@ -732,7 +813,6 @@ export default function EventoDetalheClient({
             ))
           )}
 
-          {/* 🆕 17.6 — observação geral de refugo */}
           {(editandoRefugo || evento.obsRefugo) && (
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs font-medium text-gray-500 mb-2">
@@ -754,10 +834,9 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: OPERADORES (SÓ ADMIN — 🆕 17.6-g) ════════════ */}
+      {/* ════════════ ABA: OPERADORES (SÓ ADMIN) ════════════ */}
       {aba === 'operadores' && isAdmin && (
         <div className="space-y-3">
-          {/* 🆕 17.6-g — vincular operador (só admin, evento não encerrado) */}
           {podeGerenciarOperadores ? (
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs font-medium text-gray-500 mb-2">
@@ -825,7 +904,6 @@ export default function EventoDetalheClient({
                   >
                     {op.ativo ? 'Ativo' : 'Inativo'}
                   </span>
-                  {/* 🆕 17.6-g — desvincular (só ativos, evento não encerrado) */}
                   {podeGerenciarOperadores && op.ativo && (
                     <button
                       onClick={() => desvincularOperador(op.userId, op.nome)}
@@ -842,8 +920,15 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: GRÁFICOS ════════════ */}
-      {aba === 'graficos' && <GraficosEvento metrics={evento.metrics} />}
+      {/* ════════════ ABA: GRÁFICOS (Exportar PDF só aqui — #26) ════════════ */}
+      {aba === 'graficos' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <ExportarEventoPdf eventoId={evento.id} isAdmin={isAdmin} />
+          </div>
+          <GraficosEvento metrics={evento.metrics} />
+        </div>
+      )}
     </div>
   )
 }

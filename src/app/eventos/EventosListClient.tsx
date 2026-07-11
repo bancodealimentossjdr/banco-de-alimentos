@@ -128,27 +128,28 @@ export default function EventosListClient({
       </div>
 
       {/* ════════════ FILTROS + BUSCA ════════════ */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {filtrosVisiveis.map((f) => (
-            <button
-              key={f.id}
-              className={filtroBtnCls(f.id)}
-              onClick={() => setFiltro(f.id)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+          {/* 🆕 17.8 (D2) — filtros em flex-wrap, sem scroll-x */}
+          <div className="flex flex-wrap gap-2">
+            {filtrosVisiveis.map((f) => (
+              <button
+                key={f.id}
+                className={filtroBtnCls(f.id)}
+                onClick={() => setFiltro(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-        <input
-          type="text"
-          placeholder="🔍 Buscar por nome..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-200 focus:border-green-400"
-        />
-      </div>
+          <input
+            type="text"
+            placeholder="🔍 Buscar por nome..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="flex-1 min-w-0 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-200 focus:border-green-400"
+          />
+        </div>
 
       {/* ════════════ LISTA ════════════ */}
       {eventosFiltrados.length === 0 ? (
