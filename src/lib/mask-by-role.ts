@@ -6,6 +6,7 @@ import { canEdit, type Module } from './permissions'
  * Retorna true se o role deve ver dados mascarados.
  *
  * Política atual:
+ * - dev      → vê dados crus (superconjunto do admin)
  * - admin    → vê dados crus
  * - operador → vê dados crus
  * - visualizador → vê dados mascarados
@@ -16,7 +17,7 @@ import { canEdit, type Module } from './permissions'
  */
 export function shouldMaskPersonalData(role: UserRole | undefined | null): boolean {
   if (!role) return true
-  return role !== 'admin' && role !== 'operador'
+  return role !== 'dev' && role !== 'admin' && role !== 'operador'
 }
 
 // ---------- DOADOR ----------

@@ -35,9 +35,29 @@ export const TIME_LOCKED_MODULES: Module[] = [
 ]
 
 /**
+ * Lista completa de módulos (usada pelo role dev — vê tudo).
+ */
+const ALL_MODULES: Module[] = [
+  'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
+  'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
+  'estoque', 'usuarios', 'indicadores', 'eventos',
+]
+
+/**
+ * Módulos editáveis por dev/admin (dev = superconjunto de admin).
+ */
+const ALL_EDIT_MODULES: Module[] = [
+  'produtos', 'doadores', 'beneficiarios', 'funcionarios', 'produtores',
+  'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque', 'usuarios',
+  'eventos',
+]
+
+/**
  * Quais módulos cada role pode VER (aparecer no menu / acessar a rota).
  */
 const VIEW_PERMISSIONS: Record<UserRole, Module[]> = {
+  // 🆕 DEV — superconjunto do admin: vê tudo.
+  dev: ALL_MODULES,
   admin: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
@@ -64,10 +84,12 @@ const VIEW_PERMISSIONS: Record<UserRole, Module[]> = {
  *
  * ⚠️ ONDA 17.3 — 'eventos' aqui significa GERENCIAR o evento
  * (criar, editar, ativar, encerrar, locais, catálogo, operadores).
- * Isso continua SENDO SÓ ADMIN. O REGISTRO de recebimentos por
+ * Isso continua SENDO SÓ ADMIN/DEV. O REGISTRO de recebimentos por
  * operador é uma permissão separada: canRegisterRecebimento().
  */
 const EDIT_PERMISSIONS: Record<UserRole, Module[]> = {
+  // 🆕 DEV — superconjunto do admin: edita tudo.
+  dev: ALL_EDIT_MODULES,
   admin: [
     'produtos', 'doadores', 'beneficiarios', 'funcionarios', 'produtores',
     'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque', 'usuarios',
@@ -97,11 +119,22 @@ export function canEdit(role: UserRole, module: Module): boolean {
 }
 
 /**
+ * 🆕 ONDA 17-C — Calibração de estoque (Marco Zero por gaveta).
+ *
+ * 🔒 Poder EXCLUSIVO do dev. Nem admin faz isso — é ação estrutural
+ * que redefine a base de cálculo do estoque. Backend deve gatear com
+ * requireCalibrateStock() (auth-helpers), nunca só esconder o botão.
+ */
+export function canCalibrateStock(role: UserRole): boolean {
+  return role === 'dev'
+}
+
+/**
  * 🆕 ONDA 17.3 — Registro de recebimentos em eventos (Opção A).
  *
  * ⚠️ REVOGADO PARCIALMENTE PELA DECISÃO #18 (08/07) — NÃO USE ISOLADAMENTE
  * COMO GATE FINAL. Esta função responde apenas à pergunta "a role, por si só,
- * já pode registrar em QUALQUER evento?". Isso vale para admin e operador.
+ * já pode registrar em QUALQUER evento?". Isso vale para dev, admin e operador.
  *
  * Para o perfil VISUALIZADOR, o gate real depende do VÍNCULO no evento
  * (EventoOperador { ativo:true }), que só pode ser avaliado com acesso ao
@@ -110,12 +143,13 @@ export function canEdit(role: UserRole, module: Module): boolean {
  * A trava de status (evento precisa estar ATIVO) continua na rota de recebimento.
  */
 export function canRegisterRecebimento(role: UserRole): boolean {
-  return role === 'admin' || role === 'operador'
+  return role === 'dev' || role === 'admin' || role === 'operador'
 }
 
 /**
  * 🆕 17.6-h (Decisão #18) — Gate DEFINITIVO de registro de recebimento por evento.
  *
+ * - dev        → sempre pode (qualquer evento ativo)
  * - admin      → sempre pode (qualquer evento ativo)
  * - operador   → sempre pode (qualquer evento ativo)
  * - visualizador → SÓ se tiver vínculo ATIVO no evento (EventoOperador { ativo:true })
@@ -130,7 +164,7 @@ export function podeRegistrarNoEvento(
   role: UserRole,
   temVinculoAtivo: boolean,
 ): boolean {
-  if (role === 'admin' || role === 'operador') return true
+  if (role === 'dev' || role === 'admin' || role === 'operador') return true
   if (role === 'visualizador') return temVinculoAtivo
   return false
 }
@@ -166,7 +200,8 @@ export function canEditRecord(
   recordDate: Date | string,
 ): boolean {
   if (!canEdit(role, module)) return false
-  if (role === 'admin') return true
+  // dev e admin não têm trava temporal.
+  if (role === 'dev' || role === 'admin') return true
   if (TIME_LOCKED_MODULES.includes(module)) {
     return isSameDay(recordDate, new Date())
   }
@@ -175,11 +210,11 @@ export function canEditRecord(
 
 /**
  * Verifica se um role pode EXCLUIR registros em módulos time-locked.
- * Apenas admin pode excluir doações, distribuições e colheitas.
+ * Apenas dev/admin podem excluir doações, distribuições e colheitas.
  */
 export function canDeleteRecord(role: UserRole, module: Module): boolean {
   if (!canEdit(role, module)) return false
-  if (role === 'admin') return true
+  if (role === 'dev' || role === 'admin') return true
   // Operador NUNCA exclui registros de módulos time-locked
   if (TIME_LOCKED_MODULES.includes(module)) return false
   return true

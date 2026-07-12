@@ -6,6 +6,7 @@ import {
   canView,
   canDeleteRecord,
   canRegisterRecebimento,
+  canCalibrateStock,
   type Module,
 } from './permissions'
 import type { UserRole } from '@/types/next-auth'
@@ -137,6 +138,37 @@ export async function requireRegisterRecebimento(): Promise<
   if (!canRegisterRecebimento(result.user.role)) {
     return NextResponse.json(
       { error: 'Você não tem permissão para registrar recebimentos' },
+      { status: 403 },
+    )
+  }
+  return result
+}
+/**
+ * 🆕 Garante que o usuário é dev OU admin.
+ * Útil para ações estruturais que dev e admin compartilham.
+ */
+export async function requireAdminOrDev(): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (result.user.role !== 'dev' && result.user.role !== 'admin') {
+    return NextResponse.json(
+      { error: 'Apenas administradores podem realizar esta ação' },
+      { status: 403 },
+    )
+  }
+  return result
+}
+
+/**
+ * 🆕 ONDA 17-C — Garante que o usuário pode CALIBRAR estoque (Marco Zero).
+ * 🔒 Exclusivo do dev.
+ */
+export async function requireCalibrateStock(): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (!canCalibrateStock(result.user.role)) {
+    return NextResponse.json(
+      { error: 'Apenas o perfil dev pode calibrar o estoque' },
       { status: 403 },
     )
   }
