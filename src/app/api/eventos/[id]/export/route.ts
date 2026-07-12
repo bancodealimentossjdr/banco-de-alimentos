@@ -32,6 +32,12 @@ export async function GET(
   const querMask = req.nextUrl.searchParams.get('mask')
   const semCensura = isAdmin && querMask === 'false'
 
+  // 🆕 17.5-a — filtro de período (YYYY-MM-DD). Ausentes = tudo.
+  const inicioParam = req.nextUrl.searchParams.get('inicio')
+  const fimParam = req.nextUrl.searchParams.get('fim')
+  const dtInicio = inicioParam ? new Date(`${inicioParam}T00:00:00.000Z`) : null
+  const dtFim = fimParam ? new Date(`${fimParam}T23:59:59.999Z`) : null
+
   const evento = await prisma.evento.findUnique({
     where: { id },
     include: {
@@ -52,8 +58,17 @@ export async function GET(
       operadores: {
         include: { user: { select: { name: true, email: true, role: true } } },
       },
-      // 🆕 17.3 — recebimento agora é alimentoId + quantidade (sem descricao/qtdRefugo)
+      // 🆕 17.5-a — recebimentos filtrados por período (createdAt)
       recebimentos: {
+        where:
+          dtInicio || dtFim
+            ? {
+                createdAt: {
+                  ...(dtInicio ? { gte: dtInicio } : {}),
+                  ...(dtFim ? { lte: dtFim } : {}),
+                },
+              }
+            : undefined,
         select: { quantidade: true, localId: true, alimentoId: true },
       },
     },
@@ -84,11 +99,14 @@ export async function GET(
   }
 
   // 🆕 17.3 — refugo agora vem do EventoAlimento (não mais do recebimento)
+  // ⚠️ 17.5-a — refugo NÃO tem data: continua sendo do evento inteiro
   const refugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
 
   const round = (n: number) => Math.round(n * 100) / 100
   const fmtKg = (n: number) =>
     `${round(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
+
+  const temFiltro = Boolean(inicioParam || fimParam)
 
   // ─── Monta o PDF (jsPDF) ───
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
@@ -117,6 +135,18 @@ export async function GET(
     doc.text(`Criado por: ${evento.criadoPor.name}`, 40, y)
     y += 14
   }
+
+  // 🆕 17.5-a — período do relatório
+  if (temFiltro) {
+    const fmtBR = (iso: string) => {
+      const [a, m, d] = iso.split('-')
+      return `${d}/${m}/${a}`
+    }
+    const de = inicioParam ? fmtBR(inicioParam) : 'início'
+    const ate = fimParam ? fmtBR(fimParam) : 'hoje'
+    doc.text(`Período: ${de} a ${ate}`, 40, y)
+    y += 14
+  }
   y += 8
 
   // ─── Resumo ───
@@ -125,11 +155,11 @@ export async function GET(
     head: [['Indicador', 'Valor']],
     body: [
       ['Total recebido', fmtKg(totalKg)],
-      ['Refugo', fmtKg(refugoKg)],
+      [temFiltro ? 'Refugo (evento todo)' : 'Refugo', fmtKg(refugoKg)],
       ['Líquido (sem refugo)', fmtKg(totalKg - refugoKg)],
       ['Recebimentos', String(evento.recebimentos.length)],
       ['Locais', String(evento.locais.length)],
-      ['Alimentos', String(evento.alimentos.length)], // 🆕
+      ['Alimentos', String(evento.alimentos.length)],
     ],
     theme: 'striped',
     headStyles: { fillColor: verde },
@@ -156,26 +186,21 @@ export async function GET(
   // @ts-expect-error lastAutoTable é injetado pelo plugin
   y = doc.lastAutoTable.finalY + 24
 
-  // ─── 🆕 17.3 — Recebido e refugo POR ALIMENTO ───
-const alimentosBody = evento.alimentos.map((a) => {
-  // 🔄 17.4 — chave do mapa é o nome do product (idêntico ao usado na agregação)
-  const recebido = recebidoPorAlimento.get(a.product.name) ?? 0
-  return [
-    a.product.name,
-    fmtKg(recebido),
-    fmtKg(a.refugoKg ?? 0),
-  ]
-})
+  // ─── Recebido e refugo POR ALIMENTO ───
+  const alimentosBody = evento.alimentos.map((a) => {
+    const recebido = recebidoPorAlimento.get(a.product.name) ?? 0
+    return [a.product.name, fmtKg(recebido), fmtKg(a.refugoKg ?? 0)]
+  })
 
-autoTable(doc, {
-  startY: y,
-  head: [['Alimento', 'Recebido', 'Refugo']],
-  body: alimentosBody.length > 0 ? alimentosBody : [['— sem alimentos —', '', '']],
-  theme: 'striped',
-  headStyles: { fillColor: verde },
-  styles: { fontSize: 10 },
-  margin: { left: 40, right: 40 },
-})
+  autoTable(doc, {
+    startY: y,
+    head: [['Alimento', 'Recebido', 'Refugo']],
+    body: alimentosBody.length > 0 ? alimentosBody : [['— sem alimentos —', '', '']],
+    theme: 'striped',
+    headStyles: { fillColor: verde },
+    styles: { fontSize: 10 },
+    margin: { left: 40, right: 40 },
+  })
   // @ts-expect-error lastAutoTable é injetado pelo plugin
   y = doc.lastAutoTable.finalY + 24
 

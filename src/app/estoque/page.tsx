@@ -5,26 +5,39 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { useApi } from '@/hooks/useApi'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 
+interface EventoUnidade {
+  unidade: string
+  arrecadado: number
+  distribuido: number
+  saldo: number
+}
+
 interface EstoqueResumo {
   // 📊 Totais globais (histórico completo) — alimentam os cards
   donations: number
   solidarityHarvest: number
   approved: number
   distributed: number
-  inStock: number
 
-  // 🎯 Marco Zero — alimenta o box "Como o estoque é calculado"
-  hasMarker: boolean
-  baseMarker: {
+  // 🔐 Campos SENSÍVEIS — omitidos pelo backend para visualizador
+  inStock?: number
+  hasMarker?: boolean
+  baseMarker?: {
     id: string
     type: 'ZERO' | 'ADJUSTMENT'
     date: string
     quantityKg: number
   } | null
-  movementsSinceMarker: {
+  movementsSinceMarker?: {
     approvedKg: number
     harvestKg: number
     distributedKg: number
+  }
+
+  // 🎪 Reservatório de eventos (também sensível → omitido na máscara)
+  eventos?: {
+    porUnidade: EventoUnidade[]
+    totalRecebimentos: number
   }
 }
 
@@ -59,6 +72,7 @@ interface CardConfig {
   borderColor: string
   textColor: string
   iconBg: string
+  sensivel?: boolean // 🔐 oculto para visualizador
 }
 
 const CARDS: CardConfig[] = [
@@ -66,8 +80,24 @@ const CARDS: CardConfig[] = [
   { key: 'solidarityHarvest', label: 'Colheita Solidária', emoji: '🌾', description: 'Total da colheita solidária', bgColor: 'bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-700', iconBg: 'bg-amber-100' },
   { key: 'approved', label: 'Aproveitado', emoji: '✅', description: 'Total aproveitado das doações', bgColor: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700', iconBg: 'bg-blue-100' },
   { key: 'distributed', label: 'Distribuído', emoji: '📤', description: 'Total distribuído aos beneficiários', bgColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700', iconBg: 'bg-purple-100' },
-  { key: 'inStock', label: 'Em Estoque', emoji: '📦', description: 'Saldo atual disponível', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-300', textColor: 'text-emerald-700', iconBg: 'bg-emerald-100' },
+  { key: 'inStock', label: 'Em Estoque', emoji: '📦', description: 'Saldo atual disponível', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-300', textColor: 'text-emerald-700', iconBg: 'bg-emerald-100', sensivel: true },
 ]
+
+const UNIDADE_LABEL: Record<string, string> = {
+  kg: 'kg',
+  g: 'g',
+  l: 'L',
+  ml: 'mL',
+  un: 'un',
+  cx: 'cx',
+  pct: 'pct',
+  fardo: 'fardo',
+}
+
+const formatUnidadeLabel = (u: string) => {
+  const key = (u || 'un').trim().toLowerCase()
+  return UNIDADE_LABEL[key] ?? key
+}
 
 const getHojeLocal = () => {
   const hoje = new Date()
@@ -84,6 +114,11 @@ const formatDate = (date: string) => {
 }
 
 const formatKg = (valor: number | null | undefined) => {
+  const n = typeof valor === 'number' && !isNaN(valor) ? valor : 0
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
+const formatQtd = (valor: number | null | undefined) => {
   const n = typeof valor === 'number' && !isNaN(valor) ? valor : 0
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
@@ -205,8 +240,14 @@ export default function EstoquePage() {
   const totalReceived = preview?.totalReceived ?? 0
   const semDados = preview !== undefined && preview !== null && totalReceived === 0
 
-  // 🛡️ Alerta de estoque negativo (sinal de inconsistência de dados)
-  const estoqueNegativo = resumo ? resumo.inStock < 0 : false
+  // 🔐 FLAG DE MÁSCARA — backend omite inStock para visualizador
+  const dadosMascarados = resumo ? resumo.inStock === undefined : false
+
+  // 🛡️ Alerta de estoque negativo (só faz sentido quando NÃO mascarado)
+  const estoqueNegativo =
+    resumo && !dadosMascarados && typeof resumo.inStock === 'number'
+      ? resumo.inStock < 0
+      : false
 
   // 🎯 Dados do marco (fórmula real do estoque)
   const temMarco = resumo?.hasMarker ?? false
@@ -216,6 +257,14 @@ export default function EstoquePage() {
   const aprovDesde = resumo?.movementsSinceMarker?.approvedKg ?? 0
   const colhDesde = resumo?.movementsSinceMarker?.harvestKg ?? 0
   const distrDesde = resumo?.movementsSinceMarker?.distributedKg ?? 0
+
+  // 🎪 Eventos (omitido na máscara)
+  const eventos = resumo?.eventos?.porUnidade ?? []
+  const temEventos = eventos.length > 0
+
+  // 🔐 Cards visíveis conforme máscara
+  const cardsVisiveis = CARDS.filter((c) => !(c.sensivel && dadosMascarados))
+  const gridColsClass = dadosMascarados ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
 
   return (
     <div>
@@ -266,8 +315,8 @@ export default function EstoquePage() {
 
       {resumo && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-            {CARDS.map((card) => (
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${gridColsClass} gap-4 mb-6`}>
+            {cardsVisiveis.map((card) => (
               <div key={card.key} className={`${card.bgColor} ${card.borderColor} border-2 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow`}>
                 <div className={`${card.iconBg} w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3`}>
                   {card.emoji}
@@ -281,6 +330,16 @@ export default function EstoquePage() {
               </div>
             ))}
           </div>
+
+          {/* 🔐 Aviso discreto para visualizador */}
+          {dadosMascarados && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+              <p className="text-slate-600 text-sm">
+                🔒 O saldo em estoque e os dados de calibração não estão disponíveis
+                no seu nível de acesso. Os totais históricos acima permanecem visíveis.
+              </p>
+            </div>
+          )}
 
           {/* 🛡️ Alerta de inconsistência: estoque negativo */}
           {estoqueNegativo && (
@@ -297,83 +356,147 @@ export default function EstoquePage() {
             </div>
           )}
 
-          {/* 🧮 Como o estoque é calculado */}
-          <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">🧮 Como o estoque é calculado</h3>
+          {/* 🎪 Total Arrecadado de Eventos — oculto na máscara */}
+{!dadosMascarados && temEventos && (
+  <div className="bg-white border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
+    <div className="flex items-center gap-3 mb-4">
+      <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
+        🎪
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-rose-700">
+          Total Arrecadado de Eventos
+        </p>
+        <p className="text-xs text-gray-500">
+          Saldo por unidade — controlado à parte do estoque em kg
+        </p>
+      </div>
+    </div>
 
-            {temMarco ? (
-              <>
-                {/* 🎯 Fórmula REAL baseada no Marco Zero */}
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
-                    📦 Em Estoque ({formatKg(resumo.inStock)} kg)
-                  </span>
-                  <span className="text-gray-400 font-bold">=</span>
-                  <span className="px-3 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium">
-                    🎯 Marco ({formatKg(marcoKg)})
-                  </span>
-                  <span className="text-gray-400 font-bold">+</span>
-                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
-                    ✅ Aprov. desde ({formatKg(aprovDesde)})
-                  </span>
-                  <span className="text-gray-400 font-bold">+</span>
-                  <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
-                    🌾 Colheita desde ({formatKg(colhDesde)})
-                  </span>
-                  <span className="text-gray-400 font-bold">−</span>
-                  <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
-                    📤 Distrib. desde ({formatKg(distrDesde)})
-                  </span>
-                </div>
-
-                <p className="text-xs text-gray-500 mt-3">
-                  💡 O saldo parte do{' '}
-                  <strong>
-                    {marcoTipo === 'ADJUSTMENT' ? 'último ajuste' : 'Marco Zero'}
-                    {marcoData ? ` (${formatDate(marcoData)})` : ''}
-                  </strong>{' '}
-                  — uma pesagem física que calibra o estoque oficial. A partir dele, somam-se as{' '}
-                  <strong>entradas</strong> (aproveitamento das doações + colheita realizada) e descontam-se as{' '}
-                  <strong>saídas</strong> (distribuições). Movimentações registradas no mesmo dia do marco já estão
-                  embutidas na pesagem e não são recontadas.
-                </p>
-
-                <p className="text-xs text-gray-400 mt-2">
-                  ℹ️ Os cards acima (Doações, Colheita, Aproveitado, Distribuído) mostram o{' '}
-                  <strong>histórico completo</strong> de registros — independente do marco.
-                </p>
-              </>
-            ) : (
-              <>
-                {/* 🚦 Fallback legado: sem marco cadastrado */}
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
-                    📦 Em Estoque ({formatKg(resumo.inStock)} kg)
-                  </span>
-                  <span className="text-gray-400 font-bold">=</span>
-                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
-                    ✅ Aproveitado ({formatKg(resumo.approved)})
-                  </span>
-                  <span className="text-gray-400 font-bold">+</span>
-                  <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
-                    🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
-                  </span>
-                  <span className="text-gray-400 font-bold">−</span>
-                  <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
-                    📤 Distribuído ({formatKg(resumo.distributed)})
-                  </span>
-                </div>
-
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
-                  <p className="text-xs text-amber-700">
-                    ⚠️ <strong>Nenhum Marco Zero cadastrado.</strong> O saldo está sendo calculado pelo
-                    modelo legado (histórico completo). Crie um Marco Zero para calibrar o estoque
-                    oficialmente a partir de uma pesagem física.
-                  </p>
-                </div>
-              </>
-            )}
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {eventos.map((ev) => (
+        <div
+          key={ev.unidade}
+          className="bg-rose-50 border border-rose-100 rounded-lg p-4"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-rose-600">
+              {formatUnidadeLabel(ev.unidade)}
+            </span>
+            <span
+              className={`text-lg font-bold ${
+                ev.saldo < 0 ? 'text-red-600' : 'text-emerald-700'
+              }`}
+            >
+              {formatQtd(ev.saldo)}
+            </span>
           </div>
+          <div className="space-y-1 text-xs text-gray-500">
+            <div className="flex justify-between">
+              <span>📥 Arrecadado</span>
+              <span className="font-medium text-gray-700">
+                {formatQtd(ev.arrecadado)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>📤 Distribuído</span>
+              <span className="font-medium text-gray-700">
+                {formatQtd(ev.distribuido)}
+              </span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <p className="text-xs text-gray-400 mt-4">
+      ℹ️ Itens arrecadados em eventos são controlados por{' '}
+      <strong>unidade própria</strong> (un, cx, L…) e não entram no saldo em kg
+      do estoque geral.
+    </p>
+  </div>
+)}
+
+
+          {/* 🧮 Como o estoque é calculado — oculto na máscara */}
+          {!dadosMascarados && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">🧮 Como o estoque é calculado</h3>
+
+              {temMarco ? (
+                <>
+                  {/* 🎯 Fórmula REAL baseada no Marco Zero */}
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
+                      📦 Em Estoque ({formatKg(resumo.inStock)} kg)
+                    </span>
+                    <span className="text-gray-400 font-bold">=</span>
+                    <span className="px-3 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg font-medium">
+                      🎯 Marco ({formatKg(marcoKg)})
+                    </span>
+                    <span className="text-gray-400 font-bold">+</span>
+                    <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
+                      ✅ Aprov. desde ({formatKg(aprovDesde)})
+                    </span>
+                    <span className="text-gray-400 font-bold">+</span>
+                    <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                      🌾 Colheita desde ({formatKg(colhDesde)})
+                    </span>
+                    <span className="text-gray-400 font-bold">−</span>
+                    <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
+                      📤 Distrib. desde ({formatKg(distrDesde)})
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-gray-500 mt-3">
+                    💡 O saldo parte do{' '}
+                    <strong>
+                      {marcoTipo === 'ADJUSTMENT' ? 'último ajuste' : 'Marco Zero'}
+                      {marcoData ? ` (${formatDate(marcoData)})` : ''}
+                    </strong>{' '}
+                    — uma pesagem física que calibra o estoque oficial. A partir dele, somam-se as{' '}
+                    <strong>entradas</strong> (aproveitamento das doações + colheita realizada) e descontam-se as{' '}
+                    <strong>saídas</strong> (distribuições). Movimentações registradas no mesmo dia do marco já estão
+                    embutidas na pesagem e não são recontadas.
+                  </p>
+
+                  <p className="text-xs text-gray-400 mt-2">
+                    ℹ️ Os cards acima (Doações, Colheita, Aproveitado, Distribuído) mostram o{' '}
+                    <strong>histórico completo</strong> de registros — independente do marco.
+                  </p>
+                </>
+              ) : (
+                <>
+                  {/* 🚦 Fallback legado: sem marco cadastrado */}
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
+                      📦 Em Estoque ({formatKg(resumo.inStock)} kg)
+                    </span>
+                    <span className="text-gray-400 font-bold">=</span>
+                    <span className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
+                      ✅ Aproveitado ({formatKg(resumo.approved)})
+                    </span>
+                    <span className="text-gray-400 font-bold">+</span>
+                    <span className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                      🌾 Colheita ({formatKg(resumo.solidarityHarvest)})
+                    </span>
+                    <span className="text-gray-400 font-bold">−</span>
+                    <span className="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
+                      📤 Distribuído ({formatKg(resumo.distributed)})
+                    </span>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+                    <p className="text-xs text-amber-700">
+                      ⚠️ <strong>Nenhum Marco Zero cadastrado.</strong> O saldo está sendo calculado pelo
+                      modelo legado (histórico completo). Crie um Marco Zero para calibrar o estoque
+                      oficialmente a partir de uma pesagem física.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -465,9 +588,9 @@ export default function EstoquePage() {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-sm font-semibold text-gray-700">
-                          ✅ Quantidade Aproveitada (kg) *
-                        </label>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+  Estoque *
+</label>
                         {!showCalculadora && (
                           <button
                             type="button"

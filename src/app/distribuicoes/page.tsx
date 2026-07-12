@@ -11,10 +11,13 @@ import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
+type Origem = 'DOACAO' | 'EVENTO'
+
 interface DistributionItem {
   id: string
   quantity: number
   boxes: number | null
+  origem?: Origem // 🆕 ONDA 18
   product: { name: string; unit: string }
 }
 
@@ -22,9 +25,10 @@ interface Distribution {
   id: string
   date: string
   notes: string | null
-  status: 'PENDENTE' | 'ENTREGUE' // 🆕
-  legacy: boolean // 🆕
-  receipt: { id: string } | null // 🆕
+  status: 'PENDENTE' | 'ENTREGUE'
+  legacy: boolean
+  origem?: Origem // legado (nível distribuição)
+  receipt: { id: string } | null
   beneficiary: { id: string; name: string; type: string }
   employee: { id: string; name: string } | null
   employee2: { id: string; name: string } | null
@@ -36,6 +40,7 @@ interface FormItem {
   productId: string
   quantity: number
   boxes?: number
+  origem: Origem // 🆕 ONDA 18 — obrigatório, por item
 }
 
 interface DistribuicaoForm {
@@ -47,6 +52,8 @@ interface DistribuicaoForm {
   notes: string
 }
 
+const novoItem = (): FormItem => ({ productId: '', quantity: 0, origem: 'DOACAO' })
+
 export default function DistribuicoesPage() {
   // 🔐 Permissões
   const { canEdit, canEditRecord, canDelete } = usePermissions()
@@ -56,12 +63,12 @@ export default function DistribuicoesPage() {
   // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 🚀 Cache global de cadastros (compartilhado com outras páginas)
+  // 🚀 Cache global de cadastros
   const { produtos: products } = useProdutos()
   const { beneficiarios: beneficiaries } = useBeneficiarios()
   const { funcionarios: employees } = useFuncionarios()
 
-  // 📋 Lista de distribuições — cache local
+  // 📋 Lista de distribuições
   const {
     data: distributionsData,
     isLoading: loadingDistributions,
@@ -83,7 +90,7 @@ export default function DistribuicoesPage() {
     date: new Date().toISOString().split('T')[0],
     notes: '',
   })
-  const [formItems, setFormItems] = useState<FormItem[]>([{ productId: '', quantity: 0 }])
+  const [formItems, setFormItems] = useState<FormItem[]>([novoItem()])
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
 
@@ -115,7 +122,7 @@ export default function DistribuicoesPage() {
       date: new Date().toISOString().split('T')[0],
       notes: '',
     })
-    setFormItems([{ productId: '', quantity: 0 }])
+    setFormItems([novoItem()])
     setEditingId(null)
     setShowForm(false)
     setCalcOpen(null)
@@ -135,6 +142,7 @@ export default function DistribuicoesPage() {
         productId: products.find(p => p.name === item.product.name)?.id || '',
         quantity: item.quantity,
         boxes: item.boxes ?? undefined,
+        origem: item.origem ?? dist.origem ?? 'DOACAO',
       }))
     )
     setEditingId(dist.id)
@@ -143,7 +151,7 @@ export default function DistribuicoesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const addItem = () => setFormItems([...formItems, { productId: '', quantity: 0 }])
+  const addItem = () => setFormItems([...formItems, novoItem()])
 
   const removeItem = (index: number) => {
     if (formItems.length > 1) {
@@ -152,7 +160,7 @@ export default function DistribuicoesPage() {
     if (calcOpen === index) setCalcOpen(null)
   }
 
-  const updateItem = (index: number, field: string, value: string | number) => {
+  const updateItem = (index: number, field: keyof FormItem, value: string | number) => {
     const updated = [...formItems]
     updated[index] = { ...updated[index], [field]: value }
     setFormItems(updated)
@@ -186,7 +194,12 @@ export default function DistribuicoesPage() {
             employeeId: form.employeeId || null,
             employee2Id: form.employee2Id || null,
             employee3Id: form.employee3Id || null,
-            items: validItems,
+            items: validItems.map(i => ({
+              productId: i.productId,
+              quantity: i.quantity,
+              boxes: i.boxes,
+              origem: i.origem === 'EVENTO' ? 'EVENTO' : 'DOACAO', // 🆕 por item
+            })),
           }),
         })
         if (res.ok) {
@@ -230,6 +243,14 @@ export default function DistribuicoesPage() {
 
   const getDistributionEmployees = (dist: Distribution) => {
     return [dist.employee, dist.employee2, dist.employee3].filter(Boolean) as { id: string; name: string }[]
+  }
+
+  // 🆕 ONDA 18 — origens presentes na distribuição (para badges)
+  const getOrigens = (dist: Distribution): Origem[] => {
+    const set = new Set<Origem>()
+    dist.items.forEach(i => set.add(i.origem ?? dist.origem ?? 'DOACAO'))
+    if (set.size === 0 && dist.origem) set.add(dist.origem)
+    return Array.from(set)
   }
 
   return (
@@ -350,14 +371,15 @@ export default function DistribuicoesPage() {
             </div>
 
             {formItems.map((item, index) => (
-              <div key={index} className="mb-3">
-                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-end">
+              <div key={index} className="mb-4 pb-4 border-b border-gray-100 last:border-0 last:pb-0 last:mb-0">
+                {/* Linha 1: Produto + Estoque (origem) dividindo espaço */}
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-2">
                   <div className="flex-1">
                     {index === 0 && <label className="block text-xs text-gray-500 mb-1">Produto</label>}
                     <select
                       value={item.productId}
                       onChange={e => updateItem(index, 'productId', e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2.5 text-sm"
+                      className="w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
                       required
                     >
                       <option value="">Selecione o produto...</option>
@@ -365,38 +387,54 @@ export default function DistribuicoesPage() {
                     </select>
                   </div>
 
-                  <div className="flex gap-2 items-end">
-                    <div className="flex-1 sm:w-32 sm:flex-none">
-                      {index === 0 && <label className="block text-xs text-gray-500 mb-1 hidden sm:block">Quantidade</label>}
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.01"
-                        min="0.01"
-                        value={item.quantity || ''}
-                        onChange={e => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                        className="w-full border rounded-lg px-3 py-2.5 text-sm"
-                        placeholder="Quantidade"
-                        required
-                      />
-                    </div>
+                  <div className="flex-1">
+                    {index === 0 && <label className="block text-xs text-gray-500 mb-1">Estoque *</label>}
+                    <select
+                      value={item.origem}
+                      onChange={e => updateItem(index, 'origem', e.target.value as Origem)}
+                      className="w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                      required
+                    >
+                      <option value="DOACAO">🥫 Doação / Estoque geral</option>
+                      <option value="EVENTO">🎪 Evento de arrecadação</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Linha 2: Quantidade + Calculadora meio a meio */}
+                <div className="flex gap-2 items-stretch">
+                  <div className="flex-1">
+                    {index === 0 && <label className="block text-xs text-gray-500 mb-1 hidden sm:block">Quantidade</label>}
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0.01"
+                      value={item.quantity || ''}
+                      onChange={e => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                      className="w-full h-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                      placeholder="Quantidade"
+                      required
+                    />
+                  </div>
+                  <div className="flex-1 flex items-end gap-2">
                     <button
                       type="button"
                       onClick={() => calcOpen === index ? closeCalc() : openCalc(index)}
-                      className={`shrink-0 p-2.5 rounded-lg border text-lg ${
+                      className={`flex-1 h-[46px] flex items-center justify-center gap-2 rounded-lg border text-sm font-medium transition ${
                         calcOpen === index
-                          ? 'bg-blue-100 border-blue-300'
-                          : 'bg-gray-50 border-gray-200 hover:bg-blue-50'
+                          ? 'bg-blue-100 border-blue-300 text-blue-700'
+                          : 'bg-gray-50 border-gray-200 hover:bg-blue-50 text-gray-700'
                       }`}
                       title="Calculadora de peso"
                     >
-                      🧮
+                      🧮 <span className="hidden sm:inline">Calculadora</span>
                     </button>
                     {formItems.length > 1 && (
                       <button
                         type="button"
                         onClick={() => removeItem(index)}
-                        className="shrink-0 p-2.5 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-lg"
+                        className="shrink-0 h-[46px] w-[46px] flex items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-lg"
                       >
                         ✕
                       </button>
@@ -483,6 +521,7 @@ export default function DistribuicoesPage() {
             const distEmployees = getDistributionEmployees(dist)
             const canEditThis = canEditRecord('distribuicoes', dist.date)
             const canDeleteThis = podeExcluir
+            const origens = getOrigens(dist)
 
             return (
               <div key={dist.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
@@ -493,6 +532,17 @@ export default function DistribuicoesPage() {
                       {totalBoxes > 0 && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                           📦 {totalBoxes} cx
+                        </span>
+                      )}
+                      {/* 🆕 ONDA 18 — Badges de origem (por item) */}
+                      {origens.includes('EVENTO') && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                          🎪 Evento
+                        </span>
+                      )}
+                      {origens.includes('DOACAO') && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-lime-100 text-lime-700">
+                          🥫 Doação
                         </span>
                       )}
                       {/* 🆕 Badge de status */}
@@ -532,7 +582,6 @@ export default function DistribuicoesPage() {
                       {dist.items.length} {dist.items.length === 1 ? 'item' : 'itens'}
                     </span>
 
-                    {/* 🆕 Finalizar — só se PENDENTE, não-legado e pode editar */}
                     {podeEditar && !dist.legacy && dist.status === 'PENDENTE' && (
                       <Link
                         href={`/distribuicoes/${dist.id}/finalizar`}
@@ -542,7 +591,6 @@ export default function DistribuicoesPage() {
                       </Link>
                     )}
 
-                    {/* 🆕 Comprovante — só se ENTREGUE e existe receipt */}
                     {dist.status === 'ENTREGUE' && dist.receipt && (
                       <Link
                         href={`/distribuicoes/${dist.id}/comprovante`}
@@ -578,6 +626,12 @@ export default function DistribuicoesPage() {
                         <span className="text-red-700 font-medium">{item.product.name}</span>
                         <span className="text-gray-500 mx-1">•</span>
                         <span className="text-gray-700">{item.quantity} {item.product.unit}</span>
+                        {(item.origem ?? dist.origem) === 'EVENTO' && (
+                          <>
+                            <span className="text-gray-500 mx-1">•</span>
+                            <span className="text-orange-600 font-medium">🎪</span>
+                          </>
+                        )}
                         {item.boxes ? (
                           <>
                             <span className="text-gray-500 mx-1">•</span>
@@ -597,6 +651,9 @@ export default function DistribuicoesPage() {
                             ({item.quantity} {item.product.unit}
                             {item.boxes ? ` · ${item.boxes}cx` : ''})
                           </span>
+                          {(item.origem ?? dist.origem) === 'EVENTO' && (
+                            <span className="ml-1 text-orange-600">🎪</span>
+                          )}
                         </div>
                       </div>
                     ))}

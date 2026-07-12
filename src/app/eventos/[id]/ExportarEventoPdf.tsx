@@ -5,9 +5,13 @@ import { useState } from 'react'
 export default function ExportarEventoPdf({
   eventoId,
   isAdmin,
+  dataInicio,
+  dataFim,
 }: {
   eventoId: string
   isAdmin: boolean
+  dataInicio?: string // 🆕 17.5-a — YYYY-MM-DD
+  dataFim?: string
 }) {
   const [semCensura, setSemCensura] = useState(false)
   const [baixando, setBaixando] = useState(false)
@@ -16,8 +20,10 @@ export default function ExportarEventoPdf({
     setBaixando(true)
 
     const params = new URLSearchParams({ format: 'pdf' })
-    // só admin pode pedir sem censura; o servidor REVALIDA a role
     if (isAdmin && semCensura) params.set('mask', 'false')
+    // 🆕 17.5-a — repassa o filtro de período ao PDF
+    if (dataInicio) params.set('inicio', dataInicio)
+    if (dataFim) params.set('fim', dataFim)
 
     const url = `/api/eventos/${eventoId}/export?${params.toString()}`
 
@@ -32,7 +38,6 @@ export default function ExportarEventoPdf({
   }
 
   return (
-    // 🆕 17.6-e — min-w-0 permite encolher; sem shrink-0; largura máxima no mobile
     <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:items-end">
       <button
         type="button"

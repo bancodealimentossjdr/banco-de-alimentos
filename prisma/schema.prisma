@@ -35,11 +35,10 @@ model User {
   // 🆕 ONDA 16.6a — Comprovantes de entrega finalizados (auditoria)
   receiptsFinalized DeliveryReceipt[] @relation("ReceiptFinalizedBy")
 
-eventosCriados        Evento[]         @relation("EventosCriados")
+  eventosCriados        Evento[]         @relation("EventosCriados")
   eventosEncerrados     Evento[]         @relation("EventosEncerrados")
   operacoesEmEventos    EventoOperador[] @relation("OperacoesEmEventos")
   recebimentosRegistrados Recebimento[]  @relation("RecebimentosRegistrados")
-
 }
 
 // ==========================================
@@ -202,6 +201,15 @@ model DonationItem {
 // ==========================================
 // DISTRIBUIÇÃO
 // ==========================================
+
+// 🆕 ONDA 18 — Origem da saída
+// DOACAO — reservatório geral (estoque em kg)
+// EVENTO — reservatório de eventos (saldo por unidade)
+enum DistributionOrigin {
+  DOACAO
+  EVENTO
+}
+
 model Distribution {
   id            String   @id @default(cuid())
   beneficiaryId String
@@ -213,6 +221,10 @@ model Distribution {
   // 🆕 ONDA 16.6a — Status + flag de legado
   status        DistributionStatus @default(PENDENTE)
   legacy        Boolean            @default(false)
+
+  // ⚠️ ONDA 18 — origem LEGADO (nível distribuição). Mantido p/ retrocompat.
+  //    A origem REAL passou a ser por item (DistributionItem.origem).
+  origem        DistributionOrigin @default(DOACAO)
 
   employeeId   String?
   employee     Employee? @relation("DistributionEmployee1", fields: [employeeId], references: [id])
@@ -230,6 +242,7 @@ model Distribution {
   receipt     DeliveryReceipt?
 
   @@index([status])
+  @@index([origem])
 }
 
 model DistributionItem {
@@ -239,8 +252,13 @@ model DistributionItem {
   quantity       Float
   boxes          Int?
 
+  // 🆕 ONDA 18 — Origem POR ITEM (fonte de verdade do cálculo)
+  origem         DistributionOrigin @default(DOACAO)
+
   distribution Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
   product      Product      @relation(fields: [productId], references: [id])
+
+  @@index([origem])
 }
 
 // ==========================================
@@ -345,9 +363,6 @@ model StockMarker {
 
 // ==========================================
 // 🆕 ONDA 16.6a — STATUS DE DISTRIBUIÇÃO
-// PENDENTE  — criada, aguardando finalização (entrega + assinatura)
-// ENTREGUE  — finalizada com comprovante (ou legado migrado)
-// (CANCELADA fora de escopo nesta onda — decisão 09/06/2026)
 // ==========================================
 enum DistributionStatus {
   PENDENTE
@@ -356,16 +371,6 @@ enum DistributionStatus {
 
 // ==========================================
 // 🆕 ONDA 16.6a — COMPROVANTE DE ENTREGA
-// Comprovante = assinatura digital do recebedor.
-// Relação 1:1 com Distribution.
-//
-// Regras:
-//   - Criado ao finalizar a distribuição (status → ENTREGUE)
-//   - signatureSvg: assinatura vetorizada, SEM storage externo
-//   - finalizedBy: operador/admin que finalizou (auditoria)
-//   - legacy → não gera comprovante (só muda status na Distribution)
-//   - Edição: apenas Admin, trava temporal do mesmo dia (validada na API)
-//   - VISIBILIDADE: oculto para role "visualizador" (filtrado na serialização)
 // ==========================================
 model DeliveryReceipt {
   id             String       @id @default(cuid())
@@ -373,20 +378,19 @@ model DeliveryReceipt {
   distribution   Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
 
   recipientName  String
-  signatureData  String       @db.Text // PNG base64 (data URL) gerado pelo react-signature-canvas
+  signatureData  String       @db.Text
   notes          String?      @db.Text
 
   finalizedById  String
-  finalizedBy    User         @relation("ReceiptFinalizedBy", fields: [finalizedById], references: [id]) // 🔧 nome da relação adicionado
+  finalizedBy    User         @relation("ReceiptFinalizedBy", fields: [finalizedById], references: [id])
   finalizedAt    DateTime     @default(now())
 
   @@map("delivery_receipts")
 }
+
 // ============================================
 // ONDA 17 — SISTEMA DE EVENTOS DE ARRECADAÇÃO
-// (17.3 — alimentos por evento + refugo no alimento)
 // ============================================
-
 enum EventoStatus {
   RASCUNHO
   ATIVO
@@ -401,9 +405,8 @@ model Evento {
   dataFim        DateTime?
   status         EventoStatus     @default(RASCUNHO)
   integraEstoque Boolean          @default(true)
-  obsRefugo      String?          // 🆕 17.6 — observação geral de refugo do evento
+  obsRefugo      String?
 
-  // Relations
   locais         LocalColeta[]
   operadores     EventoOperador[]
   recebimentos   Recebimento[]
@@ -422,7 +425,6 @@ model Evento {
   @@index([criadoPorId])
 }
 
-
 model LocalColeta {
   id           String        @id @default(cuid())
   nome         String
@@ -439,10 +441,6 @@ model LocalColeta {
   @@index([eventoId])
 }
 
-// 🔄 17.3 — ALIMENTO DO EVENTO = ponte Evento ↔ Product
-// O alimento de evento agora É um produto do catálogo global (aba Produtos).
-// Nome e unidade vêm de product.name / product.unit.
-// O refugo (pós-evento) permanece aqui, pois é por-evento.
 model EventoAlimento {
   id           String        @id @default(cuid())
 
@@ -454,10 +452,7 @@ model EventoAlimento {
 
   ordem        Int           @default(0)
 
-  // Refugo (pós-evento, por alimento) — em kg (peso descartado)
   refugoKg     Float         @default(0)
-  // ❌ 17.6 — motivoRefugo e obsRefugo REMOVIDOS do código.
-  //    Colunas físicas permanecem no banco (dívida técnica de limpeza).
 
   recebimentos Recebimento[]
 
@@ -478,7 +473,7 @@ model EventoOperador {
   userId    String
   user      User     @relation("OperacoesEmEventos", fields: [userId], references: [id])
 
-  ativo     Boolean  @default(true) // false após encerramento do evento
+  ativo     Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -499,9 +494,8 @@ model Recebimento {
   alimentoId   String
   alimento     EventoAlimento @relation(fields: [alimentoId], references: [id])
 
-  // 🔄 17.4 — quantidade na unidade do produto (product.unit); snapshot abaixo
   quantidade   Float
-  unidade      String        // ⚠️ removido @default("kg"): agora vem de product.unit (kg, L, un...)
+  unidade      String
 
   operadorId   String
   operador     User          @relation("RecebimentosRegistrados", fields: [operadorId], references: [id])

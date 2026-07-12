@@ -95,7 +95,15 @@ export async function PUT(
     if (authResult instanceof NextResponse) return authResult
 
     const body = await request.json()
-    const { beneficiaryId, employeeId, employee2Id, employee3Id, date, notes, items } = body
+    const {
+      beneficiaryId,
+      employeeId,
+      employee2Id,
+      employee3Id,
+      date,
+      notes,
+      items,
+    } = body
 
     // 🔍 Validação: funcionários não podem se repetir
     const empIds = [employeeId, employee2Id, employee3Id].filter(Boolean)
@@ -105,6 +113,36 @@ export async function PUT(
         { status: 400 }
       )
     }
+
+    // 🆕 ONDA 18 — normaliza origem POR ITEM
+    type IncomingItem = {
+      productId: string
+      quantity: number
+      boxes?: number
+      origem?: 'DOACAO' | 'EVENTO'
+    }
+    const incomingItems: IncomingItem[] = Array.isArray(items) ? items : []
+
+    if (incomingItems.length === 0) {
+      return NextResponse.json(
+        { error: 'Adicione pelo menos um produto' },
+        { status: 400 }
+      )
+    }
+
+    // Valida cada origem
+    for (const it of incomingItems) {
+      if (it.origem !== undefined && it.origem !== 'DOACAO' && it.origem !== 'EVENTO') {
+        return NextResponse.json(
+          { error: 'Origem inválida. Use DOACAO ou EVENTO.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // origem legado (nível distribuição) = origem do 1º item, só p/ coerência
+    const origemLegado =
+      incomingItems[0].origem === 'EVENTO' ? 'EVENTO' : 'DOACAO'
 
     await prisma.distributionItem.deleteMany({
       where: { distributionId: id },
@@ -119,14 +157,14 @@ export async function PUT(
         employee3Id: employee3Id || null,
         date: date ? new Date(date + 'T12:00:00') : undefined,
         notes: notes || null,
+        origem: origemLegado, // ⚠️ legado — cálculo real usa item.origem
         items: {
-          create: items.map(
-            (item: { productId: string; quantity: number; boxes?: number }) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              boxes: item.boxes ?? null,
-            })
-          ),
+          create: incomingItems.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            boxes: item.boxes ?? null,
+            origem: item.origem === 'EVENTO' ? 'EVENTO' : 'DOACAO', // 🆕 por item
+          })),
         },
       },
       include: {

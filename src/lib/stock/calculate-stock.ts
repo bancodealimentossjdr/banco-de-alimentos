@@ -54,12 +54,6 @@ export async function calculateStock(
     if (!baseMarker) return EMPTY_SNAPSHOT(referenceDate)
 
     // 🇧🇷 Cutoff = fim do dia do marco em horário de BRASÍLIA.
-    // Movimentações registradas NO MESMO DIA civil do marco são ignoradas
-    // (já estão embutidas na pesagem física — decisão Onda 16.2).
-    //
-    // Antes (bug): endOfDayUTC pegava 23:59:59 UTC = 20:59:59 BSB
-    // → movimentações entre 21h e 23h59 (BSB) entravam como "pós-marco".
-    // Agora: endOfDayBrasilia pega 23:59:59 BSB = 02:59:59 UTC do dia seguinte.
     const cutoff = endOfDayBrasilia(baseMarker.date)
 
     // 2️⃣ Movimentações após o marco (estritamente após o fim do dia BSB do marco)
@@ -69,9 +63,15 @@ export async function calculateStock(
           where: { date: { gt: cutoff, lte: referenceDate } },
           _sum: { approvedQty: true },
         }),
+        // 🆕 ONDA 18 — origem AGORA é por ITEM.
+        // Só itens com origem DOACAO descontam do estoque geral.
+        // Itens de EVENTO saem do reservatório de eventos (por unidade).
         prisma.distributionItem.findMany({
           where: {
-            distribution: { date: { gt: cutoff, lte: referenceDate } },
+            origem: 'DOACAO',
+            distribution: {
+              date: { gt: cutoff, lte: referenceDate },
+            },
           },
           select: { quantity: true },
         }),

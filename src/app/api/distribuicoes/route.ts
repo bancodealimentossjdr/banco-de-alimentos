@@ -58,8 +58,6 @@ export async function GET() {
 
     // 3) 🆕 Regra #9 — Camada de serialização (defesa em profundidade)
     //    O VISUALIZADOR vê a distribuição "crua", SEM a camada de finalização.
-    //    Omite status / legacy / receipt da resposta (não confiar só na UI).
-    //    ⚠️ Operador/Admin MANTÊM esses campos (precisam para finalizar).
     if (role === 'visualizador') {
       distributionsSeguras = distributionsSeguras.map((d) => {
         const { status, legacy, receipt, ...rest } = d
@@ -99,24 +97,46 @@ export async function POST(request: Request) {
       )
     }
 
+    // 🆕 ONDA 18 — normaliza origem por item
+    type IncomingItem = {
+      productId: string
+      quantity: number
+      boxes?: number
+      origem?: 'DOACAO' | 'EVENTO'
+    }
+    const incomingItems: IncomingItem[] = Array.isArray(body.items)
+      ? body.items
+      : []
+
+    if (incomingItems.length === 0) {
+      return NextResponse.json(
+        { error: 'Adicione pelo menos um produto' },
+        { status: 400 }
+      )
+    }
+
+    // origem legado (nível distribuição) = origem do 1º item, só p/ coerência
+    const origemLegado =
+      incomingItems[0].origem === 'EVENTO' ? 'EVENTO' : 'DOACAO'
+
     const dateValue = new Date(body.date + 'T12:00:00')
 
     const distribution = await prisma.distribution.create({
       data: {
         beneficiaryId: body.beneficiaryId,
+        origem: origemLegado, // ⚠️ legado — cálculo real usa item.origem
         employeeId: body.employeeId || null,
         employee2Id: body.employee2Id || null,
         employee3Id: body.employee3Id || null,
         date: dateValue,
         notes: body.notes || null,
         items: {
-          create: body.items.map(
-            (item: { productId: string; quantity: number; boxes?: number }) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              boxes: item.boxes ?? null,
-            })
-          ),
+          create: incomingItems.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            boxes: item.boxes ?? null,
+            origem: item.origem === 'EVENTO' ? 'EVENTO' : 'DOACAO', // 🆕 por item
+          })),
         },
       },
       include: {

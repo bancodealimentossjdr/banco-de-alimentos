@@ -1,11 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { useRouter } from 'next/navigation'
-import GraficosEvento from './GraficosEvento'
+import GraficosEvento, {
+  type EventoMetrics,
+  type Fato,
+  type Range,
+  derivarMetrics,
+  filtrarFatos,
+} from './GraficosEvento'
 import ExportarEventoPdf from './ExportarEventoPdf'
+
+// 🔁 re-export p/ compatibilidade com quem importava daqui
+export type { EventoMetrics }
 
 type EventoStatus = 'RASCUNHO' | 'ATIVO' | 'ENCERRADO'
 
@@ -36,14 +45,6 @@ interface UsuarioVinculavel {
   id: string
   nome: string | null
   email: string
-}
-export interface EventoMetrics {
-  totalKg: number
-  totalRefugoKg: number
-  totalLiquidoKg: number
-  kgPorLocal: { nome: string; kg: number }[]
-  kgPorTipo: { tipo: string; kg: number }[]
-  kgPorDia: { dia: string; kg: number }[]
 }
 
 interface DoacaoProduto {
@@ -83,6 +84,8 @@ interface EventoView {
   operadores: OperadorView[]
   counts: { recebimentos: number; locais: number; operadores: number; alimentos: number }
   metrics: EventoMetrics
+  fatos: Fato[] // 🆕 17.5-a
+  range: Range // 🆕 17.5-a
   doacoes: DoacoesView
 }
 
@@ -111,6 +114,23 @@ export default function EventoDetalheClient({
   const router = useRouter()
   const [aba, setAba] = useState<Aba>('doacoes')
   const badge = STATUS_BADGE[evento.status]
+
+  // 🆕 17.5-a — filtro de período (aba Gráficos)
+  const [inicio, setInicio] = useState(evento.range.defaultStart)
+  const [fim, setFim] = useState(evento.range.defaultEnd)
+
+  // 🆕 17.5-a — métricas reativas ao filtro (card de resumo + top3)
+  const fatosFiltrados = useMemo(
+    () => filtrarFatos(evento.fatos, inicio, fim),
+    [evento.fatos, inicio, fim],
+  )
+  const metricsFiltradas = useMemo(
+    () => derivarMetrics(fatosFiltrados),
+    [fatosFiltrados],
+  )
+
+  // usa métricas filtradas quando na aba gráficos; senão, totais do evento
+  const metricsResumo = aba === 'graficos' ? metricsFiltradas : evento.metrics
 
   const podeEditarRefugo = isAdmin && evento.status !== 'ENCERRADO'
   const [editandoRefugo, setEditandoRefugo] = useState(false)
@@ -162,8 +182,8 @@ export default function EventoDetalheClient({
 
   const alimentosOrdenados = [...evento.alimentos].sort((a, b) => a.ordem - b.ordem)
 
-  // 🆕 17.8-h — top 3 locais
-  const top3Locais = [...evento.metrics.kgPorLocal]
+  // 🆕 17.8-h — top 3 locais (reativo ao filtro na aba gráficos)
+  const top3Locais = [...metricsResumo.kgPorLocal]
     .sort((a, b) => b.kg - a.kg)
     .slice(0, 3)
   const medalhas = ['🥇', '🥈', '🥉']
@@ -173,7 +193,6 @@ export default function EventoDetalheClient({
     setAtualizando(true)
     router.refresh()
     toast.success('Totais atualizados')
-    // refresh é assíncrono no server component — delay só para o feedback visual
     setTimeout(() => setAtualizando(false), 600)
   }
 
@@ -473,7 +492,7 @@ export default function EventoDetalheClient({
         </p>
       </div>
 
-      {/* 🆕 17.8-c/#23 — botões de ação lado a lado, altura NORMAL (sem esticar) */}
+      {/* 🆕 17.8-c/#23 — botões de ação lado a lado */}
       <div className="flex flex-wrap gap-2 mb-4">
         {isAdmin && evento.status === 'RASCUNHO' && (
           <button
@@ -506,14 +525,17 @@ export default function EventoDetalheClient({
         )}
       </div>
 
-      {/* 🆕 17.8-h/#23 — card de resumo: total arrecadado AO LADO + top 3 locais */}
+      {/* 🆕 17.8-h/#23 — card de resumo (total reativo ao filtro na aba gráficos) */}
       <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-medium text-gray-500 flex items-center gap-1">
             📊 Total arrecadado
+            {aba === 'graficos' && (
+              <span className="text-xs font-normal text-gray-400">(no período)</span>
+            )}
           </span>
           <span className="text-2xl font-bold text-green-700 tabular-nums">
-            {fmtKg(evento.metrics.totalKg)}
+            {fmtKg(metricsResumo.totalKg)}
           </span>
         </div>
 
@@ -550,7 +572,7 @@ export default function EventoDetalheClient({
         ))}
       </div>
 
-      {/* 🆕 17.8-i/#25 — card de contexto (com shift; só Locais/Alimentos/Operadores) */}
+      {/* 🆕 17.8-i/#25 — card de contexto */}
       {textoContexto && (
         <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 mb-6 text-sm font-medium text-gray-600">
           {textoContexto}
@@ -629,7 +651,7 @@ export default function EventoDetalheClient({
       {/* ════════════ ABA: LOCAIS ════════════ */}
       {aba === 'locais' && (
         <div className="space-y-3">
-          {/* 🆕 17.8-f — form adicionar local (só admin, fora de ENCERRADO) */}
+          {/* 🆕 17.8-f — form adicionar local */}
           {podeGerenciarLocais && (
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs font-medium text-gray-500 mb-2">
@@ -710,7 +732,7 @@ export default function EventoDetalheClient({
         </div>
       )}
 
-      {/* ════════════ ABA: ALIMENTOS (total em Kg abaixo do nome) ════════════ */}
+      {/* ════════════ ABA: ALIMENTOS ════════════ */}
       {aba === 'alimentos' && (
         <div className="space-y-3">
           {podeEditarRefugo && (
@@ -924,9 +946,21 @@ export default function EventoDetalheClient({
       {aba === 'graficos' && (
         <div className="space-y-4">
           <div className="flex justify-end">
-            <ExportarEventoPdf eventoId={evento.id} isAdmin={isAdmin} />
+            <ExportarEventoPdf
+              eventoId={evento.id}
+              isAdmin={isAdmin}
+              dataInicio={inicio}
+              dataFim={fim}
+            />
           </div>
-          <GraficosEvento metrics={evento.metrics} />
+          <GraficosEvento
+            fatos={evento.fatos}
+            range={evento.range}
+            inicio={inicio}
+            fim={fim}
+            onInicioChange={setInicio}
+            onFimChange={setFim}
+          />
         </div>
       )}
     </div>
