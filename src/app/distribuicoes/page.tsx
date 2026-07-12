@@ -11,7 +11,7 @@ import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
 
-type Origem = 'DOACAO' | 'EVENTO'
+type Origem = 'DOACAO' | 'COLHEITA' | 'EVENTO'
 
 interface DistributionItem {
   id: string
@@ -198,7 +198,7 @@ export default function DistribuicoesPage() {
               productId: i.productId,
               quantity: i.quantity,
               boxes: i.boxes,
-              origem: i.origem === 'EVENTO' ? 'EVENTO' : 'DOACAO', // 🆕 por item
+              origem: i.origem
             })),
           }),
         })
@@ -396,7 +396,8 @@ export default function DistribuicoesPage() {
                       required
                     >
                       <option value="DOACAO">🥫 Doação / Estoque geral</option>
-                      <option value="EVENTO">🎪 Evento de arrecadação</option>
+<option value="COLHEITA">🌾 Colheita Solidária</option>
+<option value="EVENTO">🎪 Evento de arrecadação</option>
                     </select>
                   </div>
                 </div>
@@ -540,6 +541,11 @@ export default function DistribuicoesPage() {
                           🎪 Evento
                         </span>
                       )}
+                      {origens.includes('COLHEITA') && (
+  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+    🌾 Colheita
+  </span>
+)}
                       {origens.includes('DOACAO') && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-lime-100 text-lime-700">
                           🥫 Doação

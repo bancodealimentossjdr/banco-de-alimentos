@@ -12,11 +12,17 @@ export type StockSnapshot = {
   movements: {
     approvedKg: number
     harvestKg: number
-    distributedKg: number
+    distributedKg: number // 🔧 saídas DOACAO (compat)
+    // 🆕 ONDA 19
+    distributedDonationKg: number
+    distributedHarvestKg: number
   }
   info: {
     donationsKg: number
   }
+  // 🆕 ONDA 19 — gavetas separadas
+  donationStockKg: number
+  harvestStockKg: number
   currentStockKg: number
   calculatedAt: Date
 }
@@ -24,8 +30,16 @@ export type StockSnapshot = {
 const EMPTY_SNAPSHOT = (referenceDate: Date): StockSnapshot => ({
   hasMarker: false,
   baseMarker: null,
-  movements: { approvedKg: 0, harvestKg: 0, distributedKg: 0 },
+  movements: {
+    approvedKg: 0,
+    harvestKg: 0,
+    distributedKg: 0,
+    distributedDonationKg: 0,
+    distributedHarvestKg: 0,
+  },
   info: { donationsKg: 0 },
+  donationStockKg: 0,
+  harvestStockKg: 0,
   currentStockKg: 0,
   calculatedAt: referenceDate,
 })
@@ -45,7 +59,7 @@ export async function calculateStock(
   }
 
   try {
-    // 1️⃣ Marco base
+    // 1️⃣ Marco base (só afeta a gaveta de DOAÇÃO)
     const baseMarker = await prisma.stockMarker.findFirst({
       where: { date: { lte: referenceDate } },
       orderBy: { date: 'desc' },
@@ -57,49 +71,66 @@ export async function calculateStock(
     const cutoff = endOfDayBrasilia(baseMarker.date)
 
     // 2️⃣ Movimentações após o marco (estritamente após o fim do dia BSB do marco)
-    const [approvalAgg, distributionItems, harvestItems, donationItems] =
-      await Promise.all([
-        prisma.dailyApproval.aggregate({
-          where: { date: { gt: cutoff, lte: referenceDate } },
-          _sum: { approvedQty: true },
-        }),
-        // 🆕 ONDA 18 — origem AGORA é por ITEM.
-        // Só itens com origem DOACAO descontam do estoque geral.
-        // Itens de EVENTO saem do reservatório de eventos (por unidade).
-        prisma.distributionItem.findMany({
-          where: {
-            origem: 'DOACAO',
-            distribution: {
-              date: { gt: cutoff, lte: referenceDate },
-            },
+    const [
+      approvalAgg,
+      donationDistItems,
+      harvestDistItems,
+      harvestItems,
+      donationItems,
+    ] = await Promise.all([
+      prisma.dailyApproval.aggregate({
+        where: { date: { gt: cutoff, lte: referenceDate } },
+        _sum: { approvedQty: true },
+      }),
+      // 🥫 Saídas da gaveta DOAÇÃO
+      prisma.distributionItem.findMany({
+        where: {
+          origem: 'DOACAO',
+          distribution: { date: { gt: cutoff, lte: referenceDate } },
+        },
+        select: { quantity: true },
+      }),
+      // 🆕 ONDA 19 — 🌾 Saídas da gaveta COLHEITA
+      prisma.distributionItem.findMany({
+        where: {
+          origem: 'COLHEITA',
+          distribution: { date: { gt: cutoff, lte: referenceDate } },
+        },
+        select: { quantity: true },
+      }),
+      // 🌾 Entradas de colheita realizada
+      prisma.harvestItem.findMany({
+        where: {
+          harvest: {
+            date: { gt: cutoff, lte: referenceDate },
+            status: 'realizada',
           },
-          select: { quantity: true },
-        }),
-        prisma.harvestItem.findMany({
-          where: {
-            harvest: {
-              date: { gt: cutoff, lte: referenceDate },
-              status: 'realizada',
-            },
-          },
-          select: { quantity: true },
-        }),
-        prisma.donationItem.findMany({
-          where: {
-            donation: { date: { gt: cutoff, lte: referenceDate } },
-          },
-          select: { quantity: true },
-        }),
-      ])
+        },
+        select: { quantity: true },
+      }),
+      prisma.donationItem.findMany({
+        where: {
+          donation: { date: { gt: cutoff, lte: referenceDate } },
+        },
+        select: { quantity: true },
+      }),
+    ])
 
     const approvedKg = approvalAgg._sum.approvedQty ?? 0
     const harvestKg = sumQty(harvestItems)
-    const distributedKg = sumQty(distributionItems)
+    const distributedDonationKg = sumQty(donationDistItems)
+    const distributedHarvestKg = sumQty(harvestDistItems)
     const donationsKg = sumQty(donationItems)
 
-    const currentStockKg = round3(
-      baseMarker.quantityKg + approvedKg + harvestKg - distributedKg,
+    // 🥫 Gaveta DOAÇÃO: Marco Zero + aproveitado − saídas DOAÇÃO
+    const donationStockKg = round3(
+      baseMarker.quantityKg + approvedKg - distributedDonationKg,
     )
+
+    // 🌾 Gaveta COLHEITA: nasce em 0 · entradas colheita − saídas COLHEITA
+    const harvestStockKg = round3(harvestKg - distributedHarvestKg)
+
+    const currentStockKg = round3(donationStockKg + harvestStockKg)
 
     return {
       hasMarker: true,
@@ -112,9 +143,13 @@ export async function calculateStock(
       movements: {
         approvedKg: round3(approvedKg),
         harvestKg: round3(harvestKg),
-        distributedKg: round3(distributedKg),
+        distributedKg: round3(distributedDonationKg), // compat: saídas DOAÇÃO
+        distributedDonationKg: round3(distributedDonationKg),
+        distributedHarvestKg: round3(distributedHarvestKg),
       },
       info: { donationsKg: round3(donationsKg) },
+      donationStockKg,
+      harvestStockKg,
       currentStockKg,
       calculatedAt: referenceDate,
     }

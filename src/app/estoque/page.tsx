@@ -13,7 +13,7 @@ interface EventoUnidade {
 }
 
 interface EstoqueResumo {
-  // 📊 Totais globais (histórico completo) — alimentam os cards
+  // 📊 Totais globais (histórico completo) — alimentam os cards de cima
   donations: number
   solidarityHarvest: number
   approved: number
@@ -34,10 +34,17 @@ interface EstoqueResumo {
     distributedKg: number
   }
 
-  // 🎪 Reservatório de eventos (também sensível → omitido na máscara)
+  // 🆕 17-C — Gavetas de saldo separadas (kg) · SENSÍVEIS (omitidas na máscara)
+  donationStockKg?: number
+  harvestStockKg?: number
+
+  // 🎪 Reservatório de eventos.
+  // ⚠️ porUnidade / totalRecebimentos são SENSÍVEIS (omitidos na máscara).
+  // ✅ totalArrecadadoGeral é AGREGADO e SEMPRE presente (inclusive p/ visualizador).
   eventos?: {
-    porUnidade: EventoUnidade[]
-    totalRecebimentos: number
+    porUnidade?: EventoUnidade[]
+    totalRecebimentos?: number
+    totalArrecadadoGeral?: number
   }
 }
 
@@ -134,12 +141,11 @@ export default function EstoquePage() {
     isLoading: loading,
     mutate: mutateResumo,
   } = useApi<EstoqueResumo>('/api/estoque/resumo', {
-    dedupingInterval: 5_000, // 5s — estoque muda mais que cadastros
+    dedupingInterval: 5_000,
   })
 
   const erro = erroResumo ? 'Falha ao carregar resumo do estoque' : null
 
-  // Modal state (controlado localmente — só carrega o preview quando abre)
   const [showModal, setShowModal] = useState(false)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [approvedQty, setApprovedQty] = useState<string>('')
@@ -148,16 +154,14 @@ export default function EstoquePage() {
   const [showCalculadora, setShowCalculadora] = useState(false)
   const [hydrated, setHydrated] = useState(false)
 
-  // 🔍 Preview SÓ é buscado quando modal está aberto (previewKey != null)
   const {
     data: preview,
     error: erroPreview,
     isLoading: previewLoading,
   } = useApi<PreviewData>(previewKey, {
-    dedupingInterval: 0, // sempre revalida ao abrir modal
+    dedupingInterval: 0,
     revalidateOnFocus: false,
     onSuccess: (data) => {
-      // hidrata os campos do form ao carregar o preview pela 1ª vez
       if (!hydrated && data) {
         if (data.existingApproval) {
           setApprovedQty(String(data.existingApproval.approvedQuantity))
@@ -228,7 +232,7 @@ export default function EstoquePage() {
       }
 
       fecharModal()
-      mutateResumo() // 🔄 atualiza o resumo
+      mutateResumo()
     } catch (err) {
       console.error('Erro ao salvar:', err)
       alert(err instanceof Error ? err.message : 'Erro ao salvar')
@@ -249,7 +253,7 @@ export default function EstoquePage() {
       ? resumo.inStock < 0
       : false
 
-  // 🎯 Dados do marco (fórmula real do estoque)
+  // 🎯 Dados do marco
   const temMarco = resumo?.hasMarker ?? false
   const marcoKg = resumo?.baseMarker?.quantityKg ?? 0
   const marcoData = resumo?.baseMarker?.date ?? null
@@ -258,9 +262,20 @@ export default function EstoquePage() {
   const colhDesde = resumo?.movementsSinceMarker?.harvestKg ?? 0
   const distrDesde = resumo?.movementsSinceMarker?.distributedKg ?? 0
 
-  // 🎪 Eventos (omitido na máscara)
+  // 🆕 17-C — Saldos por gaveta
+  const saldoDoacaoKg = temMarco ? resumo?.donationStockKg ?? 0 : 0
+  const saldoColheitaKg = temMarco ? resumo?.harvestStockKg ?? 0 : 0
+  const saldoEstoqueGeralKg = saldoDoacaoKg + saldoColheitaKg
+
+  // 🎪 Eventos detalhados (porUnidade — omitido na máscara)
   const eventos = resumo?.eventos?.porUnidade ?? []
   const temEventos = eventos.length > 0
+
+  // 🆕 Total geral arrecadado em eventos (AGREGADO — visível p/ TODOS).
+  // Backend envia sempre; fallback soma porUnidade quando não mascarado.
+  const totalArrecadadoEventos =
+    resumo?.eventos?.totalArrecadadoGeral ??
+    (temEventos ? eventos.reduce((acc, ev) => acc + (ev.arrecadado || 0), 0) : 0)
 
   // 🔐 Cards visíveis conforme máscara
   const cardsVisiveis = CARDS.filter((c) => !(c.sensivel && dadosMascarados))
@@ -315,6 +330,7 @@ export default function EstoquePage() {
 
       {resumo && (
         <>
+          {/* Cards principais */}
           <div className={`grid grid-cols-1 sm:grid-cols-2 ${gridColsClass} gap-4 mb-6`}>
             {cardsVisiveis.map((card) => (
               <div key={card.key} className={`${card.bgColor} ${card.borderColor} border-2 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow`}>
@@ -331,6 +347,79 @@ export default function EstoquePage() {
             ))}
           </div>
 
+          {/* 🎪 Card SIMPLES — só visualizador (sem detalhe por unidade) */}
+{dadosMascarados && (
+  <div className="bg-rose-50 border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
+    <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3">
+      🎪
+    </div>
+    <p className="text-sm font-semibold text-rose-700 mb-1">
+      Total de alimentos arrecadados em eventos
+    </p>
+    <p className="text-2xl md:text-3xl font-bold text-gray-900">
+      {formatQtd(totalArrecadadoEventos)}
+    </p>
+    <p className="text-xs text-gray-500 mt-2">
+      ℹ️ Este total engloba <strong>todas as unidades de medida</strong> (kg, un, dz, L…).
+      Para o detalhamento por unidade, procure um funcionário responsável.
+    </p>
+  </div>
+)}
+
+          {/* 🆕 17-C — Card ÚNICO "Estoque Geral" — oculto na máscara */}
+          {!dadosMascarados && (
+            <div className="bg-white border-2 border-teal-200 rounded-xl p-5 shadow-sm mb-6">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-teal-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
+                    🗄️
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-teal-700">Estoque Geral</p>
+                    <p className="text-xs text-gray-500">Saldo consolidado por origem — em kg</p>
+                  </div>
+                </div>
+                <p className="text-2xl md:text-3xl font-bold text-gray-900 shrink-0">
+                  {formatKg(saldoEstoqueGeralKg)}
+                  <span className="text-sm font-medium text-gray-500 ml-1">kg</span>
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-teal-50 border border-teal-100 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                      🥫 Doações
+                    </span>
+                    <span className={`text-lg font-bold ${saldoDoacaoKg < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                      {formatKg(saldoDoacaoKg)} <span className="text-xs text-gray-500">kg</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-lime-50 border border-lime-100 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                      🌾 Colheita Solidária
+                    </span>
+                    <span className={`text-lg font-bold ${saldoColheitaKg < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                      {formatKg(saldoColheitaKg)} <span className="text-xs text-gray-500">kg</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {!temMarco && (
+                <p className="text-xs text-amber-600 mt-4">
+                  ⚠️ Sem <strong>Marco de calibração</strong> ainda. Os saldos permanecem em
+                  0 kg até a pesagem física. Depois do marco, cada colheita registrada soma na
+                  gaveta Colheita e cada distribuição desconta da gaveta escolhida (Doações ou
+                  Colheita) — igual à lógica dos eventos.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* 🔐 Aviso discreto para visualizador */}
           {dadosMascarados && (
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
@@ -341,7 +430,69 @@ export default function EstoquePage() {
             </div>
           )}
 
-          {/* 🛡️ Alerta de inconsistência: estoque negativo */}
+          {/* 🎪 Card DETALHADO — operador/adm/dev, agora com total no cabeçalho */}
+{!dadosMascarados && temEventos && (
+  <div className="bg-white border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
+    <div className="flex items-center justify-between gap-3 mb-4">
+      <div className="flex items-center gap-3">
+        <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
+          🎪
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-rose-700">
+            Total Arrecadado de Eventos
+          </p>
+          <p className="text-xs text-gray-500">
+            Saldo por unidade — controlado à parte do estoque em kg
+          </p>
+        </div>
+      </div>
+      {/* 🆕 total agregado no canto direito */}
+      <div className="text-right shrink-0">
+        <p className="text-2xl md:text-3xl font-bold text-gray-900">
+          {formatQtd(totalArrecadadoEventos)}
+        </p>
+        <p className="text-xs text-gray-500">total arrecadado</p>
+      </div>
+    </div>
+
+    {/* ...resto igual (grid de eventos + rodapé ℹ️) */}
+
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {eventos.map((ev) => (
+                  <div key={ev.unidade} className="bg-rose-50 border border-rose-100 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-rose-600">
+                        {formatUnidadeLabel(ev.unidade)}
+                      </span>
+                      <span className={`text-lg font-bold ${ev.saldo < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                        {formatQtd(ev.saldo)}
+                      </span>
+                    </div>
+                    <div className="space-y-1 text-xs text-gray-500">
+                      <div className="flex justify-between">
+                        <span>📥 Arrecadado</span>
+                        <span className="font-medium text-gray-700">{formatQtd(ev.arrecadado)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>📤 Distribuído</span>
+                        <span className="font-medium text-gray-700">{formatQtd(ev.distribuido)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-gray-400 mt-4">
+                ℹ️ Itens arrecadados em eventos são controlados por{' '}
+                <strong>unidade própria</strong> (un, cx, L…) e não entram no saldo em kg
+                do estoque geral.
+              </p>
+            </div>
+          )}
+
+          {/* 🛡️ Alerta de estoque negativo — ⬇️ AGORA abaixo dos eventos e acima do cálculo */}
           {estoqueNegativo && (
             <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6">
               <p className="text-red-700 font-semibold text-sm">
@@ -349,74 +500,12 @@ export default function EstoquePage() {
               </p>
               <p className="text-red-600 text-xs mt-1">
                 As saídas desde o marco superaram as entradas.
-                Isso indica uma possível inconsistência nos dados (distribuição lançada sem aproveitamento correspondente)
-                ou a necessidade de uma nova recalibração do estoque.
+                Isso indica uma possível inconsistência nos dados (distribuição lançada sem
+                aproveitamento correspondente) ou a necessidade de uma nova recalibração do estoque.
                 Recomenda-se conferir os registros.
               </p>
             </div>
           )}
-
-          {/* 🎪 Total Arrecadado de Eventos — oculto na máscara */}
-{!dadosMascarados && temEventos && (
-  <div className="bg-white border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
-    <div className="flex items-center gap-3 mb-4">
-      <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
-        🎪
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-rose-700">
-          Total Arrecadado de Eventos
-        </p>
-        <p className="text-xs text-gray-500">
-          Saldo por unidade — controlado à parte do estoque em kg
-        </p>
-      </div>
-    </div>
-
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {eventos.map((ev) => (
-        <div
-          key={ev.unidade}
-          className="bg-rose-50 border border-rose-100 rounded-lg p-4"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-rose-600">
-              {formatUnidadeLabel(ev.unidade)}
-            </span>
-            <span
-              className={`text-lg font-bold ${
-                ev.saldo < 0 ? 'text-red-600' : 'text-emerald-700'
-              }`}
-            >
-              {formatQtd(ev.saldo)}
-            </span>
-          </div>
-          <div className="space-y-1 text-xs text-gray-500">
-            <div className="flex justify-between">
-              <span>📥 Arrecadado</span>
-              <span className="font-medium text-gray-700">
-                {formatQtd(ev.arrecadado)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>📤 Distribuído</span>
-              <span className="font-medium text-gray-700">
-                {formatQtd(ev.distribuido)}
-              </span>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-
-    <p className="text-xs text-gray-400 mt-4">
-      ℹ️ Itens arrecadados em eventos são controlados por{' '}
-      <strong>unidade própria</strong> (un, cx, L…) e não entram no saldo em kg
-      do estoque geral.
-    </p>
-  </div>
-)}
-
 
           {/* 🧮 Como o estoque é calculado — oculto na máscara */}
           {!dadosMascarados && (
@@ -425,7 +514,6 @@ export default function EstoquePage() {
 
               {temMarco ? (
                 <>
-                  {/* 🎯 Fórmula REAL baseada no Marco Zero */}
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
                       📦 Em Estoque ({formatKg(resumo.inStock)} kg)
@@ -467,7 +555,6 @@ export default function EstoquePage() {
                 </>
               ) : (
                 <>
-                  {/* 🚦 Fallback legado: sem marco cadastrado */}
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
                       📦 Em Estoque ({formatKg(resumo.inStock)} kg)
@@ -505,9 +592,7 @@ export default function EstoquePage() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleSubmit}>
               <div className="flex justify-between items-center border-b px-5 py-4 sticky top-0 bg-white rounded-t-xl z-10">
-                <h3 className="text-lg font-bold text-gray-900">
-                  ✅ Registrar Aproveitamento
-                </h3>
+                <h3 className="text-lg font-bold text-gray-900">✅ Registrar Aproveitamento</h3>
                 <button
                   type="button"
                   onClick={fecharModal}
@@ -588,9 +673,7 @@ export default function EstoquePage() {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-sm font-semibold text-gray-700 mb-1">
-  Estoque *
-</label>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">Estoque *</label>
                         {!showCalculadora && (
                           <button
                             type="button"
@@ -625,10 +708,7 @@ export default function EstoquePage() {
                       )}
 
                       {showCalculadora && (
-                        <CalculadoraPeso
-                          onApply={handleApplyCalc}
-                          onClose={() => setShowCalculadora(false)}
-                        />
+                        <CalculadoraPeso onApply={handleApplyCalc} onClose={() => setShowCalculadora(false)} />
                       )}
                     </div>
 

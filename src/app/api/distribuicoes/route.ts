@@ -9,6 +9,14 @@ import {
   shouldMaskPersonalData,
 } from '@/lib/mask-by-role'
 
+// 🆕 ONDA 19 — 3 origens
+type Origem = 'DOACAO' | 'COLHEITA' | 'EVENTO'
+const ORIGENS_VALIDAS: Origem[] = ['DOACAO', 'COLHEITA', 'EVENTO']
+
+// Normaliza origem por item; default seguro = DOACAO
+const normOrigem = (o: unknown): Origem =>
+  o === 'EVENTO' || o === 'COLHEITA' ? o : 'DOACAO'
+
 export async function GET() {
   const authResult = await requireView('distribuicoes')
   if (authResult instanceof NextResponse) return authResult
@@ -28,18 +36,15 @@ export async function GET() {
       orderBy: { date: 'desc' },
     })
 
-    // 🔐 Aplica máscaras conforme o role
     const session = await auth()
     const role = session?.user?.role
 
-    // 1) Mascara notes se for somente leitura no módulo
     let distributionsSeguras = maskNotesListIfReadOnly(
       distributions,
       role,
-      'distribuicoes'
+      'distribuicoes',
     )
 
-    // 2) Mascara dados pessoais do beneficiário e funcionários se for visualizador
     if (shouldMaskPersonalData(role)) {
       distributionsSeguras = distributionsSeguras.map((d) => ({
         ...d,
@@ -56,8 +61,6 @@ export async function GET() {
       })) as typeof distributionsSeguras
     }
 
-    // 3) 🆕 Regra #9 — Camada de serialização (defesa em profundidade)
-    //    O VISUALIZADOR vê a distribuição "crua", SEM a camada de finalização.
     if (role === 'visualizador') {
       distributionsSeguras = distributionsSeguras.map((d) => {
         const { status, legacy, receipt, ...rest } = d
@@ -73,36 +76,34 @@ export async function GET() {
     console.error('Erro GET distribuições:', error)
     return NextResponse.json(
       { error: 'Erro ao buscar distribuições' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }
 
 export async function POST(request: Request) {
-  // 🔐 Só admin/operador podem criar distribuições
   const authResult = await requireEdit('distribuicoes')
   if (authResult instanceof NextResponse) return authResult
 
   try {
     const body = await request.json()
 
-    // 🔍 Validação: funcionários não podem se repetir
     const empIds = [body.employeeId, body.employee2Id, body.employee3Id].filter(
-      Boolean
+      Boolean,
     )
     if (empIds.length !== new Set(empIds).size) {
       return NextResponse.json(
         { error: 'Não é possível adicionar o mesmo funcionário mais de uma vez' },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
-    // 🆕 ONDA 18 — normaliza origem por item
+    // 🆕 ONDA 19 — origem por item (DOACAO | COLHEITA | EVENTO)
     type IncomingItem = {
       productId: string
       quantity: number
       boxes?: number
-      origem?: 'DOACAO' | 'EVENTO'
+      origem?: Origem
     }
     const incomingItems: IncomingItem[] = Array.isArray(body.items)
       ? body.items
@@ -111,13 +112,26 @@ export async function POST(request: Request) {
     if (incomingItems.length === 0) {
       return NextResponse.json(
         { error: 'Adicione pelo menos um produto' },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
-    // origem legado (nível distribuição) = origem do 1º item, só p/ coerência
-    const origemLegado =
-      incomingItems[0].origem === 'EVENTO' ? 'EVENTO' : 'DOACAO'
+    // Valida cada origem
+    for (const it of incomingItems) {
+      if (
+        it.origem !== undefined &&
+        !ORIGENS_VALIDAS.includes(it.origem as Origem)
+      ) {
+        return NextResponse.json(
+          { error: 'Origem inválida. Use DOACAO, COLHEITA ou EVENTO.' },
+          { status: 400 },
+        )
+      }
+    }
+
+    // origem legado (enum: só DOACAO|EVENTO). COLHEITA cai como DOACAO no legado.
+    const primeira = normOrigem(incomingItems[0].origem)
+    const origemLegado = primeira === 'EVENTO' ? 'EVENTO' : 'DOACAO'
 
     const dateValue = new Date(body.date + 'T12:00:00')
 
@@ -132,13 +146,13 @@ export async function POST(request: Request) {
         notes: body.notes || null,
         items: {
           create: incomingItems.map((item) => ({
-            productId: item.productId,
+            product: { connect: { id: item.productId } },
             quantity: item.quantity,
             boxes: item.boxes ?? null,
-            origem: item.origem === 'EVENTO' ? 'EVENTO' : 'DOACAO', // 🆕 por item
+            origem: normOrigem(item.origem),
           })),
         },
-      },
+      }, // ✅ fecha o data (ESTAVA FALTANDO)
       include: {
         beneficiary: { select: { id: true, name: true, type: true } },
         employee: { select: { id: true, name: true } },
@@ -156,7 +170,7 @@ export async function POST(request: Request) {
     console.error('Erro POST distribuição:', error)
     return NextResponse.json(
       { error: 'Erro ao criar distribuição' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

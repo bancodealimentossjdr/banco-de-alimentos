@@ -202,11 +202,9 @@ model DonationItem {
 // DISTRIBUIÇÃO
 // ==========================================
 
-// 🆕 ONDA 18 — Origem da saída
-// DOACAO — reservatório geral (estoque em kg)
-// EVENTO — reservatório de eventos (saldo por unidade)
 enum DistributionOrigin {
   DOACAO
+  COLHEITA
   EVENTO
 }
 
@@ -218,27 +216,20 @@ model Distribution {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  // 🆕 ONDA 16.6a — Status + flag de legado
-  status        DistributionStatus @default(PENDENTE)
-  legacy        Boolean            @default(false)
+  status DistributionStatus @default(PENDENTE)
+  legacy Boolean            @default(false)
 
-  // ⚠️ ONDA 18 — origem LEGADO (nível distribuição). Mantido p/ retrocompat.
-  //    A origem REAL passou a ser por item (DistributionItem.origem).
-  origem        DistributionOrigin @default(DOACAO)
+  origem DistributionOrigin @default(DOACAO)
 
-  employeeId   String?
-  employee     Employee? @relation("DistributionEmployee1", fields: [employeeId], references: [id])
-
-  employee2Id  String?
-  employee2    Employee? @relation("DistributionEmployee2", fields: [employee2Id], references: [id])
-
-  employee3Id  String?
-  employee3    Employee? @relation("DistributionEmployee3", fields: [employee3Id], references: [id])
+  employeeId  String?
+  employee    Employee? @relation("DistributionEmployee1", fields: [employeeId], references: [id])
+  employee2Id String?
+  employee2   Employee? @relation("DistributionEmployee2", fields: [employee2Id], references: [id])
+  employee3Id String?
+  employee3   Employee? @relation("DistributionEmployee3", fields: [employee3Id], references: [id])
 
   beneficiary Beneficiary        @relation(fields: [beneficiaryId], references: [id])
   items       DistributionItem[]
-
-  // 🆕 ONDA 16.6a — Comprovante de entrega (1:1)
   receipt     DeliveryReceipt?
 
   @@index([status])
@@ -252,14 +243,12 @@ model DistributionItem {
   quantity       Float
   boxes          Int?
 
-  // 🆕 ONDA 18 — Origem POR ITEM (fonte de verdade do cálculo)
-  origem         DistributionOrigin @default(DOACAO)
+  origem String @default("DOACAO")
 
   distribution Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
   product      Product      @relation(fields: [productId], references: [id])
-
-  @@index([origem])
 }
+
 
 // ==========================================
 // PRODUTORES RURAIS

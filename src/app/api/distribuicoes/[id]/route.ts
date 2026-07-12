@@ -114,35 +114,44 @@ export async function PUT(
       )
     }
 
-    // 🆕 ONDA 18 — normaliza origem POR ITEM
-    type IncomingItem = {
-      productId: string
-      quantity: number
-      boxes?: number
-      origem?: 'DOACAO' | 'EVENTO'
-    }
-    const incomingItems: IncomingItem[] = Array.isArray(items) ? items : []
+            // 🆕 ONDA 19 — normaliza origem POR ITEM (DOACAO | COLHEITA | EVENTO)
+        type Origem = 'DOACAO' | 'COLHEITA' | 'EVENTO'
+        const ORIGENS_VALIDAS: Origem[] = ['DOACAO', 'COLHEITA', 'EVENTO']
+        const normOrigem = (o: unknown): Origem =>
+          o === 'EVENTO' || o === 'COLHEITA' ? o : 'DOACAO'
 
-    if (incomingItems.length === 0) {
-      return NextResponse.json(
-        { error: 'Adicione pelo menos um produto' },
-        { status: 400 }
-      )
-    }
+        type IncomingItem = {
+          productId: string
+          quantity: number
+          boxes?: number
+          origem?: Origem
+        }
+        const incomingItems: IncomingItem[] = Array.isArray(items) ? items : []
 
-    // Valida cada origem
-    for (const it of incomingItems) {
-      if (it.origem !== undefined && it.origem !== 'DOACAO' && it.origem !== 'EVENTO') {
-        return NextResponse.json(
-          { error: 'Origem inválida. Use DOACAO ou EVENTO.' },
-          { status: 400 }
-        )
-      }
-    }
+        if (incomingItems.length === 0) {
+          return NextResponse.json(
+            { error: 'Adicione pelo menos um produto' },
+            { status: 400 }
+          )
+        }
 
-    // origem legado (nível distribuição) = origem do 1º item, só p/ coerência
-    const origemLegado =
-      incomingItems[0].origem === 'EVENTO' ? 'EVENTO' : 'DOACAO'
+        // Valida cada origem
+        for (const it of incomingItems) {
+          if (
+            it.origem !== undefined &&
+            !ORIGENS_VALIDAS.includes(it.origem as Origem)
+          ) {
+            return NextResponse.json(
+              { error: 'Origem inválida. Use DOACAO, COLHEITA ou EVENTO.' },
+              { status: 400 }
+            )
+          }
+        }
+
+        // origem legado (enum: só DOACAO|EVENTO). COLHEITA cai como DOACAO.
+        const origemLegado =
+          normOrigem(incomingItems[0].origem) === 'EVENTO' ? 'EVENTO' : 'DOACAO'
+
 
     await prisma.distributionItem.deleteMany({
       where: { distributionId: id },
@@ -163,7 +172,7 @@ export async function PUT(
             productId: item.productId,
             quantity: item.quantity,
             boxes: item.boxes ?? null,
-            origem: item.origem === 'EVENTO' ? 'EVENTO' : 'DOACAO', // 🆕 por item
+                            origem: normOrigem(item.origem), // 🆕 ONDA 19 — 3 valores
           })),
         },
       },
