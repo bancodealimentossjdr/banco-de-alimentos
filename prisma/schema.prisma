@@ -396,7 +396,7 @@ model Evento {
   dataFim        DateTime?
   status         EventoStatus     @default(RASCUNHO)
   integraEstoque Boolean          @default(true)
-
+obsRefugo String?
   locais         LocalColeta[]
   operadores     EventoOperador[]
   recebimentos   Recebimento[]
