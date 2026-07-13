@@ -264,7 +264,6 @@ export default async function EventoDetalhePage({
     dataFim: evento.dataFim ? evento.dataFim.toISOString() : null,
     status: evento.status,
     integraEstoque: evento.integraEstoque,
-    obsRefugo: evento.obsRefugo,
     encerradoEm: evento.encerradoEm ? evento.encerradoEm.toISOString() : null,
     encerradoPor: evento.encerradoPor,
     criadoPor: evento.criadoPor,
