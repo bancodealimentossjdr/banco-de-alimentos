@@ -35,10 +35,13 @@ model User {
   // 🆕 ONDA 16.6a — Comprovantes de entrega finalizados (auditoria)
   receiptsFinalized DeliveryReceipt[] @relation("ReceiptFinalizedBy")
 
-  eventosCriados        Evento[]         @relation("EventosCriados")
-  eventosEncerrados     Evento[]         @relation("EventosEncerrados")
-  operacoesEmEventos    EventoOperador[] @relation("OperacoesEmEventos")
-  recebimentosRegistrados Recebimento[]  @relation("RecebimentosRegistrados")
+  eventosCriados          Evento[]         @relation("EventosCriados")
+  eventosEncerrados       Evento[]         @relation("EventosEncerrados")
+  operacoesEmEventos      EventoOperador[] @relation("OperacoesEmEventos")
+  recebimentosRegistrados Recebimento[]    @relation("RecebimentosRegistrados")
+
+  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
+  arrecadacoesExtra       ArrecadacaoExtra[] @relation("ArrecadacaoExtraOperador")
 }
 
 // ==========================================
@@ -96,7 +99,7 @@ model Product {
   donationItems     DonationItem[]
   distributionItems DistributionItem[]
   harvestItems      HarvestItem[]
-  eventoAlimentos EventoAlimento[]
+  eventoAlimentos   EventoAlimento[]
 }
 
 // ==========================================
@@ -249,7 +252,6 @@ model DistributionItem {
   product      Product      @relation(fields: [productId], references: [id])
 }
 
-
 // ==========================================
 // PRODUTORES RURAIS
 // ==========================================
@@ -394,12 +396,14 @@ model Evento {
   dataFim        DateTime?
   status         EventoStatus     @default(RASCUNHO)
   integraEstoque Boolean          @default(true)
-  obsRefugo      String?
 
   locais         LocalColeta[]
   operadores     EventoOperador[]
   recebimentos   Recebimento[]
   alimentos      EventoAlimento[]
+
+  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
+  arrecadacoesExtra ArrecadacaoExtra[]
 
   criadoPorId    String
   criadoPor      User             @relation("EventosCriados", fields: [criadoPorId], references: [id])
@@ -424,6 +428,9 @@ model LocalColeta {
 
   recebimentos Recebimento[]
 
+  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
+  arrecadacoesExtra ArrecadacaoExtra[]
+
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -444,6 +451,9 @@ model EventoAlimento {
   refugoKg     Float         @default(0)
 
   recebimentos Recebimento[]
+
+  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
+  arrecadacoesExtra ArrecadacaoExtra[]
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -496,4 +506,37 @@ model Recebimento {
   @@index([alimentoId])
   @@index([operadorId])
   @@index([eventoId, createdAt])
+}
+
+model ArrecadacaoExtra {
+  id String @id @default(cuid())
+
+  eventoId String
+  evento   Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  // Doador (SEMPRE obrigatório nesta modalidade)
+  doadorNome String
+  doadorCpf  String?
+
+  // O que foi doado
+  alimentoId String
+  alimento   EventoAlimento @relation(fields: [alimentoId], references: [id])
+  quantidade Int // unidades inteiras (cada uma = 1 cupom)
+
+  // Faixa de cupons GLOBAL por evento (numeroInicio..numeroFim)
+  numeroInicio Int
+  numeroFim    Int
+
+  // 🆕 Local da doação
+  localId String?
+  local   LocalColeta? @relation(fields: [localId], references: [id])
+
+  operadorId String
+  operador   User @relation("ArrecadacaoExtraOperador", fields: [operadorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([eventoId])
+  @@index([eventoId, numeroInicio])
+  @@index([localId])
 }

@@ -583,26 +583,37 @@ export default function EventoDetalheClient({
       {/* ════════════ ABA: DOAÇÕES ════════════ */}
       {aba === 'doacoes' && (
         <div className="space-y-4">
-          {/* 🆕 17.8-g — barra de ações: Atualizar + Registrar */}
-          <div className="flex justify-end items-center gap-2 flex-wrap">
-            <button
-              onClick={atualizarDoacoes}
-              disabled={atualizando}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
-            >
-              <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
-              {atualizando ? 'Atualizando…' : 'Atualizar'}
-            </button>
+          {/* 🆕 17.8-g — barra de ações: Atualizar + Registrar + Arrecadação Extra */}
+<div className="flex justify-end items-center gap-2 flex-wrap">
+  <button
+    onClick={atualizarDoacoes}
+    disabled={atualizando}
+    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
+  >
+    <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
+    {atualizando ? 'Atualizando…' : 'Atualizar'}
+  </button>
 
-            {podeRegistrar && evento.status === 'ATIVO' && (
-              <Link
-                href={`/eventos/${evento.id}/campo`}
-                className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-              >
-                📥 Registrar Doação
-              </Link>
-            )}
-          </div>
+  {podeRegistrar && evento.status === 'ATIVO' && (
+    <>
+      <Link
+        href={`/eventos/${evento.id}/campo`}
+        className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+      >
+        📥 Registrar Doação
+      </Link>
+
+      {/* 🆕 Arrecadação Extra — ao lado de Registrar Doação */}
+      <Link
+        href={`/eventos/${evento.id}/arrecadacao-extra`}
+        className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+      >
+        📤 Arrecadação Extra
+      </Link>
+    </>
+  )}
+</div>
+
 
           {evento.status !== 'ATIVO' && (
             <p className="text-xs text-gray-400">
