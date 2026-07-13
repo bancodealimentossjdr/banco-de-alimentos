@@ -306,7 +306,6 @@ export async function PUT(
           dataInicio: new Date(dataInicio),
           dataFim: dataFim ? new Date(dataFim) : null,
           integraEstoque: integraEstoque ?? true,
-          obsRefugo: typeof obsRefugo === 'string' ? obsRefugo.trim() || null : null, // 🆕 17.6
         },
       })
 
