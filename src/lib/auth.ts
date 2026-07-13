@@ -13,14 +13,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma) as Adapter,
   session: { strategy: 'jwt' },
   providers: [
-    // 🆕 Login com Google
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       allowDangerousEmailAccountLinking: true,
     }),
-
-    // Login com email/senha (mantido)
     Credentials({
       name: 'credentials',
       credentials: {
@@ -75,24 +72,26 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true
     },
 
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user }) {
       // Login inicial
       if (user) {
         token.id = user.id
         token.role = (user as { role?: UserRole }).role
       }
 
-      // Atualiza role do banco em cada request (caso admin promova/desative)
-      if (trigger === 'update' || (token.email && !token.role)) {
+      // 🔑 FONTE DE VERDADE = BANCO. Relê role/active em TODO request.
+      // Custo: 1 query por request — aceitável no porte da ONG.
+      // Corrige a role fossilizada no token antigo (sem precisar relogar).
+      if (token.email) {
         const dbUser = await prisma.user.findUnique({
           where: { email: token.email as string },
           select: { id: true, role: true, active: true },
         })
 
         if (dbUser) {
+          if (!dbUser.active) return null // desativado → derruba sessão
           token.id = dbUser.id
           token.role = dbUser.role as UserRole
-          if (!dbUser.active) return null
         }
       }
 
@@ -101,7 +100,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
     async session({ session, token }) {
       if (token && session.user) {
-        // ✅ Narrowing com typeof — TypeScript entende que valor é definido
         if (typeof token.id === 'string') {
           session.user.id = token.id
         }
