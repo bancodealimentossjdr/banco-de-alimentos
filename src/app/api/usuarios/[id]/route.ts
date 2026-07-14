@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth'
+import { canEdit } from '@/lib/permissions'
+import type { UserRole } from '@/types/next-auth'
+
+// ⚠️ 'dev' NÃO é atribuível via API — role estrutural (só banco/seed).
+const VALID_ROLES: UserRole[] = ['admin', 'operador', 'visualizador']
 
 export async function PUT(
   request: Request,
@@ -9,7 +14,7 @@ export async function PUT(
 ) {
   try {
     const session = await auth()
-    if (!session || session.user.role !== 'admin') {
+    if (!session || !canEdit(session.user.role as UserRole, 'usuarios')) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 403 })
     }
 
@@ -19,6 +24,20 @@ export async function PUT(
     const user = await prisma.user.findUnique({ where: { id } })
     if (!user) {
       return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 })
+    }
+
+    // 🔒 Se um role for informado, precisa ser válido (nunca aceitar 'dev' via API).
+    if (body.role !== undefined && !VALID_ROLES.includes(body.role)) {
+      return NextResponse.json({ error: 'Role inválida' }, { status: 400 })
+    }
+
+    // 🔒 Blindagem do 'dev': admin não pode rebaixar/alterar um usuário 'dev'.
+    // Só outro dev pode mexer num dev (evita admin sabotar a role estrutural).
+    if (user.role === 'dev' && session.user.role !== 'dev') {
+      return NextResponse.json(
+        { error: 'Apenas um desenvolvedor pode alterar outro desenvolvedor' },
+        { status: 403 }
+      )
     }
 
     if (body.email && body.email !== user.email) {
@@ -33,9 +52,14 @@ export async function PUT(
       }
     }
 
-    if (session.user.id === id && body.role && body.role !== 'admin') {
+    // 🔒 Não pode rebaixar a própria conta (admin OU dev) para algo sem gestão.
+    if (
+      session.user.id === id &&
+      body.role &&
+      !canEdit(body.role as UserRole, 'usuarios')
+    ) {
       return NextResponse.json(
-        { error: 'Você não pode remover sua própria permissão de administrador' },
+        { error: 'Você não pode remover sua própria permissão de gestão' },
         { status: 400 }
       )
     }
@@ -99,7 +123,7 @@ export async function DELETE(
 ) {
   try {
     const session = await auth()
-    if (!session || session.user.role !== 'admin') {
+    if (!session || !canEdit(session.user.role as UserRole, 'usuarios')) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 403 })
     }
 
@@ -115,6 +139,14 @@ export async function DELETE(
     const user = await prisma.user.findUnique({ where: { id } })
     if (!user) {
       return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 })
+    }
+
+    // 🔒 Blindagem do 'dev': admin não pode excluir um dev.
+    if (user.role === 'dev' && session.user.role !== 'dev') {
+      return NextResponse.json(
+        { error: 'Apenas um desenvolvedor pode excluir outro desenvolvedor' },
+        { status: 403 }
+      )
     }
 
     await prisma.user.delete({ where: { id } })

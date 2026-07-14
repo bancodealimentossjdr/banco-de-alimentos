@@ -2,19 +2,22 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth'
+import { canEdit } from '@/lib/permissions'
 import type { UserRole } from '@/types/next-auth'
 
+// ⚠️ 'dev' NÃO é atribuível via API — é role estrutural (só banco/seed).
+// admin/dev PODEM gerenciar usuários, mas NÃO podem CRIAR outro 'dev'.
 const VALID_ROLES: UserRole[] = ['admin', 'operador', 'visualizador']
 
 /**
  * GET /api/usuarios
- * Lista todos os usuários (só admin).
+ * Lista todos os usuários (admin e dev).
  */
 export async function GET() {
   try {
     const session = await auth()
 
-    if (!session || session.user.role !== 'admin') {
+    if (!session || !canEdit(session.user.role as UserRole, 'usuarios')) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 403 })
     }
 
@@ -40,13 +43,13 @@ export async function GET() {
 
 /**
  * POST /api/usuarios
- * Cria um novo usuário (só admin).
+ * Cria um novo usuário (admin e dev).
  */
 export async function POST(request: Request) {
   try {
     const session = await auth()
 
-    if (!session || session.user.role !== 'admin') {
+    if (!session || !canEdit(session.user.role as UserRole, 'usuarios')) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 403 })
     }
 
@@ -61,6 +64,7 @@ export async function POST(request: Request) {
       )
     }
 
+    // 🔒 'dev' não é criável via API, mesmo por outro dev (role estrutural).
     if (!VALID_ROLES.includes(role)) {
       return NextResponse.json({ error: 'Role inválida' }, { status: 400 })
     }
