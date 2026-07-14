@@ -75,7 +75,6 @@ interface EventoView {
   dataFim: string | null
   status: EventoStatus
   integraEstoque: boolean
-  obsRefugo: string | null
   encerradoEm: string | null
   encerradoPor: { id: string; name: string } | null
   criadoPor: { id: string; name: string } | null
@@ -138,7 +137,6 @@ export default function EventoDetalheClient({
   const [refugoDraft, setRefugoDraft] = useState<Record<string, string>>(() =>
     Object.fromEntries(evento.alimentos.map((a) => [a.id, String(a.refugoKg ?? 0)])),
   )
-  const [obsDraft, setObsDraft] = useState(evento.obsRefugo ?? '')
 
   const [encerrando, setEncerrando] = useState(false)
   const [ativando, setAtivando] = useState(false)
@@ -205,7 +203,6 @@ export default function EventoDetalheClient({
         dataInicio: evento.dataInicio,
         dataFim: evento.dataFim,
         integraEstoque: evento.integraEstoque,
-        obsRefugo: obsDraft,
         locais: evento.locais.map((l) => ({
           id: l.id,
           nome: l.nome,
@@ -584,36 +581,35 @@ export default function EventoDetalheClient({
       {aba === 'doacoes' && (
         <div className="space-y-4">
           {/* 🆕 17.8-g — barra de ações: Atualizar + Registrar + Arrecadação Extra */}
-<div className="flex justify-end items-center gap-2 flex-wrap">
-  <button
-    onClick={atualizarDoacoes}
-    disabled={atualizando}
-    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
-  >
-    <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
-    {atualizando ? 'Atualizando…' : 'Atualizar'}
-  </button>
+          <div className="flex justify-end items-center gap-2 flex-wrap">
+            <button
+              onClick={atualizarDoacoes}
+              disabled={atualizando}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
+            >
+              <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
+              {atualizando ? 'Atualizando…' : 'Atualizar'}
+            </button>
 
-  {podeRegistrar && evento.status === 'ATIVO' && (
-    <>
-      <Link
-        href={`/eventos/${evento.id}/campo`}
-        className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-      >
-        📥 Registrar Doação
-      </Link>
+            {podeRegistrar && evento.status === 'ATIVO' && (
+              <>
+                <Link
+                  href={`/eventos/${evento.id}/campo`}
+                  className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+                >
+                  📥 Registrar Doação
+                </Link>
 
-      {/* 🆕 Arrecadação Extra — ao lado de Registrar Doação */}
-      <Link
-        href={`/eventos/${evento.id}/arrecadacao-extra`}
-        className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-      >
-        📤 Arrecadação Extra
-      </Link>
-    </>
-  )}
-</div>
-
+                {/* 🆕 Arrecadação Extra — ao lado de Registrar Doação */}
+                <Link
+                  href={`/eventos/${evento.id}/arrecadacao-extra`}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+                >
+                  📤 Arrecadação Extra
+                </Link>
+              </>
+            )}
+          </div>
 
           {evento.status !== 'ATIVO' && (
             <p className="text-xs text-gray-400">
@@ -764,7 +760,6 @@ export default function EventoDetalheClient({
                           evento.alimentos.map((a) => [a.id, String(a.refugoKg ?? 0)]),
                         ),
                       )
-                      setObsDraft(evento.obsRefugo ?? '')
                       setEditandoRefugo(false)
                     }}
                     disabled={salvando}
@@ -844,25 +839,6 @@ export default function EventoDetalheClient({
                 </div>
               </div>
             ))
-          )}
-
-          {(editandoRefugo || evento.obsRefugo) && (
-            <div className="bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs font-medium text-gray-500 mb-2">
-                Observação geral de refugo
-              </p>
-              {editandoRefugo ? (
-                <textarea
-                  value={obsDraft}
-                  onChange={(e) => setObsDraft(e.target.value)}
-                  rows={3}
-                  placeholder="Ex.: lote vencido descartado no local X, embalagens violadas no transporte…"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-y"
-                />
-              ) : (
-                <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{evento.obsRefugo}</p>
-              )}
-            </div>
           )}
         </div>
       )}

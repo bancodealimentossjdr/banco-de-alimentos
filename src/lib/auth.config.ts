@@ -9,16 +9,10 @@ export const authConfig: NextAuthConfig = {
   },
   session: {
     strategy: 'jwt',
+    updateAge: 0, // força revalidação/regravação a cada acesso
   },
   providers: [],
   callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.role = user.role
-        token.id = user.id as string
-      }
-      return token
-    },
     async session({ session, token }) {
       if (session.user) {
         session.user.role = token.role as UserRole

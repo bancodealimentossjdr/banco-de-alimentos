@@ -21,10 +21,12 @@ const pageTitles: Record<string, string> = {
 }
 
 const roleLabels: Record<string, { label: string; icon: React.ElementType; color: string }> = {
+  dev: { label: 'Desenvolvedor', icon: Shield, color: 'text-purple-600 bg-purple-50' },
   admin: { label: 'Administrador', icon: Shield, color: 'text-red-600 bg-red-50' },
   operador: { label: 'Operador', icon: UserCog, color: 'text-blue-600 bg-blue-50' },
   visualizador: { label: 'Visualizador', icon: Eye, color: 'text-gray-600 bg-gray-100' },
 }
+
 
 interface NavbarProps {
   onMenuClick: () => void
@@ -38,8 +40,8 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
 
   const title = pageTitles[pathname] || 'Banco de Alimentos'
   const userName = session?.user?.name || 'Usuário'
-  const userRole = session?.user?.role || 'operador'
-  const roleInfo = roleLabels[userRole] || roleLabels.operador
+  const userRole = session?.user?.role || 'visualizador'
+const roleInfo = roleLabels[userRole] || roleLabels.visualizador
   const RoleIcon = roleInfo.icon
 
   // Fecha dropdown ao clicar fora

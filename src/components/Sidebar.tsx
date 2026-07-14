@@ -63,8 +63,10 @@ export default function Sidebar({
   const pathname = usePathname()
   const { data: session } = useSession()
 
-  const isAdmin = session?.user.role === 'admin'
-  const visibleItems = menuItems.filter(item => !item.adminOnly || isAdmin)
+  // 🔐 dev e admin veem itens adminOnly (a aba Usuários incluída)
+  const role = session?.user?.role
+  const isAdmin = role === 'admin' || role === 'dev'
+  const visibleItems = menuItems.filter((item) => !item.adminOnly || isAdmin)
 
   // Mostrar texto completo: quando NÃO colapsada OU quando aberta no mobile
   const showFullLogo = !collapsed || sidebarOpen

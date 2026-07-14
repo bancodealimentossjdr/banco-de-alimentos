@@ -157,7 +157,7 @@ export async function PATCH(
 // PUT — Editar evento + locais + alimentos (ADMIN)
 // Regra: não remove local/alimento que já tem recebimento.
 // 🔄 17.4 — alimentos: [{ productId, refugoKg }]
-// 🆕 17.6 — grava refugoKg por alimento + obsRefugo geral do evento
+// 🆕 17.6 — grava refugoKg por alimento
 // ──────────────────────────────────────────────
 export async function PUT(
   request: NextRequest,
@@ -170,8 +170,7 @@ export async function PUT(
 
   try {
     const body = await request.json().catch(() => ({}))
-    // 🆕 17.6 — lê obsRefugo do body
-    const { nome, descricao, dataInicio, dataFim, integraEstoque, locais, alimentos, obsRefugo } =
+    const { nome, descricao, dataInicio, dataFim, integraEstoque, locais, alimentos } =
       body
 
     if (!nome || !nome.trim()) {
@@ -297,7 +296,6 @@ export async function PUT(
 
     // ── Transação ──
     const atualizado = await prisma.$transaction(async (tx) => {
-      // dados base (🆕 17.6 — grava obsRefugo geral)
       await tx.evento.update({
         where: { id },
         data: {

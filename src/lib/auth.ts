@@ -73,27 +73,47 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
 
     async jwt({ token, user }) {
-      // Login inicial
+      // Login inicial — garante id E email no token (email pode faltar no OAuth).
       if (user) {
         token.id = user.id
+        token.email = user.email ?? token.email
         token.role = (user as { role?: UserRole }).role
       }
 
       // 🔑 FONTE DE VERDADE = BANCO. Relê role/active em TODO request.
-      // Custo: 1 query por request — aceitável no porte da ONG.
-      // Corrige a role fossilizada no token antigo (sem precisar relogar).
-      if (token.email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: token.email as string },
-          select: { id: true, role: true, active: true },
-        })
+      // 🔧 FIX: buscar por ID (token.sub sempre existe), com fallback por email.
+      // Antes dependia só de token.email, que quase nunca era preenchido →
+      // a releitura não rodava e a role ficava fossilizada.
+      const lookupId = (token.id as string | undefined) ?? token.sub
+      const lookupEmail = token.email as string | undefined
 
-        if (dbUser) {
-          if (!dbUser.active) return null // desativado → derruba sessão
-          token.id = dbUser.id
-          token.role = dbUser.role as UserRole
-        }
+      const dbUser =
+        (lookupId
+          ? await prisma.user.findUnique({
+              where: { id: lookupId },
+              select: { id: true, email: true, role: true, active: true },
+            })
+          : null) ??
+        (lookupEmail
+          ? await prisma.user.findUnique({
+              where: { email: lookupEmail },
+              select: { id: true, email: true, role: true, active: true },
+            })
+          : null)
+
+      if (dbUser) {
+        if (!dbUser.active) return null // desativado → derruba sessão
+        token.id = dbUser.id
+        token.email = dbUser.email
+        token.role = dbUser.role as UserRole
       }
+      console.log('[JWT DEBUG]', {
+  lookupId,
+  lookupEmail,
+  dbUserRole: dbUser?.role,
+  tokenRole: token.role,
+})
+return token
 
       return token
     },
