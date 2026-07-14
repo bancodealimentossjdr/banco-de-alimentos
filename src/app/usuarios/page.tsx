@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
-
-type UserRole = 'admin' | 'operador' | 'visualizador'
+import { canView } from '@/lib/permissions'
+import type { UserRole } from '@/types/next-auth'
 
 interface User {
   id: string
@@ -16,6 +16,8 @@ interface User {
   createdAt: string
 }
 
+// ⚠️ 'dev' NÃO é atribuível pela UI — é role estrutural, criada só via banco/seed.
+// Por isso não aparece no seletor, mas É reconhecida na exibição (badge/label).
 const USER_ROLES: { value: UserRole; label: string }[] = [
   { value: 'admin', label: 'Administrador' },
   { value: 'operador', label: 'Operador' },
@@ -24,17 +26,28 @@ const USER_ROLES: { value: UserRole; label: string }[] = [
 
 const roleBadgeClass = (role: UserRole) => {
   switch (role) {
+    case 'dev':
+      return 'bg-amber-100 text-amber-700'
     case 'admin':
       return 'bg-purple-100 text-purple-700'
     case 'operador':
       return 'bg-blue-100 text-blue-700'
     case 'visualizador':
       return 'bg-gray-100 text-gray-700'
+    default:
+      return 'bg-gray-100 text-gray-700'
   }
 }
 
+const ROLE_LABELS: Record<UserRole, string> = {
+  dev: 'Desenvolvedor',
+  admin: 'Administrador',
+  operador: 'Operador',
+  visualizador: 'Visualizador',
+}
+
 const getRoleLabel = (value: string) =>
-  USER_ROLES.find(r => r.value === value)?.label || value
+  ROLE_LABELS[value as UserRole] || value
 
 export default function UsuariosPage() {
   const router = useRouter()
@@ -54,13 +67,16 @@ export default function UsuariosPage() {
     role: 'operador' as UserRole,
   })
 
-  // 🔒 Proteção: só admin entra
+  // 🔒 Proteção: quem pode VER o módulo 'usuarios' entra (admin E dev).
+  // Fonte única de verdade: permissions.ts (nunca comparar string crua).
+  const podeAcessar = canView(session?.user.role as UserRole, 'usuarios')
+
   useEffect(() => {
     if (status === 'loading') return
-    if (!session || session.user.role !== 'admin') {
+    if (!session || !podeAcessar) {
       router.replace('/')
     }
-  }, [session, status, router])
+  }, [session, status, podeAcessar, router])
 
   const fetchUsers = async () => {
     try {
@@ -76,8 +92,8 @@ export default function UsuariosPage() {
   }
 
   useEffect(() => {
-    if (session?.user.role === 'admin') fetchUsers()
-  }, [session])
+    if (podeAcessar) fetchUsers()
+  }, [podeAcessar])
 
   const resetForm = () => {
     setForm({ name: '', email: '', password: '', role: 'operador' })
@@ -174,7 +190,7 @@ export default function UsuariosPage() {
   }
 
   // 🔒 Enquanto carrega ou redireciona
-  if (status === 'loading' || !session || session.user.role !== 'admin') {
+  if (status === 'loading' || !session || !podeAcessar) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
