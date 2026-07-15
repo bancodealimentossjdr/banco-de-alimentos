@@ -14,7 +14,7 @@ const createSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD'),
   quantityKg: z
-    .number({ invalid_type_error: 'Peso deve ser um número' })
+    .number({ message: 'Peso deve ser um número' })
     .min(0, 'O peso não pode ser negativo'),
   note: z.string().trim().max(500).optional().nullable(),
 })
