@@ -13,13 +13,11 @@ interface EventoUnidade {
 }
 
 interface EstoqueResumo {
-  // 📊 Totais globais (histórico completo) — alimentam os cards de cima
   donations: number
   solidarityHarvest: number
   approved: number
   distributed: number
 
-  // 🔐 Campos SENSÍVEIS — omitidos pelo backend para visualizador
   inStock?: number
   hasMarker?: boolean
   baseMarker?: {
@@ -34,13 +32,6 @@ interface EstoqueResumo {
     distributedKg: number
   }
 
-  // 🆕 17-C — Gavetas de saldo separadas (kg) · SENSÍVEIS (omitidas na máscara)
-  donationStockKg?: number
-  harvestStockKg?: number
-
-  // 🎪 Reservatório de eventos.
-  // ⚠️ porUnidade / totalRecebimentos são SENSÍVEIS (omitidos na máscara).
-  // ✅ totalArrecadadoGeral é AGREGADO e SEMPRE presente (inclusive p/ visualizador).
   eventos?: {
     porUnidade?: EventoUnidade[]
     totalRecebimentos?: number
@@ -79,7 +70,7 @@ interface CardConfig {
   borderColor: string
   textColor: string
   iconBg: string
-  sensivel?: boolean // 🔐 oculto para visualizador
+  sensivel?: boolean
 }
 
 const CARDS: CardConfig[] = [
@@ -91,14 +82,7 @@ const CARDS: CardConfig[] = [
 ]
 
 const UNIDADE_LABEL: Record<string, string> = {
-  kg: 'kg',
-  g: 'g',
-  l: 'L',
-  ml: 'mL',
-  un: 'un',
-  cx: 'cx',
-  pct: 'pct',
-  fardo: 'fardo',
+  kg: 'kg', g: 'g', l: 'L', ml: 'mL', un: 'un', cx: 'cx', pct: 'pct', fardo: 'fardo',
 }
 
 const formatUnidadeLabel = (u: string) => {
@@ -131,10 +115,10 @@ const formatQtd = (valor: number | null | undefined) => {
 }
 
 export default function EstoquePage() {
-  const { canEdit } = usePermissions()
+  const { canEdit, role } = usePermissions()
   const podeRegistrar = canEdit('doacoes')
+  const podeCalibrar = role === 'dev' // 🔒 exclusivo dev
 
-  // 📊 Resumo do estoque (cache global)
   const {
     data: resumo,
     error: erroResumo,
@@ -146,6 +130,7 @@ export default function EstoquePage() {
 
   const erro = erroResumo ? 'Falha ao carregar resumo do estoque' : null
 
+  // 🔵 Estado do modal de APROVEITAMENTO
   const [showModal, setShowModal] = useState(false)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [approvedQty, setApprovedQty] = useState<string>('')
@@ -153,6 +138,14 @@ export default function EstoquePage() {
   const [salvando, setSalvando] = useState(false)
   const [showCalculadora, setShowCalculadora] = useState(false)
   const [hydrated, setHydrated] = useState(false)
+
+  // 🎯 Estado do modal de CALIBRAÇÃO (Marco)
+  const [showCalibModal, setShowCalibModal] = useState(false)
+  const [calibDate, setCalibDate] = useState<string>(getHojeLocal())
+  const [calibKg, setCalibKg] = useState<string>('')
+  const [calibNote, setCalibNote] = useState<string>('')
+  const [calibConfirm, setCalibConfirm] = useState(false)
+  const [calibrando, setCalibrando] = useState(false)
 
   const {
     data: preview,
@@ -241,19 +234,77 @@ export default function EstoquePage() {
     }
   }
 
+  // 🎯 CALIBRAÇÃO
+  const abrirCalibModal = () => {
+    setCalibDate(getHojeLocal())
+    setCalibKg(
+      typeof resumo?.inStock === 'number' && resumo.inStock > 0
+        ? String(resumo.inStock)
+        : '',
+    )
+    setCalibNote('')
+    setCalibConfirm(false)
+    setShowCalibModal(true)
+  }
+
+  const fecharCalibModal = () => {
+    if (calibrando) return
+    setShowCalibModal(false)
+    setCalibKg('')
+    setCalibNote('')
+    setCalibConfirm(false)
+  }
+
+  const handleCalibSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    const kg = parseFloat(calibKg.replace(',', '.'))
+    if (isNaN(kg) || kg < 0) {
+      alert('Informe o peso físico atual (kg) válido.')
+      return
+    }
+    if (!calibConfirm) {
+      alert('Confirme que a pesagem física foi conferida.')
+      return
+    }
+
+    try {
+      setCalibrando(true)
+      const res = await fetch('/api/estoque/marcos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: calibDate,
+          quantityKg: kg,
+          note: calibNote.trim() || null,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Erro ao calibrar estoque')
+      }
+
+      fecharCalibModal()
+      mutateResumo()
+    } catch (err) {
+      console.error('Erro ao calibrar:', err)
+      alert(err instanceof Error ? err.message : 'Erro ao calibrar')
+    } finally {
+      setCalibrando(false)
+    }
+  }
+
   const totalReceived = preview?.totalReceived ?? 0
   const semDados = preview !== undefined && preview !== null && totalReceived === 0
 
-  // 🔐 FLAG DE MÁSCARA — backend omite inStock para visualizador
   const dadosMascarados = resumo ? resumo.inStock === undefined : false
 
-  // 🛡️ Alerta de estoque negativo (só faz sentido quando NÃO mascarado)
   const estoqueNegativo =
     resumo && !dadosMascarados && typeof resumo.inStock === 'number'
       ? resumo.inStock < 0
       : false
 
-  // 🎯 Dados do marco
   const temMarco = resumo?.hasMarker ?? false
   const marcoKg = resumo?.baseMarker?.quantityKg ?? 0
   const marcoData = resumo?.baseMarker?.date ?? null
@@ -262,22 +313,13 @@ export default function EstoquePage() {
   const colhDesde = resumo?.movementsSinceMarker?.harvestKg ?? 0
   const distrDesde = resumo?.movementsSinceMarker?.distributedKg ?? 0
 
-  // 🆕 17-C — Saldos por gaveta
-  const saldoDoacaoKg = temMarco ? resumo?.donationStockKg ?? 0 : 0
-  const saldoColheitaKg = temMarco ? resumo?.harvestStockKg ?? 0 : 0
-  const saldoEstoqueGeralKg = saldoDoacaoKg + saldoColheitaKg
-
-  // 🎪 Eventos detalhados (porUnidade — omitido na máscara)
   const eventos = resumo?.eventos?.porUnidade ?? []
   const temEventos = eventos.length > 0
 
-  // 🆕 Total geral arrecadado em eventos (AGREGADO — visível p/ TODOS).
-  // Backend envia sempre; fallback soma porUnidade quando não mascarado.
   const totalArrecadadoEventos =
     resumo?.eventos?.totalArrecadadoGeral ??
     (temEventos ? eventos.reduce((acc, ev) => acc + (ev.arrecadado || 0), 0) : 0)
 
-  // 🔐 Cards visíveis conforme máscara
   const cardsVisiveis = CARDS.filter((c) => !(c.sensivel && dadosMascarados))
   const gridColsClass = dadosMascarados ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
 
@@ -332,91 +374,50 @@ export default function EstoquePage() {
         <>
           {/* Cards principais */}
           <div className={`grid grid-cols-1 sm:grid-cols-2 ${gridColsClass} gap-4 mb-6`}>
-            {cardsVisiveis.map((card) => (
-              <div key={card.key} className={`${card.bgColor} ${card.borderColor} border-2 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow`}>
-                <div className={`${card.iconBg} w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3`}>
-                  {card.emoji}
+            {cardsVisiveis.map((card) => {
+              const isEstoque = card.key === 'inStock'
+              return (
+                <div key={card.key} className={`${card.bgColor} ${card.borderColor} border-2 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow`}>
+                  <div className={`${card.iconBg} w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3`}>
+                    {card.emoji}
+                  </div>
+                  <p className={`text-sm font-semibold ${card.textColor} mb-1`}>{card.label}</p>
+                  <p className="text-2xl md:text-3xl font-bold text-gray-900">
+                    {formatKg(resumo[card.key])}
+                    <span className="text-sm font-medium text-gray-500 ml-1">kg</span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-2">{card.description}</p>
+
+                  {/* 🎯 Botão de calibração — só dev, só no card "Em Estoque" */}
+                  {isEstoque && podeCalibrar && (
+                    <button
+                      onClick={abrirCalibModal}
+                      className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-medium transition text-xs flex items-center justify-center gap-1.5"
+                    >
+                      🎯 Calibrar Estoque
+                    </button>
+                  )}
                 </div>
-                <p className={`text-sm font-semibold ${card.textColor} mb-1`}>{card.label}</p>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900">
-                  {formatKg(resumo[card.key])}
-                  <span className="text-sm font-medium text-gray-500 ml-1">kg</span>
-                </p>
-                <p className="text-xs text-gray-500 mt-2">{card.description}</p>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
-          {/* 🎪 Card SIMPLES — só visualizador (sem detalhe por unidade) */}
-{dadosMascarados && (
-  <div className="bg-rose-50 border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
-    <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3">
-      🎪
-    </div>
-    <p className="text-sm font-semibold text-rose-700 mb-1">
-      Total de alimentos arrecadados em eventos
-    </p>
-    <p className="text-2xl md:text-3xl font-bold text-gray-900">
-      {formatQtd(totalArrecadadoEventos)}
-    </p>
-    <p className="text-xs text-gray-500 mt-2">
-      ℹ️ Este total engloba <strong>todas as unidades de medida</strong> (kg, un, dz, L…).
-      Para o detalhamento por unidade, procure um funcionário responsável.
-    </p>
-  </div>
-)}
-
-          {/* 🆕 17-C — Card ÚNICO "Estoque Geral" — oculto na máscara */}
-          {!dadosMascarados && (
-            <div className="bg-white border-2 border-teal-200 rounded-xl p-5 shadow-sm mb-6">
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-teal-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
-                    🗄️
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-teal-700">Estoque Geral</p>
-                    <p className="text-xs text-gray-500">Saldo consolidado por origem — em kg</p>
-                  </div>
-                </div>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900 shrink-0">
-                  {formatKg(saldoEstoqueGeralKg)}
-                  <span className="text-sm font-medium text-gray-500 ml-1">kg</span>
-                </p>
+          {/* 🎪 Card SIMPLES — só visualizador */}
+          {dadosMascarados && (
+            <div className="bg-rose-50 border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
+              <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl mb-3">
+                🎪
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="bg-teal-50 border border-teal-100 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                      🥫 Doações
-                    </span>
-                    <span className={`text-lg font-bold ${saldoDoacaoKg < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                      {formatKg(saldoDoacaoKg)} <span className="text-xs text-gray-500">kg</span>
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-lime-50 border border-lime-100 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                      🌾 Colheita Solidária
-                    </span>
-                    <span className={`text-lg font-bold ${saldoColheitaKg < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                      {formatKg(saldoColheitaKg)} <span className="text-xs text-gray-500">kg</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {!temMarco && (
-                <p className="text-xs text-amber-600 mt-4">
-                  ⚠️ Sem <strong>Marco de calibração</strong> ainda. Os saldos permanecem em
-                  0 kg até a pesagem física. Depois do marco, cada colheita registrada soma na
-                  gaveta Colheita e cada distribuição desconta da gaveta escolhida (Doações ou
-                  Colheita) — igual à lógica dos eventos.
-                </p>
-              )}
+              <p className="text-sm font-semibold text-rose-700 mb-1">
+                Total de alimentos arrecadados em eventos
+              </p>
+              <p className="text-2xl md:text-3xl font-bold text-gray-900">
+                {formatQtd(totalArrecadadoEventos)}
+              </p>
+              <p className="text-xs text-gray-500 mt-2">
+                ℹ️ Este total engloba <strong>todas as unidades de medida</strong> (kg, un, dz, L…).
+                Para o detalhamento por unidade, procure um funcionário responsável.
+              </p>
             </div>
           )}
 
@@ -430,34 +431,30 @@ export default function EstoquePage() {
             </div>
           )}
 
-          {/* 🎪 Card DETALHADO — operador/adm/dev, agora com total no cabeçalho */}
-{!dadosMascarados && temEventos && (
-  <div className="bg-white border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
-    <div className="flex items-center justify-between gap-3 mb-4">
-      <div className="flex items-center gap-3">
-        <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
-          🎪
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-rose-700">
-            Total Arrecadado de Eventos
-          </p>
-          <p className="text-xs text-gray-500">
-            Saldo por unidade — controlado à parte do estoque em kg
-          </p>
-        </div>
-      </div>
-      {/* 🆕 total agregado no canto direito */}
-      <div className="text-right shrink-0">
-        <p className="text-2xl md:text-3xl font-bold text-gray-900">
-          {formatQtd(totalArrecadadoEventos)}
-        </p>
-        <p className="text-xs text-gray-500">total arrecadado</p>
-      </div>
-    </div>
-
-    {/* ...resto igual (grid de eventos + rodapé ℹ️) */}
-
+          {/* 🎪 Card DETALHADO — operador/adm/dev */}
+          {!dadosMascarados && temEventos && (
+            <div className="bg-white border-2 border-rose-200 rounded-xl p-5 shadow-sm mb-6">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-rose-100 w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0">
+                    🎪
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-rose-700">
+                      Total Arrecadado de Eventos
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Saldo por unidade — controlado à parte do estoque em kg
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-2xl md:text-3xl font-bold text-gray-900">
+                    {formatQtd(totalArrecadadoEventos)}
+                  </p>
+                  <p className="text-xs text-gray-500">total arrecadado</p>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {eventos.map((ev) => (
@@ -492,7 +489,7 @@ export default function EstoquePage() {
             </div>
           )}
 
-          {/* 🛡️ Alerta de estoque negativo — ⬇️ AGORA abaixo dos eventos e acima do cálculo */}
+          {/* 🛡️ Alerta de estoque negativo */}
           {estoqueNegativo && (
             <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6">
               <p className="text-red-700 font-semibold text-sm">
@@ -502,12 +499,12 @@ export default function EstoquePage() {
                 As saídas desde o marco superaram as entradas.
                 Isso indica uma possível inconsistência nos dados (distribuição lançada sem
                 aproveitamento correspondente) ou a necessidade de uma nova recalibração do estoque.
-                Recomenda-se conferir os registros.
+                {podeCalibrar && ' Use o botão “Calibrar Estoque” após conferir a pesagem física.'}
               </p>
             </div>
           )}
 
-          {/* 🧮 Como o estoque é calculado — oculto na máscara */}
+          {/* 🧮 Como o estoque é calculado */}
           {!dadosMascarados && (
             <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">🧮 Como o estoque é calculado</h3>
@@ -576,8 +573,8 @@ export default function EstoquePage() {
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
                     <p className="text-xs text-amber-700">
                       ⚠️ <strong>Nenhum Marco Zero cadastrado.</strong> O saldo está sendo calculado pelo
-                      modelo legado (histórico completo). Crie um Marco Zero para calibrar o estoque
-                      oficialmente a partir de uma pesagem física.
+                      modelo legado (histórico completo).
+                      {podeCalibrar && ' Use o botão “Calibrar Estoque” para calibrar oficialmente a partir de uma pesagem física.'}
                     </p>
                   </div>
                 </>
@@ -587,20 +584,14 @@ export default function EstoquePage() {
         </>
       )}
 
+      {/* ===================== MODAL APROVEITAMENTO ===================== */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleSubmit}>
               <div className="flex justify-between items-center border-b px-5 py-4 sticky top-0 bg-white rounded-t-xl z-10">
                 <h3 className="text-lg font-bold text-gray-900">✅ Registrar Aproveitamento</h3>
-                <button
-                  type="button"
-                  onClick={fecharModal}
-                  disabled={salvando}
-                  className="text-gray-400 hover:text-gray-600 text-2xl leading-none disabled:opacity-50"
-                >
-                  ×
-                </button>
+                <button type="button" onClick={fecharModal} disabled={salvando} className="text-gray-400 hover:text-gray-600 text-2xl leading-none disabled:opacity-50">×</button>
               </div>
 
               <div className="p-5 space-y-4">
@@ -675,11 +666,7 @@ export default function EstoquePage() {
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-sm font-semibold text-gray-700 mb-1">Estoque *</label>
                         {!showCalculadora && (
-                          <button
-                            type="button"
-                            onClick={() => setShowCalculadora(true)}
-                            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                          >
+                          <button type="button" onClick={() => setShowCalculadora(true)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">
                             🧮 Usar calculadora
                           </button>
                         )}
@@ -727,20 +714,98 @@ export default function EstoquePage() {
               </div>
 
               <div className="border-t px-5 py-4 flex flex-col sm:flex-row gap-2 sm:justify-end sticky bottom-0 bg-white rounded-b-xl">
-                <button
-                  type="button"
-                  onClick={fecharModal}
-                  disabled={salvando}
-                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50"
-                >
+                <button type="button" onClick={fecharModal} disabled={salvando} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50">
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  disabled={salvando || !preview || semDados}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button type="submit" disabled={salvando || !preview || semDados} className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
                   {salvando ? 'Salvando...' : preview?.existingApproval ? 'Atualizar Aproveitamento' : 'Registrar Aproveitamento'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== MODAL CALIBRAÇÃO (Marco) ===================== */}
+      {showCalibModal && podeCalibrar && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <form onSubmit={handleCalibSubmit}>
+              <div className="flex justify-between items-center border-b px-5 py-4 sticky top-0 bg-white rounded-t-xl z-10">
+                <h3 className="text-lg font-bold text-gray-900">🎯 Calibrar Estoque</h3>
+                <button type="button" onClick={fecharCalibModal} disabled={calibrando} className="text-gray-400 hover:text-gray-600 text-2xl leading-none disabled:opacity-50">×</button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <p className="text-xs text-emerald-800">
+                    🎯 A calibração cria um <strong>marco de pesagem física</strong>. O saldo
+                    passa a ser contado <strong>a partir desta data</strong>, zerando o passado.
+                    Movimentações registradas no mesmo dia já estão embutidas na pesagem.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Data da calibração *</label>
+                  <input
+                    type="date"
+                    value={calibDate}
+                    max={getHojeLocal()}
+                    onChange={(e) => setCalibDate(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Peso físico atual (kg) *</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={calibKg}
+                    onChange={(e) => setCalibKg(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                    placeholder="Ex: 1250.00"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    💡 Informe o peso realmente medido na câmara/depósito nesta data.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Observação</label>
+                  <textarea
+                    value={calibNote}
+                    onChange={(e) => setCalibNote(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                    rows={2}
+                    placeholder="Ex: Recalibração após inventário físico de julho."
+                  />
+                </div>
+
+                <label className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={calibConfirm}
+                    onChange={(e) => setCalibConfirm(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-xs text-amber-800">
+                    Confirmo que a <strong>pesagem física foi conferida</strong> e que o saldo
+                    será recalculado a partir desta data. Esta ação sobrescreve o marco desta data, se houver.
+                  </span>
+                </label>
+              </div>
+
+              <div className="border-t px-5 py-4 flex flex-col sm:flex-row gap-2 sm:justify-end sticky bottom-0 bg-white rounded-b-xl">
+                <button type="button" onClick={fecharCalibModal} disabled={calibrando} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={calibrando || !calibConfirm} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+                  {calibrando ? 'Calibrando...' : '🎯 Confirmar Calibração'}
                 </button>
               </div>
             </form>

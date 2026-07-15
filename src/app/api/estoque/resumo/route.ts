@@ -23,54 +23,37 @@ export async function GET() {
       maskSaldo = false
     }
 
-    // 📦 3. Snapshot do estoque (Marco Zero)
+    // 📦 3. Snapshot do estoque (Marco Zero) — saldo único
     const snapshot = await calculateStock()
 
     // 📊 4. Agregados globais
-    const [
-      donationAgg,
-      harvestAgg,
-      distDonationAgg,
-      distHarvestAgg,
-      approvalAgg,
-    ] = await Promise.all([
-      prisma.donationItem.aggregate({ _sum: { quantity: true } }),
-      prisma.harvestItem.aggregate({
-        _sum: { quantity: true },
-        where: { harvest: { status: 'realizada' } },
-      }),
-      // 🥫 saídas DOAÇÃO (por item — fonte de verdade)
-      prisma.distributionItem.aggregate({
-        _sum: { quantity: true },
-        where: { origem: 'DOACAO' },
-      }),
-      // 🆕 ONDA 19 — 🌾 saídas COLHEITA (por item)
-      prisma.distributionItem.aggregate({
-        _sum: { quantity: true },
-        where: { origem: 'COLHEITA' },
-      }),
-      prisma.dailyApproval.aggregate({ _sum: { approvedQty: true } }),
-    ])
+    const [donationAgg, harvestAgg, distTotalAgg, approvalAgg] =
+      await Promise.all([
+        prisma.donationItem.aggregate({ _sum: { quantity: true } }),
+        prisma.harvestItem.aggregate({
+          _sum: { quantity: true },
+          where: { harvest: { status: 'realizada' } },
+        }),
+        // 📤 Saída ÚNICA — toda distribuição EXCETO evento (DOACAO + COLHEITA)
+        prisma.distributionItem.aggregate({
+          _sum: { quantity: true },
+          where: { origem: { not: 'EVENTO' } },
+        }),
+        prisma.dailyApproval.aggregate({ _sum: { approvedQty: true } }),
+      ])
 
     const donations = donationAgg._sum.quantity ?? 0
     const solidarityHarvest = harvestAgg._sum.quantity ?? 0
-    const distributedDonation = distDonationAgg._sum.quantity ?? 0
-    const distributedHarvest = distHarvestAgg._sum.quantity ?? 0
-    const distributed = distributedDonation // compat com payload antigo
+    const distributed = distTotalAgg._sum.quantity ?? 0
     const approved = approvalAgg._sum.approvedQty ?? 0
 
     const utilizationRate = donations > 0 ? (approved / donations) * 100 : 0
 
-    // 🆕 ONDA 19 — gavetas separadas
-    const donationStockKg = snapshot.hasMarker
-      ? snapshot.donationStockKg
-      : approved - distributedDonation
-    const harvestStockKg = snapshot.hasMarker
-      ? snapshot.harvestStockKg
-      : solidarityHarvest - distributedHarvest
+    // 📦 Estoque ÚNICO: marco + (aprov + colheita) − distribuído total
+    const round3 = (n: number) => Math.round(n * 1000) / 1000
     const inStock = snapshot.hasMarker
       ? snapshot.currentStockKg
-      : donationStockKg + harvestStockKg
+      : round3(approved + solidarityHarvest - distributed)
 
     // ============================================
     // 🎪 RESERVATÓRIO DE EVENTOS (por unidade)
@@ -136,7 +119,7 @@ export async function GET() {
       eventosPorUnidade.reduce((s, e) => s + e.arrecadado, 0).toFixed(2),
     )
 
-    // 📦 5. Payload completo
+    // 📦 5. Payload completo — SALDO ÚNICO (sem gavetas)
     const payload = {
       hasMarker: snapshot.hasMarker,
       baseMarker: snapshot.baseMarker,
@@ -149,51 +132,36 @@ export async function GET() {
       approved,
       distributed,
       inStock,
-      // 🆕 ONDA 19 — gavetas de kg separadas
-      donationStockKg,
-      harvestStockKg,
-      distributedDonation,
-      distributedHarvest,
       inStockBreakdown: snapshot.hasMarker
         ? {
             baseMarkerKg: snapshot.baseMarker?.quantityKg ?? 0,
             approvedSinceMarker: snapshot.movements.approvedKg,
             harvestSinceMarker: snapshot.movements.harvestKg,
-            distributedDonationSinceMarker:
-              snapshot.movements.distributedDonationKg,
-            distributedHarvestSinceMarker:
-              snapshot.movements.distributedHarvestKg,
+            distributedSinceMarker: snapshot.movements.distributedKg,
           }
         : {
             approved,
             solidarityHarvest,
-            distributedDonation,
-            distributedHarvest,
+            distributed,
           },
       utilizationRate: Number(utilizationRate.toFixed(1)),
       eventos: {
         porUnidade: eventosPorUnidade,
         totalRecebimentos: totalArrecadadoGeral,
-        // 🆕 sempre presente (mantido também na versão mascarada abaixo)
         totalArrecadadoGeral,
       },
       debug: {
         mode: snapshot.hasMarker ? 'marker-based' : 'legacy-fallback',
         formula: snapshot.hasMarker
-          ? 'doacao = baseMarker + approvedSince − distribDOACAO · colheita = harvestSince − distribCOLHEITA · inStock = doacao + colheita'
-          : 'doacao = approved − distribDOACAO · colheita = harvestRealized − distribCOLHEITA (legacy)',
+          ? 'inStock = baseMarker + (approvedSince + harvestSince) − distributedSince (saída única, exceto EVENTO)'
+          : 'inStock = approved + harvestRealized − distributed (saída única, exceto EVENTO) [legacy]',
         harvestStatusFilter: 'realizada',
-        onda19:
-          'Gaveta COLHEITA independente (kg). Marco Zero só na gaveta DOAÇÃO. EVENTO isolado por unidade.',
+        saldoUnico:
+          'Saldo em kg unificado (DOAÇÃO + COLHEITA). EVENTO isolado por unidade.',
         ...(snapshot.hasMarker &&
           snapshot.currentStockKg < 0 && {
             warning:
               '⚠️ Estoque negativo: saídas desde o marco > entradas. Verificar dados ou criar nova recalibração (ADJUSTMENT).',
-          }),
-        ...(snapshot.hasMarker &&
-          harvestStockKg < 0 && {
-            warningColheita:
-              '⚠️ Gaveta de colheita negativa: distribuiu-se mais colheita do que foi colhido/registrado.',
           }),
         ...(!snapshot.hasMarker && {
           warning:
@@ -212,10 +180,6 @@ export async function GET() {
         movementsSinceMarker,
         eventos,
         debug,
-        donationStockKg: _ds,
-        harvestStockKg: _hs,
-        distributedDonation: _dd,
-        distributedHarvest: _dh,
         ...safe
       } = payload
       void currentStockKg
@@ -223,17 +187,11 @@ export async function GET() {
       void inStockBreakdown
       void baseMarker
       void movementsSinceMarker
-      void _ds
-      void _hs
-      void _dd
-      void _dh
 
-      const { warning, warningColheita, ...debugSafe } = debug
+      const { warning, ...debugSafe } = debug
       void warning
-      void warningColheita
 
       // 🆕 Mantém APENAS o total agregado de eventos para o visualizador.
-      // O detalhamento por unidade (porUnidade) e o breakdown continuam ocultos.
       const eventosSafe = {
         totalArrecadadoGeral: eventos.totalArrecadadoGeral,
       }

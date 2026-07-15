@@ -41,7 +41,7 @@ model User {
   recebimentosRegistrados Recebimento[]    @relation("RecebimentosRegistrados")
 
   // 🆕 ONDA 17 — Arrecadação Extra (cupons)
-  arrecadacoesExtra       ArrecadacaoExtra[] @relation("ArrecadacaoExtraOperador")
+  arrecadacoesExtra ArrecadacaoExtra[] @relation("ArrecadacaoExtraOperador")
 }
 
 // ==========================================
@@ -168,22 +168,22 @@ model Employee {
 // DOAÇÃO
 // ==========================================
 model Donation {
-  id         String   @id @default(cuid())
-  donorId    String
-  date       DateTime @default(now())
-  origin     String   @default("coleta")
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  donorId   String
+  date      DateTime @default(now())
+  origin    String   @default("coleta")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  employeeId   String?
-  employee     Employee? @relation("DonationEmployee1", fields: [employeeId], references: [id])
+  employeeId String?
+  employee   Employee? @relation("DonationEmployee1", fields: [employeeId], references: [id])
 
-  employee2Id  String?
-  employee2    Employee? @relation("DonationEmployee2", fields: [employee2Id], references: [id])
+  employee2Id String?
+  employee2   Employee? @relation("DonationEmployee2", fields: [employee2Id], references: [id])
 
-  employee3Id  String?
-  employee3    Employee? @relation("DonationEmployee3", fields: [employee3Id], references: [id])
+  employee3Id String?
+  employee3   Employee? @relation("DonationEmployee3", fields: [employee3Id], references: [id])
 
   donor Donor          @relation(fields: [donorId], references: [id])
   items DonationItem[]
@@ -282,8 +282,8 @@ model SolidarityHarvest {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  employeeId  String?
-  employee    Employee? @relation("HarvestEmployee1", fields: [employeeId], references: [id])
+  employeeId String?
+  employee   Employee? @relation("HarvestEmployee1", fields: [employeeId], references: [id])
 
   employee2Id String?
   employee2   Employee? @relation("HarvestEmployee2", fields: [employee2Id], references: [id])
@@ -316,13 +316,13 @@ model DailyApproval {
   notes       String?
 
   createdById String
-  createdBy   User     @relation("DailyApprovalCreatedBy", fields: [createdById], references: [id])
+  createdBy   User   @relation("DailyApprovalCreatedBy", fields: [createdById], references: [id])
 
   updatedById String?
-  updatedBy   User?    @relation("DailyApprovalUpdatedBy", fields: [updatedById], references: [id])
+  updatedBy   User?   @relation("DailyApprovalUpdatedBy", fields: [updatedById], references: [id])
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([date])
   @@map("daily_approvals")
@@ -337,15 +337,15 @@ enum StockMarkerType {
 }
 
 model StockMarker {
-  id          String          @id @default(cuid())
-  type        StockMarkerType
-  date        DateTime        @unique @db.Date
-  quantityKg  Float
-  note        String?
+  id         String          @id @default(cuid())
+  type       StockMarkerType
+  date       DateTime        @unique @db.Date
+  quantityKg Float
+  note       String?
 
   createdById String
-  createdBy   User            @relation("StockMarkerCreatedBy", fields: [createdById], references: [id])
-  createdAt   DateTime        @default(now())
+  createdBy   User     @relation("StockMarkerCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
 
   @@index([date])
   @@index([type])
@@ -368,13 +368,13 @@ model DeliveryReceipt {
   distributionId String       @unique
   distribution   Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
 
-  recipientName  String
-  signatureData  String       @db.Text
-  notes          String?      @db.Text
+  recipientName String
+  signatureData String  @db.Text
+  notes         String? @db.Text
 
-  finalizedById  String
-  finalizedBy    User         @relation("ReceiptFinalizedBy", fields: [finalizedById], references: [id])
-  finalizedAt    DateTime     @default(now())
+  finalizedById String
+  finalizedBy   User     @relation("ReceiptFinalizedBy", fields: [finalizedById], references: [id])
+  finalizedAt   DateTime @default(now())
 
   @@map("delivery_receipts")
 }
@@ -405,57 +405,54 @@ model Evento {
   arrecadacoesExtra ArrecadacaoExtra[]
 
   criadoPorId    String
-  criadoPor      User             @relation("EventosCriados", fields: [criadoPorId], references: [id])
+  criadoPor      User      @relation("EventosCriados", fields: [criadoPorId], references: [id])
   encerradoPorId String?
-  encerradoPor   User?            @relation("EventosEncerrados", fields: [encerradoPorId], references: [id])
+  encerradoPor   User?     @relation("EventosEncerrados", fields: [encerradoPorId], references: [id])
   encerradoEm    DateTime?
 
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([criadoPorId])
 }
 
 model LocalColeta {
-  id           String        @id @default(cuid())
-  nome         String
-  endereco     String?
+  id       String  @id @default(cuid())
+  nome     String
+  endereco String?
 
-  eventoId     String
-  evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  eventoId String
+  evento   Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
   recebimentos Recebimento[]
 
   // 🆕 ONDA 17 — Arrecadação Extra (cupons)
   arrecadacoesExtra ArrecadacaoExtra[]
 
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([eventoId])
 }
 
 model EventoAlimento {
-  id           String        @id @default(cuid())
+  id String @id @default(cuid())
 
-  eventoId     String
-  evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  eventoId String
+  evento   Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
-  productId    String
-  product      Product       @relation(fields: [productId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  itensArrecadacao ArrecadacaoItem[]
 
   ordem        Int           @default(0)
-
   refugoKg     Float         @default(0)
-
   recebimentos Recebimento[]
 
-  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
-  arrecadacoesExtra ArrecadacaoExtra[]
-
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([eventoId, productId])
   @@index([eventoId])
@@ -463,15 +460,15 @@ model EventoAlimento {
 }
 
 model EventoOperador {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  eventoId  String
-  evento    Evento   @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  eventoId String
+  evento   Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
-  userId    String
-  user      User     @relation("OperacoesEmEventos", fields: [userId], references: [id])
+  userId String
+  user   User   @relation("OperacoesEmEventos", fields: [userId], references: [id])
 
-  ativo     Boolean  @default(true)
+  ativo Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -481,24 +478,24 @@ model EventoOperador {
 }
 
 model Recebimento {
-  id           String        @id @default(cuid())
+  id String @id @default(cuid())
 
-  eventoId     String
-  evento       Evento        @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  eventoId String
+  evento   Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
-  localId      String
-  local        LocalColeta   @relation(fields: [localId], references: [id])
+  localId String
+  local   LocalColeta @relation(fields: [localId], references: [id])
 
-  alimentoId   String
-  alimento     EventoAlimento @relation(fields: [alimentoId], references: [id])
+  alimentoId String
+  alimento   EventoAlimento @relation(fields: [alimentoId], references: [id])
 
-  quantidade   Float
-  unidade      String
+  quantidade Float
+  unidade    String
 
-  operadorId   String
-  operador     User          @relation("RecebimentosRegistrados", fields: [operadorId], references: [id])
+  operadorId String
+  operador   User   @relation("RecebimentosRegistrados", fields: [operadorId], references: [id])
 
-  createdAt    DateTime      @default(now())
+  createdAt DateTime @default(now())
 
   @@index([eventoId])
   @@index([localId])
@@ -508,34 +505,42 @@ model Recebimento {
 }
 
 model ArrecadacaoExtra {
-  id String @id @default(cuid())
-
+  id       String @id @default(cuid())
   eventoId String
   evento   Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
-  // Doador (SEMPRE obrigatório nesta modalidade)
   doadorNome String
   doadorCpf  String?
 
-  // O que foi doado
-  alimentoId String
-  alimento   EventoAlimento @relation(fields: [alimentoId], references: [id])
-  quantidade Int // unidades inteiras (cada uma = 1 cupom)
-
-  // Faixa de cupons GLOBAL por evento (numeroInicio..numeroFim)
-  numeroInicio Int
-  numeroFim    Int
-
-  // 🆕 Local da doação
   localId String?
   local   LocalColeta? @relation(fields: [localId], references: [id])
 
   operadorId String
-  operador   User @relation("ArrecadacaoExtraOperador", fields: [operadorId], references: [id])
+  operador   User   @relation("ArrecadacaoExtraOperador", fields: [operadorId], references: [id])
+
+  itens ArrecadacaoItem[]
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([eventoId])
-  @@index([eventoId, numeroInicio])
-  @@index([localId])
+}
+
+model ArrecadacaoItem {
+  id String @id @default(cuid())
+
+  arrecadacaoId String
+  arrecadacao   ArrecadacaoExtra @relation(fields: [arrecadacaoId], references: [id], onDelete: Cascade)
+
+  showDia String
+
+  alimentoId String
+  alimento   EventoAlimento @relation(fields: [alimentoId], references: [id])
+
+  quantidade   Int
+  numeroInicio Int
+  numeroFim    Int
+
+  @@index([arrecadacaoId])
+  @@index([showDia])
 }
