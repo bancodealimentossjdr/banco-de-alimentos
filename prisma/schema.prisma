@@ -492,6 +492,9 @@ model Recebimento {
   quantidade Float
   unidade    String
 
+  // 🆕 CPF do doador (doação normal) — opcional
+  doadorCpf String?
+
   operadorId String
   operador   User   @relation("RecebimentosRegistrados", fields: [operadorId], references: [id])
 
@@ -503,6 +506,7 @@ model Recebimento {
   @@index([operadorId])
   @@index([eventoId, createdAt])
 }
+
 
 model ArrecadacaoExtra {
   id       String @id @default(cuid())

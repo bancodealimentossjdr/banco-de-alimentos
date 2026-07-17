@@ -21,25 +21,20 @@ type Props = {
 // Config de unidade (B-turbo)
 // ==========================================
 type UnitConfig = {
-  passos: number[] // botões de passo rápido
-  baseStep: number // valor dos botões − / +
-  decimais: number // casas decimais exibidas/aceitas
+  passos: number[]
+  baseStep: number
+  decimais: number
 }
 
 function getUnitConfig(unidadeRaw: string): UnitConfig {
   const u = unidadeRaw.trim().toLowerCase()
-
-  // unidades inteiras (un, unidade, cx, caixa, pç, pacote...)
   const inteiras = ['un', 'und', 'unidade', 'unidades', 'cx', 'caixa', 'pç', 'pc', 'pacote', 'fardo', 'dz', 'duzia', 'dúzia']
   if (inteiras.includes(u)) {
     return { passos: [1, 10], baseStep: 1, decimais: 0 }
   }
-
-  // peso / volume fracionável (kg, l, g, ml...)
   return { passos: [0.5, 1, 5], baseStep: 1, decimais: 1 }
 }
 
-// Arredonda pra evitar lixo de ponto flutuante (ex: 0.1 + 0.2)
 function fix(value: number, decimais: number): number {
   const f = Math.pow(10, decimais)
   return Math.round(value * f) / f
@@ -50,6 +45,15 @@ function fmt(value: number, decimais: number): string {
     minimumFractionDigits: decimais > 0 ? 1 : 0,
     maximumFractionDigits: decimais,
   })
+}
+
+// 🆕 CPF — máscara 000.000.000-00
+function maskCpf(v: string): string {
+  const d = v.replace(/\D/g, '').slice(0, 11)
+  return d
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
 }
 
 // ==========================================
@@ -64,13 +68,13 @@ export default function CampoCliente({
   const router = useRouter()
 
   const [localId, setLocalId] = useState<string>('')
+  const [doadorCpf, setDoadorCpf] = useState<string>('') // 🆕 CPF
   const [quantidades, setQuantidades] = useState<Record<string, number>>({})
   const [salvando, setSalvando] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
 
   const localSelecionado = locais.find((l) => l.id === localId) ?? null
 
-  // Itens com quantidade > 0 (o que será enviado / confirmado)
   const itensComQtd = useMemo(
     () =>
       alimentos
@@ -84,22 +88,14 @@ export default function CampoCliente({
 
   const temAlgoParaSalvar = itensComQtd.length > 0
 
-  // ----------------------------------------
-  // 🆕 Voltar ao detalhe do evento (com proteção de dados não salvos)
-  // ----------------------------------------
   function voltarAoEvento() {
     if (temAlgoParaSalvar) {
-      const ok = window.confirm(
-        'Você tem quantidades não salvas. Sair mesmo assim?',
-      )
+      const ok = window.confirm('Você tem quantidades não salvas. Sair mesmo assim?')
       if (!ok) return
     }
     router.push(`/eventos/${eventoId}`)
   }
 
-  // ----------------------------------------
-  // Handlers de quantidade
-  // ----------------------------------------
   function setQtd(alimentoId: string, novo: number, decimais: number) {
     const limpo = Math.max(0, fix(novo, decimais))
     setQuantidades((prev) => ({ ...prev, [alimentoId]: limpo }))
@@ -110,23 +106,15 @@ export default function CampoCliente({
     setQtd(alimentoId, atual + delta, decimais)
   }
 
-  // ----------------------------------------
-  // Trocar de local → zera as quantidades
-  // ----------------------------------------
   function trocarLocal(novoId: string) {
     if (temAlgoParaSalvar && novoId !== localId) {
-      const ok = window.confirm(
-        'Trocar de local vai apagar as quantidades não salvas. Continuar?',
-      )
+      const ok = window.confirm('Trocar de local vai apagar as quantidades não salvas. Continuar?')
       if (!ok) return
     }
     setLocalId(novoId)
     setQuantidades({})
   }
 
-  // ----------------------------------------
-  // Salvar (com confirmação)
-  // ----------------------------------------
   function pedirConfirmacao() {
     if (!localId) {
       toast.error('Escolha um local primeiro.')
@@ -145,6 +133,7 @@ export default function CampoCliente({
 
     const payload = {
       localId,
+      doadorCpf: doadorCpf.trim() || null, // 🆕 CPF
       itens: itensComQtd.map((i) => ({
         alimentoId: i.alimento.id,
         quantidade: i.quantidade,
@@ -166,7 +155,8 @@ export default function CampoCliente({
       }
 
       toast.success(`${data.registrados} recebimento(s) registrado(s)! ✅`)
-      setQuantidades({}) // limpa pro próximo lote no mesmo local
+      setQuantidades({})
+      setDoadorCpf('') // 🆕 CPF — limpa pro próximo lote
       router.refresh()
     } catch {
       toast.error('Falha de conexão. Tente novamente.')
@@ -182,7 +172,6 @@ export default function CampoCliente({
     <div className="mx-auto max-w-2xl px-4 py-6">
       {/* Cabeçalho */}
       <header className="mb-6">
-        {/* 🆕 Botão voltar ao evento */}
         <button
           type="button"
           onClick={voltarAoEvento}
@@ -235,7 +224,24 @@ export default function CampoCliente({
         )}
       </section>
 
-      {/* Passo 2 — quantidades (só aparece após escolher local) */}
+      {/* 🆕 CPF — só aparece após escolher local */}
+      {localSelecionado && (
+        <section className="mb-6">
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            CPF do doador <span className="text-gray-400">(opcional)</span>
+          </label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={doadorCpf}
+            onChange={(e) => setDoadorCpf(maskCpf(e.target.value))}
+            placeholder="000.000.000-00"
+            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-base focus:border-green-500 focus:ring-green-500"
+          />
+        </section>
+      )}
+
+      {/* Passo 2 — quantidades */}
       {localSelecionado && (
         <section className="mb-24">
           <h2 className="mb-3 text-sm font-medium text-gray-700">
@@ -258,20 +264,14 @@ export default function CampoCliente({
                 <div
                   key={a.id}
                   className={`rounded-xl border p-4 transition ${
-                    ativo
-                      ? 'border-green-400 bg-green-50'
-                      : 'border-gray-200 bg-white'
+                    ativo ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'
                   }`}
                 >
-                  {/* Nome + unidade */}
                   <div className="mb-3 flex items-baseline justify-between">
                     <span className="font-medium text-gray-900">{a.nome}</span>
-                    <span className="text-xs uppercase text-gray-400">
-                      {a.unidade}
-                    </span>
+                    <span className="text-xs uppercase text-gray-400">{a.unidade}</span>
                   </div>
 
-                  {/* Linha − valor + */}
                   <div className="flex items-center justify-center gap-4">
                     <button
                       type="button"
@@ -282,7 +282,6 @@ export default function CampoCliente({
                       −
                     </button>
 
-                    {/* Número clicável → vira input */}
                     <input
                       type="number"
                       inputMode="decimal"
@@ -310,7 +309,6 @@ export default function CampoCliente({
                     </button>
                   </div>
 
-                  {/* Passos rápidos */}
                   <div className="mt-3 flex justify-center gap-2">
                     {cfg.passos.map((p) => (
                       <button
@@ -364,12 +362,15 @@ export default function CampoCliente({
       {confirmando && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="mb-1 text-lg font-bold text-gray-900">
-              Confirmar registro
-            </h3>
-            <p className="mb-4 text-sm text-gray-500">
+            <h3 className="mb-1 text-lg font-bold text-gray-900">Confirmar registro</h3>
+            <p className="mb-1 text-sm text-gray-500">
               Local: <span className="font-medium">{localSelecionado?.nome}</span>
             </p>
+            {doadorCpf.trim() && (
+              <p className="mb-4 text-sm text-gray-500">
+                CPF: <span className="font-medium">{doadorCpf}</span>
+              </p>
+            )}
 
             <ul className="mb-6 max-h-64 space-y-2 overflow-y-auto">
               {itensComQtd.map((i) => {

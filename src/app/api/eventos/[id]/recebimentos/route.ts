@@ -5,22 +5,8 @@ import { podeRegistrarNoEvento } from '@/lib/permissions'
 
 /**
  * 🆕 ONDA 17.4 — Registro EM LOTE de recebimentos num local do evento.
- * 🔄 17.6-h (Decisão #18) — Gate de registro por evento:
- *   - admin / operador → registram em qualquer evento ATIVO
- *   - visualizador     → SÓ se tiver vínculo ATIVO (EventoOperador { ativo:true })
- *
- * Fluxo do voluntário no portão:
- *   - escolhe um Local do evento
- *   - ajusta quantidades por alimento (EventoAlimento)
- *   - SALVA → cria 1 Recebimento por alimento com quantidade > 0
- *
- * Defesa em profundidade:
- *   1. requireAuth() → precisa estar logado
- *   2. evento precisa existir e estar ATIVO
- *   3. 🆕 gate por role + vínculo (podeRegistrarNoEvento)
- *   4. local precisa pertencer AO evento
- *   5. cada alimento precisa pertencer AO evento
- *   6. unidade = snapshot de product.unit (frontend NÃO escolhe unidade)
+ * 🔄 17.6-h (Decisão #18) — Gate de registro por evento.
+ * 🆕 CPF — doação normal agora grava CPF do doador (opcional) em cada recebimento.
  */
 export async function POST(
   req: Request,
@@ -42,24 +28,25 @@ export async function POST(
     return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
   }
 
-  const { localId, itens } = (body ?? {}) as {
+  const { localId, itens, doadorCpf } = (body ?? {}) as {
     localId?: string
+    doadorCpf?: string | null
     itens?: { alimentoId?: string; quantidade?: number }[]
   }
 
   if (!localId || typeof localId !== 'string') {
-    return NextResponse.json(
-      { error: 'localId é obrigatório' },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: 'localId é obrigatório' }, { status: 400 })
   }
 
   if (!Array.isArray(itens) || itens.length === 0) {
-    return NextResponse.json(
-      { error: 'Envie ao menos um item' },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: 'Envie ao menos um item' }, { status: 400 })
   }
+
+  // 🆕 CPF — opcional, guarda só dígitos (aceita só se tiver 11 dígitos)
+  const cpfLimpo =
+    typeof doadorCpf === 'string' && doadorCpf.replace(/\D/g, '').length === 11
+      ? doadorCpf.replace(/\D/g, '')
+      : null
 
   // Normaliza + filtra: só quantidades válidas e > 0
   const itensLimpos = itens
@@ -88,10 +75,7 @@ export async function POST(
   })
 
   if (!evento) {
-    return NextResponse.json(
-      { error: 'Evento não encontrado' },
-      { status: 404 },
-    )
+    return NextResponse.json({ error: 'Evento não encontrado' }, { status: 404 })
   }
 
   if (evento.status !== 'ATIVO') {
@@ -101,8 +85,7 @@ export async function POST(
     )
   }
 
-  // 3️⃣.5 🆕 17.6-h (Decisão #18) — Gate de registro por evento.
-  // admin/operador ignoram o vínculo; visualizador depende dele.
+  // 3️⃣.5 Gate de registro por evento
   let temVinculoAtivo = false
   if (role === 'visualizador') {
     const vinculo = await prisma.eventoOperador.findUnique({
@@ -132,7 +115,7 @@ export async function POST(
     )
   }
 
-  // 5️⃣ Alimentos pertencem ao evento + snapshot da unidade (product.unit)
+  // 5️⃣ Alimentos pertencem ao evento + snapshot da unidade
   const alimentoIds = itensLimpos.map((i) => i.alimentoId)
 
   const alimentos = await prisma.eventoAlimento.findMany({
@@ -144,7 +127,6 @@ export async function POST(
     alimentos.map((a) => [a.id, a.product.unit]),
   )
 
-  // Algum item aponta pra alimento que não é deste evento?
   const invalido = itensLimpos.find((i) => !unidadePorAlimento.has(i.alimentoId))
   if (invalido) {
     return NextResponse.json(
@@ -164,6 +146,7 @@ export async function POST(
           quantidade: i.quantidade,
           unidade: unidadePorAlimento.get(i.alimentoId)!, // snapshot
           operadorId,
+          doadorCpf: cpfLimpo, // 🆕 CPF
         },
         select: { id: true, alimentoId: true, quantidade: true, unidade: true },
       }),

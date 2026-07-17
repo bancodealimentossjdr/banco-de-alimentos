@@ -39,11 +39,11 @@ async function autorizar(eventoId: string) {
     return { ok: false as const, status: 403, error: 'Permissão negada' }
   }
 
-  return { ok: true as const, userId, role, podeEditar: true }
+  return { ok: true as const, userId, role, podeEditar: role === 'dev' }
 }
 
 // ==========================================
-// GET — listas + registros
+// GET — listas + registros + shows reais
 // ==========================================
 export async function GET(
   _req: NextRequest,
@@ -55,7 +55,6 @@ export async function GET(
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
-  // Alimentos vinculados ao evento
   const eventoAlimentos = await prisma.eventoAlimento.findMany({
     where: { eventoId },
     select: { id: true, product: { select: { name: true } } },
@@ -66,7 +65,6 @@ export async function GET(
     nome: ea.product.name,
   }))
 
-  // Locais do evento
   const locaisRaw = await prisma.localColeta.findMany({
     where: { eventoId },
     select: { id: true, nome: true },
@@ -74,7 +72,6 @@ export async function GET(
   })
   const locais = locaisRaw.map((l) => ({ id: l.id, nome: l.nome }))
 
-  // Registros (com itens)
   const registrosRaw = await prisma.arrecadacaoExtra.findMany({
     where: { eventoId },
     orderBy: { createdAt: 'desc' },
@@ -112,19 +109,21 @@ export async function GET(
     })),
   }))
 
-  // Totais por show
+  // 🆕 Shows REAIS = valores distintos de showDia já usados no evento
   const totaisPorShow: Record<string, number> = {}
   for (const r of registrosRaw) {
     for (const it of r.itens) {
       totaisPorShow[it.showDia] = (totaisPorShow[it.showDia] ?? 0) + it.quantidade
     }
   }
+  const showsDistintos = Object.keys(totaisPorShow).sort()
 
   return NextResponse.json({
     alimentos,
     locais,
     registros,
     totaisPorShow,
+    showsDistintos,
     podeEditar: auth.podeEditar,
   })
 }
@@ -159,7 +158,6 @@ export async function POST(
     return NextResponse.json({ error: 'Itens inválidos' }, { status: 400 })
   }
 
-  // Validar itens
   const itensValidos: ItemValido[] = []
   for (const it of itens) {
     const showDia = typeof it.showDia === 'string' ? it.showDia.trim() : ''
@@ -178,7 +176,6 @@ export async function POST(
     return NextResponse.json({ error: 'Nenhum item válido' }, { status: 400 })
   }
 
-  // Confirmar que os alimentos pertencem ao evento
   const alims = await prisma.eventoAlimento.findMany({
     where: { eventoId, id: { in: itensValidos.map((i) => i.alimentoId) } },
     select: { id: true },
@@ -188,7 +185,6 @@ export async function POST(
     return NextResponse.json({ error: 'Alimento não pertence ao evento' }, { status: 400 })
   }
 
-  // Próximo número de cupom (busca o maior numeroFim entre TODOS os itens do evento)
   const ultimoItem = await prisma.arrecadacaoItem.findFirst({
     where: { arrecadacao: { eventoId } },
     orderBy: { numeroFim: 'desc' },
@@ -196,7 +192,6 @@ export async function POST(
   })
   let proximoNum = (ultimoItem?.numeroFim ?? 0) + 1
 
-  // Montar faixas
   const itensComFaixa = itensValidos.map((it) => {
     const inicio = proximoNum
     const fim = proximoNum + it.quantidade - 1

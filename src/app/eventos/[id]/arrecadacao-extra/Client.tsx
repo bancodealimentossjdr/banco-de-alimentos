@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 
 type Alimento = { id: string; nome: string }
 type Local = { id: string; nome: string }
-type ShowOption = { value: string; artista: string; dia: string; data: string }
+type ShowOption = { value: string; artista: string; data: string }
 
 type ItemRegistro = {
   id: string
@@ -24,16 +24,17 @@ type Registro = {
   itens: ItemRegistro[]
 }
 
-// Shows do evento (ajuste conforme o line-up do evento principal)
+// 🎤 Line-up FIXO do evento
 const SHOWS: ShowOption[] = [
-  { value: 'ana-castela-sexta', artista: 'Ana Castela', dia: 'Sexta', data: '14/08' },
-  { value: 'daniel-sabado', artista: 'Daniel', dia: 'Sábado', data: '15/08' },
-  { value: 'domingo', artista: 'Encerramento', dia: 'Domingo', data: '16/08' },
+  { value: 'hugo-guilherme-13', artista: 'Hugo e Guilherme', data: '13/08' },
+  { value: 'ana-castela-14', artista: 'Ana Castela', data: '14/08' },
+  { value: 'daniel-15', artista: 'Daniel', data: '15/08' },
+  { value: 'mariana-fagundes-16', artista: 'Mariana Fagundes', data: '16/08' },
 ]
 
 function labelShow(v: string): string {
   const s = SHOWS.find((x) => x.value === v)
-  return s ? `${s.artista} — ${s.dia} — ${s.data}` : v
+  return s ? `${s.data} — ${s.artista}` : v
 }
 
 type ItemForm = { showDia: string; alimentoId: string; quantidade: string }
@@ -55,7 +56,6 @@ export default function Client({
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
 
-  // form principal
   const [doadorNome, setDoadorNome] = useState('')
   const [doadorCpf, setDoadorCpf] = useState('')
   const [localId, setLocalId] = useState('')
@@ -63,7 +63,6 @@ export default function Client({
     { showDia: '', alimentoId: '', quantidade: '' },
   ])
 
-  // edição
   const [editandoId, setEditandoId] = useState<string | null>(null)
 
   const carregar = useCallback(async () => {
@@ -113,7 +112,6 @@ export default function Client({
     setEditandoId(r.id)
     setDoadorNome(r.doadorNome)
     setDoadorCpf(r.doadorCpf ?? '')
-    // localId: precisa mapear nome->id
     const loc = locais.find((l) => l.nome === r.localNome)
     setLocalId(loc?.id ?? '')
     setItens(
@@ -234,7 +232,7 @@ export default function Client({
                 className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
               >
                 <span className="font-semibold text-gray-800">{s.artista}</span>
-                <span className="text-gray-400"> · {s.dia}</span>
+                <span className="text-gray-400"> · {s.data}</span>
                 <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-700">
                   {total}
                 </span>
@@ -252,17 +250,12 @@ export default function Client({
         {editandoId && (
           <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
             <span>✏️ Editando registro</span>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="font-medium underline"
-            >
+            <button type="button" onClick={resetForm} className="font-medium underline">
               Cancelar
             </button>
           </div>
         )}
 
-        {/* dados da pessoa */}
         <div className="mb-4">
           <label className="mb-1 block text-sm font-medium text-gray-700">
             Nome do doador <span className="text-red-500">*</span>
@@ -308,9 +301,7 @@ export default function Client({
         {/* caixa de itens (show + alimento + qtd) */}
         <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">
-              🎤 Shows &amp; alimentos
-            </h3>
+            <h3 className="text-sm font-semibold text-gray-800">🎤 Shows &amp; alimentos</h3>
             <button
               type="button"
               onClick={adicionarItem}
@@ -322,14 +313,9 @@ export default function Client({
 
           <div className="space-y-3">
             {itens.map((it, idx) => (
-              <div
-                key={idx}
-                className="rounded-lg border border-gray-200 bg-white p-3"
-              >
+              <div key={idx} className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-500">
-                    Item {idx + 1}
-                  </span>
+                  <span className="text-xs font-medium text-gray-500">Item {idx + 1}</span>
                   {itens.length > 1 && (
                     <button
                       type="button"
@@ -353,7 +339,7 @@ export default function Client({
                     <option value="">Selecione o show...</option>
                     {SHOWS.map((s) => (
                       <option key={s.value} value={s.value}>
-                        🎤 {s.artista} • {s.dia} ({s.data})
+                        🎤 {s.data} • {s.artista}
                       </option>
                     ))}
                   </select>
@@ -366,9 +352,7 @@ export default function Client({
                     </label>
                     <select
                       value={it.alimentoId}
-                      onChange={(e) =>
-                        atualizarItem(idx, 'alimentoId', e.target.value)
-                      }
+                      onChange={(e) => atualizarItem(idx, 'alimentoId', e.target.value)}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
                     >
                       <option value="">Selecione...</option>
@@ -387,9 +371,7 @@ export default function Client({
                       type="number"
                       min={1}
                       value={it.quantidade}
-                      onChange={(e) =>
-                        atualizarItem(idx, 'quantidade', e.target.value)
-                      }
+                      onChange={(e) => atualizarItem(idx, 'quantidade', e.target.value)}
                       placeholder="Cada unidade = 1 cupom"
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
                     />
@@ -405,11 +387,7 @@ export default function Client({
           disabled={salvando}
           className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
         >
-          {salvando
-            ? 'Salvando...'
-            : editandoId
-              ? 'Salvar alterações'
-              : 'Registrar doação'}
+          {salvando ? 'Salvando...' : editandoId ? 'Salvar alterações' : 'Registrar doação'}
         </button>
       </form>
 
@@ -426,25 +404,16 @@ export default function Client({
         ) : (
           <div className="space-y-4">
             {registros.map((r) => (
-              <div
-                key={r.id}
-                className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
-              >
-                {/* dados principais em destaque */}
+              <div key={r.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-start justify-between border-b border-gray-100 pb-3">
                   <div>
-                    <div className="text-base font-bold text-gray-900">
-                      {r.doadorNome}
-                    </div>
+                    <div className="text-base font-bold text-gray-900">{r.doadorNome}</div>
                     <div className="text-xs text-gray-500">
                       CPF: {r.doadorCpf ?? '—'}
                       {r.localNome && (
                         <>
-                          {' '}
-                          · Local:{' '}
-                          <span className="font-medium text-gray-700">
-                            {r.localNome}
-                          </span>
+                          {' '}· Local:{' '}
+                          <span className="font-medium text-gray-700">{r.localNome}</span>
                         </>
                       )}
                     </div>
@@ -467,7 +436,6 @@ export default function Client({
                   )}
                 </div>
 
-                {/* itens: cupons por show */}
                 <div className="space-y-2">
                   {r.itens.map((i) => (
                     <div
@@ -475,9 +443,7 @@ export default function Client({
                       className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"
                     >
                       <div>
-                        <span className="font-semibold text-emerald-700">
-                          {labelShow(i.showDia)}
-                        </span>
+                        <span className="font-semibold text-emerald-700">{labelShow(i.showDia)}</span>
                         <span className="text-gray-400"> · {i.alimentoNome}</span>
                       </div>
                       <div className="flex items-center gap-3">
