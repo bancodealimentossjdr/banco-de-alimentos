@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
+import CardIngressos from './CardIngressos'
 
 // ==========================================
 // Tipos
@@ -240,6 +241,13 @@ export default function CampoCliente({
           />
         </section>
       )}
+
+      {/* 🎫 Card informativo de ingressos — só leitura (Onda 18) */}
+          {localSelecionado && (
+            <section className="mb-6">
+              <CardIngressos cpf={doadorCpf} />
+            </section>
+          )}
 
       {/* Passo 2 — quantidades */}
       {localSelecionado && (

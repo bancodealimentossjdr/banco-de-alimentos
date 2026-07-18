@@ -28,6 +28,7 @@ model User {
 
   dailyApprovalsCreated DailyApproval[] @relation("DailyApprovalCreatedBy")
   dailyApprovalsUpdated DailyApproval[] @relation("DailyApprovalUpdatedBy")
+  ingressosRetirados ReservaIngresso[] @relation("IngressoRetiradoPor")
 
   // 🆕 ONDA 16.2 — Marcos de Estoque
   stockMarkersCreated StockMarker[] @relation("StockMarkerCreatedBy")
@@ -547,4 +548,47 @@ model ArrecadacaoItem {
 
   @@index([arrecadacaoId])
   @@index([showDia])
+}
+
+// ============================================
+// INGRESSOS SOLIDÁRIOS (API App minhaSJ troca ingresso → alimento)
+// ============================================
+
+model LoteIngresso {
+  id             String   @id @default(cuid())
+  nomeArquivo String @unique
+  operador       String?
+  showData       DateTime @db.Date
+  showLabel      String
+  importadoPorId String
+  importadoEm    DateTime @default(now())
+  totalLinhas    Int      @default(0)
+  ingressos      ReservaIngresso[]
+  @@index([showData])
+  @@map("lotes_ingresso")
+}
+
+model ReservaIngresso {
+  id            String       @id @default(cuid())
+  loteId        String
+  lote          LoteIngresso @relation(fields: [loteId], references: [id], onDelete: Cascade)
+  protocolo     String
+  cpf           String
+  nome          String
+  dataNasc      String?
+  cidade        String?
+  bairro        String?
+  retirado      Boolean      @default(false)
+  retiradoEm    DateTime?
+
+  // 🆕 Rastreabilidade da retirada
+  retiradoPorId String?
+  retiradoPor   User?        @relation("IngressoRetiradoPor", fields: [retiradoPorId], references: [id])
+
+  createdAt     DateTime     @default(now())
+
+  @@unique([loteId, protocolo])
+  @@index([cpf])
+  @@index([protocolo])
+  @@map("reservas_ingresso")
 }
