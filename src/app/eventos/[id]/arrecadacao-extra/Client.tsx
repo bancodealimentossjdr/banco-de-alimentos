@@ -148,6 +148,10 @@ export default function Client({
       toast.error('Informe o nome do doador.')
       return
     }
+    if (doadorCpf.trim().length === 0) {
+      toast.error('Informe o CPF do doador.')
+      return
+    }
     const itensPayload = itens
       .filter((it) => it.showDia && it.alimentoId && it.quantidade)
       .map((it) => ({
@@ -270,7 +274,7 @@ export default function Client({
 
         <div className="mb-4">
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            CPF <span className="text-gray-400">(opcional)</span>
+            CPF <span className="text-red-500">*</span>
           </label>
           <input
             value={doadorCpf}
