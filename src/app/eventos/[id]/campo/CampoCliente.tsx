@@ -212,11 +212,10 @@ export default function CampoCliente({
         >
           <option value="">— Selecione o local —</option>
           {locais.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.nome}
-              {l.endereco ? ` — ${l.endereco}` : ''}
-            </option>
-          ))}
+  <option key={l.id} value={l.id}>
+    {l.nome}
+  </option>
+))}
         </select>
         {locais.length === 0 && (
           <p className="mt-2 text-sm text-red-600">
