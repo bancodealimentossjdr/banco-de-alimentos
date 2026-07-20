@@ -401,6 +401,7 @@ model Evento {
   operadores     EventoOperador[]
   recebimentos   Recebimento[]
   alimentos      EventoAlimento[]
+  folhasResumoIngresso FolhaResumoIngresso[]
 
   // 🆕 ONDA 17 — Arrecadação Extra (cupons)
   arrecadacoesExtra ArrecadacaoExtra[]
@@ -591,4 +592,19 @@ model ReservaIngresso {
   @@index([cpf])
   @@index([protocolo])
   @@map("reservas_ingresso")
+}
+
+model FolhaResumoIngresso {
+  id             String   @id @default(cuid())
+  eventoId       String
+  codigoFamiliar String
+  cpf            String
+  rendaPerCapita Decimal  @db.Decimal(10, 2)
+  registradoPor  String   // userId de quem retirou
+  createdAt      DateTime @default(now())
+
+  evento  Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  @@unique([eventoId, codigoFamiliar])
+  @@index([eventoId])
 }

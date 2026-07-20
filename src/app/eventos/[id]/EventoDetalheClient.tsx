@@ -490,37 +490,48 @@ export default function EventoDetalheClient({
       </div>
 
       {/* 🆕 17.8-c/#23 — botões de ação lado a lado */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {isAdmin && evento.status === 'RASCUNHO' && (
-          <button
-            onClick={ativarEvento}
-            disabled={ativando}
-            className="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-          >
-            {ativando ? 'Ativando…' : '▶️ Ativar evento'}
-          </button>
-        )}
+<div className="flex flex-wrap gap-2 mb-4">
+  {isAdmin && evento.status === 'RASCUNHO' && (
+    <button
+      onClick={ativarEvento}
+      disabled={ativando}
+      className="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+    >
+      {ativando ? 'Ativando…' : '▶️ Ativar evento'}
+    </button>
+  )}
 
-        {podeReverter && (
-          <button
-            onClick={reverterEvento}
-            disabled={revertendo}
-            className="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-60 text-gray-700 font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-          >
-            {revertendo ? 'Revertendo…' : '↩️ Voltar p/ rascunho'}
-          </button>
-        )}
+  {podeReverter && (
+    <button
+      onClick={reverterEvento}
+      disabled={revertendo}
+      className="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-60 text-gray-700 font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+    >
+      {revertendo ? 'Revertendo…' : '↩️ Voltar p/ rascunho'}
+    </button>
+  )}
 
-        {isAdmin && evento.status === 'ATIVO' && (
-          <button
-            onClick={encerrarEvento}
-            disabled={encerrando}
-            className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-          >
-            {encerrando ? 'Encerrando…' : '⏹️ Encerrar evento'}
-          </button>
-        )}
-      </div>
+  {isAdmin && evento.status === 'ATIVO' && (
+    <button
+      onClick={encerrarEvento}
+      disabled={encerrando}
+      className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+    >
+      {encerrando ? 'Encerrando…' : '⏹️ Encerrar evento'}
+    </button>
+  )}
+
+  {/* 🆕 Atualizar — movido pro topo, ao lado de Encerrar */}
+  <button
+    onClick={atualizarDoacoes}
+    disabled={atualizando}
+    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
+  >
+    <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
+    {atualizando ? 'Atualizando…' : 'Atualizar'}
+  </button>
+</div>
+
 
       {/* 🆕 17.8-h/#23 — card de resumo (total reativo ao filtro na aba gráficos) */}
       <div className="bg-white rounded-xl shadow-sm border p-4 mb-6">
@@ -581,35 +592,32 @@ export default function EventoDetalheClient({
       {aba === 'doacoes' && (
         <div className="space-y-4">
           {/* 🆕 17.8-g — barra de ações: Atualizar + Registrar + Arrecadação Extra */}
-          <div className="flex justify-end items-center gap-2 flex-wrap">
-            <button
-              onClick={atualizarDoacoes}
-              disabled={atualizando}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
-            >
-              <span className={atualizando ? 'inline-block animate-spin' : ''}>🔄</span>
-              {atualizando ? 'Atualizando…' : 'Atualizar'}
-            </button>
+          {/* 🆕 3 botões de ingresso em grid uniforme (empilha no mobile) */}
+{podeRegistrar && evento.status === 'ATIVO' && (
+  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    <Link
+      href={`/eventos/${evento.id}/campo`}
+      className="inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+    >
+      📥 Ingresso ➡️ Alimento
+    </Link>
 
-            {podeRegistrar && evento.status === 'ATIVO' && (
-              <>
-                <Link
-                  href={`/eventos/${evento.id}/campo`}
-                  className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-                >
-                  📥 Registrar Doação
-                </Link>
+    <Link
+      href={`/eventos/${evento.id}/arrecadacao-extra`}
+      className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+    >
+      📤 Conheça seu Ídolo
+    </Link>
 
-                {/* 🆕 Arrecadação Extra — ao lado de Registrar Doação */}
-                <Link
-                  href={`/eventos/${evento.id}/arrecadacao-extra`}
-                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
-                >
-                  📤 Arrecadação Extra
-                </Link>
-              </>
-            )}
-          </div>
+    <Link
+      href={`/eventos/${evento.id}/folha-resumo`}
+      className="inline-flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold px-4 py-2 rounded-lg shadow-sm transition active:scale-95"
+    >
+      📋 Ingresso ➡️ Folha Resumo
+    </Link>
+  </div>
+)}
+
 
           {evento.status !== 'ATIVO' && (
             <p className="text-xs text-gray-400">
