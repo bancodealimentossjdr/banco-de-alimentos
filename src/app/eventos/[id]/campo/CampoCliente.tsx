@@ -16,6 +16,7 @@ type Props = {
   eventoNome: string
   locais: Local[]
   alimentos: Alimento[]
+  isDev?: boolean // 🆕 controla botão "reverter retirada"
 }
 
 // ==========================================
@@ -48,15 +49,6 @@ function fmt(value: number, decimais: number): string {
   })
 }
 
-// 🆕 CPF — máscara 000.000.000-00
-function maskCpf(v: string): string {
-  const d = v.replace(/\D/g, '').slice(0, 11)
-  return d
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
-}
-
 // ==========================================
 // Componente principal
 // ==========================================
@@ -65,11 +57,11 @@ export default function CampoCliente({
   eventoNome,
   locais,
   alimentos,
+  isDev = false, // 🆕
 }: Props) {
   const router = useRouter()
 
   const [localId, setLocalId] = useState<string>('')
-  const [doadorCpf, setDoadorCpf] = useState<string>('') // 🆕 CPF
   const [quantidades, setQuantidades] = useState<Record<string, number>>({})
   const [salvando, setSalvando] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
@@ -134,7 +126,6 @@ export default function CampoCliente({
 
     const payload = {
       localId,
-      doadorCpf: doadorCpf.trim() || null, // 🆕 CPF
       itens: itensComQtd.map((i) => ({
         alimentoId: i.alimento.id,
         quantidade: i.quantidade,
@@ -157,7 +148,6 @@ export default function CampoCliente({
 
       toast.success(`${data.registrados} recebimento(s) registrado(s)! ✅`)
       setQuantidades({})
-      setDoadorCpf('') // 🆕 CPF — limpa pro próximo lote
       router.refresh()
     } catch {
       toast.error('Falha de conexão. Tente novamente.')
@@ -212,10 +202,10 @@ export default function CampoCliente({
         >
           <option value="">— Selecione o local —</option>
           {locais.map((l) => (
-  <option key={l.id} value={l.id}>
-    {l.nome}
-  </option>
-))}
+            <option key={l.id} value={l.id}>
+              {l.nome}
+            </option>
+          ))}
         </select>
         {locais.length === 0 && (
           <p className="mt-2 text-sm text-red-600">
@@ -224,29 +214,12 @@ export default function CampoCliente({
         )}
       </section>
 
-      {/* 🆕 CPF — só aparece após escolher local */}
+      {/* 🎫 Card de ingressos — busca CPF por dentro (Onda 18) */}
       {localSelecionado && (
         <section className="mb-6">
-          <label className="mb-2 block text-sm font-medium text-gray-700">
-            CPF do doador <span className="text-gray-400">(opcional)</span>
-          </label>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={doadorCpf}
-            onChange={(e) => setDoadorCpf(maskCpf(e.target.value))}
-            placeholder="000.000.000-00"
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-base focus:border-green-500 focus:ring-green-500"
-          />
+          <CardIngressos isDev={isDev} />
         </section>
       )}
-
-      {/* 🎫 Card informativo de ingressos — só leitura (Onda 18) */}
-          {localSelecionado && (
-            <section className="mb-6">
-              <CardIngressos cpf={doadorCpf} />
-            </section>
-          )}
 
       {/* Passo 2 — quantidades */}
       {localSelecionado && (
@@ -370,14 +343,9 @@ export default function CampoCliente({
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="mb-1 text-lg font-bold text-gray-900">Confirmar registro</h3>
-            <p className="mb-1 text-sm text-gray-500">
+            <p className="mb-4 text-sm text-gray-500">
               Local: <span className="font-medium">{localSelecionado?.nome}</span>
             </p>
-            {doadorCpf.trim() && (
-              <p className="mb-4 text-sm text-gray-500">
-                CPF: <span className="font-medium">{doadorCpf}</span>
-              </p>
-            )}
 
             <ul className="mb-6 max-h-64 space-y-2 overflow-y-auto">
               {itensComQtd.map((i) => {

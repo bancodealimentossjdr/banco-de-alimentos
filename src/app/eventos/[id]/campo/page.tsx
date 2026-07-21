@@ -29,6 +29,9 @@ export default async function CampoPage({
   const userId = result.user.id
   const role = result.user.role
 
+  // 🆕 flag dev — controla botão "reverter retirada" (só front; backend revalida)
+  const isDev = role === 'dev'
+
   const { id: eventoId } = await params
 
   // 2️⃣ Busca evento + locais + alimentos (com produto)
@@ -94,6 +97,7 @@ export default async function CampoPage({
       eventoNome={evento.nome}
       locais={locais}
       alimentos={alimentos}
+      isDev={isDev}
     />
   )
 }

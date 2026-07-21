@@ -1,3 +1,4 @@
+// src/app/api/eventos/[id]/arrecadacao-extra/[registroId]/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
@@ -58,9 +59,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Quantidade inválida.' }, { status: 400 })
     }
     itensValidados.push({
-      showDia: it.showDia as string,
-      alimentoId: it.alimentoId as string,
-      quantidade: it.quantidade as number,
+      showDia: it.showDia.trim(),
+      alimentoId: it.alimentoId,
+      quantidade: it.quantidade,
     })
   }
 
@@ -78,39 +79,52 @@ export async function PUT(
         },
       })
 
-      // recria itens: apaga e regenera numeração por show
+      // apaga itens antigos e regenera com faixas ATÔMICAS por show
       await tx.arrecadacaoItem.deleteMany({ where: { arrecadacaoId: registroId } })
 
+      const qtdPorShow = new Map<string, number>()
       for (const it of itensValidados) {
-        const ultimo = await tx.arrecadacaoItem.findFirst({
-          where: { showDia: it.showDia, arrecadacao: { eventoId } },
-          orderBy: { numeroFim: 'desc' },
-          select: { numeroFim: true },
-        })
-        const numeroInicio = (ultimo?.numeroFim ?? 0) + 1
-        const numeroFim = numeroInicio + it.quantidade - 1
+        qtdPorShow.set(it.showDia, (qtdPorShow.get(it.showDia) ?? 0) + it.quantidade)
+      }
 
+      const baseInicio = new Map<string, number>()
+      for (const [showDia, qtd] of qtdPorShow) {
+        const contador = await tx.showContador.upsert({
+          where: { eventoId_showDia: { eventoId, showDia } },
+          create: { eventoId, showDia, ultimoNumero: qtd },
+          update: { ultimoNumero: { increment: qtd } },
+          select: { ultimoNumero: true },
+        })
+        baseInicio.set(showDia, contador.ultimoNumero - qtd + 1)
+      }
+
+      const cursorPorShow = new Map(baseInicio)
+      for (const it of itensValidados) {
+        const inicio = cursorPorShow.get(it.showDia)!
+        const fim = inicio + it.quantidade - 1
+        cursorPorShow.set(it.showDia, fim + 1)
         await tx.arrecadacaoItem.create({
           data: {
             arrecadacaoId: registroId,
             showDia: it.showDia,
             alimentoId: it.alimentoId,
             quantidade: it.quantidade,
-            numeroInicio,
-            numeroFim,
+            numeroInicio: inicio,
+            numeroFim: fim,
           },
         })
       }
     })
 
     return NextResponse.json({ ok: true })
-  } catch {
+  } catch (e) {
+    console.error('Erro PUT arrecadacao-extra:', e)
     return NextResponse.json({ error: 'Erro ao editar.' }, { status: 500 })
   }
 }
 
 export async function DELETE(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string; registroId: string }> },
 ) {
   const { id: eventoId, registroId } = await params

@@ -146,7 +146,7 @@ export default function FolhaResumoClient({
         {/* CPF */}
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            CPF do responsável
+            CPF de quem retirou o ingresso
           </label>
           <input
             type="text"

@@ -608,3 +608,15 @@ model FolhaResumoIngresso {
   @@unique([eventoId, codigoFamiliar])
   @@index([eventoId])
 }
+
+// Adicione ao schema.prisma
+
+model ShowContador {
+  id           String @id @default(cuid())
+  eventoId     String
+  showDia      String
+  ultimoNumero Int    @default(0)
+
+  @@unique([eventoId, showDia])
+  @@index([eventoId])
+}

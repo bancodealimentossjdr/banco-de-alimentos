@@ -81,9 +81,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       // 🔑 FONTE DE VERDADE = BANCO. Relê role/active em TODO request.
-      // 🔧 FIX: buscar por ID (token.sub sempre existe), com fallback por email.
-      // Antes dependia só de token.email, que quase nunca era preenchido →
-      // a releitura não rodava e a role ficava fossilizada.
       const lookupId = (token.id as string | undefined) ?? token.sub
       const lookupEmail = token.email as string | undefined
 
@@ -107,13 +104,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.email = dbUser.email
         token.role = dbUser.role as UserRole
       }
-      console.log('[JWT DEBUG]', {
-  lookupId,
-  lookupEmail,
-  dbUserRole: dbUser?.role,
-  tokenRole: token.role,
-})
-return token
 
       return token
     },

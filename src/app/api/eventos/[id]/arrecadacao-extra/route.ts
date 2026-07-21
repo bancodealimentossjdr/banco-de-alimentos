@@ -1,3 +1,4 @@
+// src/app/api/eventos/[id]/arrecadacao-extra/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
@@ -109,7 +110,6 @@ export async function GET(
     })),
   }))
 
-  // 🆕 Shows REAIS = valores distintos de showDia já usados no evento
   const totaisPorShow: Record<string, number> = {}
   for (const r of registrosRaw) {
     for (const it of r.itens) {
@@ -129,7 +129,7 @@ export async function GET(
 }
 
 // ==========================================
-// POST — criar registro + itens
+// POST — criar registro + itens (numeração ATÔMICA por show)
 // ==========================================
 export async function POST(
   req: NextRequest,
@@ -185,40 +185,66 @@ export async function POST(
     return NextResponse.json({ error: 'Alimento não pertence ao evento' }, { status: 400 })
   }
 
-  const ultimoItem = await prisma.arrecadacaoItem.findFirst({
-    where: { arrecadacao: { eventoId } },
-    orderBy: { numeroFim: 'desc' },
-    select: { numeroFim: true },
-  })
-  let proximoNum = (ultimoItem?.numeroFim ?? 0) + 1
+  try {
+    const criado = await prisma.$transaction(async (tx) => {
+      // 🔑 numeração ATÔMICA por (eventoId, showDia)
+      // Agrupa quantidade por show p/ 1 incremento por show
+      const qtdPorShow = new Map<string, number>()
+      for (const it of itensValidos) {
+        qtdPorShow.set(it.showDia, (qtdPorShow.get(it.showDia) ?? 0) + it.quantidade)
+      }
 
-  const itensComFaixa = itensValidos.map((it) => {
-    const inicio = proximoNum
-    const fim = proximoNum + it.quantidade - 1
-    proximoNum = fim + 1
-    return {
-      showDia: it.showDia,
-      alimentoId: it.alimentoId,
-      quantidade: it.quantidade,
-      numeroInicio: inicio,
-      numeroFim: fim,
-    }
-  })
+      // baseInicio[showDia] = primeiro número livre daquele show
+      const baseInicio = new Map<string, number>()
+      for (const [showDia, qtd] of qtdPorShow) {
+        // upsert + increment atômico: dois pontos simultâneos NUNCA colidem
+        const contador = await tx.showContador.upsert({
+          where: { eventoId_showDia: { eventoId, showDia } },
+          create: { eventoId, showDia, ultimoNumero: qtd },
+          update: { ultimoNumero: { increment: qtd } },
+          select: { ultimoNumero: true },
+        })
+        // pós-incremento → faixa reservada é [ultimoNumero-qtd+1 .. ultimoNumero]
+        baseInicio.set(showDia, contador.ultimoNumero - qtd + 1)
+      }
 
-  const criado = await prisma.arrecadacaoExtra.create({
-    data: {
-      eventoId,
-      doadorNome: doadorNomeTrim,
-      doadorCpf: doadorCpfTrim,
-      localId: localIdValid,
-      operadorId: auth.userId,
-      itens: { create: itensComFaixa },
-    },
-    select: { id: true },
-  })
+      // distribui números dentro da faixa reservada de cada show
+      const cursorPorShow = new Map(baseInicio)
+      const itensComFaixa = itensValidos.map((it) => {
+        const inicio = cursorPorShow.get(it.showDia)!
+        const fim = inicio + it.quantidade - 1
+        cursorPorShow.set(it.showDia, fim + 1)
+        return {
+          showDia: it.showDia,
+          alimentoId: it.alimentoId,
+          quantidade: it.quantidade,
+          numeroInicio: inicio,
+          numeroFim: fim,
+        }
+      })
 
-  return NextResponse.json(
-    { ok: true, id: criado.id, itens: itensComFaixa.length },
-    { status: 201 }
-  )
+      return tx.arrecadacaoExtra.create({
+        data: {
+          eventoId,
+          doadorNome: doadorNomeTrim,
+          doadorCpf: doadorCpfTrim,
+          localId: localIdValid,
+          operadorId: auth.userId,
+          itens: { create: itensComFaixa },
+        },
+        select: {
+          id: true,
+          itens: { select: { showDia: true, numeroInicio: true, numeroFim: true } },
+        },
+      })
+    })
+
+    return NextResponse.json(
+      { ok: true, id: criado.id, itens: criado.itens },
+      { status: 201 }
+    )
+  } catch (e) {
+    console.error('Erro POST arrecadacao-extra:', e)
+    return NextResponse.json({ error: 'Erro ao registrar' }, { status: 500 })
+  }
 }
