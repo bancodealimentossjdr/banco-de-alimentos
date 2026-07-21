@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
 import { podeRegistrarNoEvento } from '@/lib/permissions'
 import CampoCliente from './CampoCliente'
+import CardBuscaCpf from "./CardIngressos";
 
 /**
  * 🆕 ONDA 17.4-c — Tela de campo (B-turbo).

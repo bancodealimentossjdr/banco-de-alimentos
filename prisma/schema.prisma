@@ -620,3 +620,37 @@ model ShowContador {
   @@unique([eventoId, showDia])
   @@index([eventoId])
 }
+
+// ============================================
+// TROCA AVULSA — CPF sem reserva (Expo del-Rei)
+// Registra nome+email de quem trocou ingresso sem reserva cadastrada
+// ============================================
+model TrocaAvulsa {
+  id        String   @id @default(cuid())
+  eventoId  String
+  cpf       String
+  nome      String
+  email     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shows TrocaAvulsaShow[]   // 🆕
+
+  @@index([eventoId])
+  @@index([cpf])
+  @@index([eventoId, createdAt])
+  @@map("trocas_avulsas")
+}
+
+// 🆕 shows trocados por cada pessoa
+model TrocaAvulsaShow {
+  id            String      @id @default(cuid())
+  trocaId       String
+  troca         TrocaAvulsa @relation(fields: [trocaId], references: [id], onDelete: Cascade)
+  showDia       String
+  createdAt     DateTime    @default(now())
+
+  @@index([trocaId])
+  @@index([showDia])
+  @@map("trocas_avulsas_shows")
+}
