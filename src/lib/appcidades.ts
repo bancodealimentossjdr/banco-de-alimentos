@@ -78,6 +78,7 @@ async function fetchRespostas(
     headers,
     body,
   });
+  console.log(res);
 
   if (!res.ok) {
     const corpo = await res.text().catch(() => "");
