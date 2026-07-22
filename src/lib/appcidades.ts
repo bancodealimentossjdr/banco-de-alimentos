@@ -46,11 +46,11 @@ async function fetchRespostas(
   cpfBusca: string,
   signal: AbortSignal
 ): Promise<any[] | null> {
-  const url = `${BASE_URL}/formularios/${formId}/respostas/filter`;
+  const url = `https://backend.appcidades.com.br/formularios/${formId}/respostas/filter`;
 
   const headers = {
-    cidade: process.env.APPCIDADES_CIDADE!,
-    Authorization: `Bearer ${process.env.APPCIDADES_TOKEN!}`,
+    cidade: 'sao_joao_del_rei_mg',
+    Authorization: `Bearer eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOi4MTczMDIwNDM0MSJ9.QdtD-wI1mnOgWi1CVwUdFsVy23EcgaZ4WF1RtUyISivsV-mBW83Qw0weQn60FnxdU_V5zEz5YFYZwJAiD35-iw`,
     "Content-Type": "application/json",
   };
 
@@ -59,7 +59,7 @@ async function fetchRespostas(
     filtroProtocoloSearch: null,
     filtroNomeSearch: null,
     filtroCpfSearch: cpfBusca,
-    filtroStatusSearch: "FINALIZADA",
+    filtroStatusSearch: null,
     revisadaSearch: -1,
     voltouRecusaSearch: -1,
     recusadaSearch: -1,
