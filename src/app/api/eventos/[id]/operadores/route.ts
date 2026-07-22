@@ -1,22 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin } from '@/lib/auth-helpers'
+import { requireAdminOrDev } from '@/lib/auth-helpers'
 
-/**
- * 🆕 17.6-g — Vincular (ou reativar) um usuário como OPERADOR do evento.
- *
- * Regras:
- * - Só admin (requireAdmin).
- * - Evento não pode estar ENCERRADO.
- * - Usuário precisa existir e ter role 'visualizador'
- *   (admin/operador já registram em qualquer evento — Decisão #18).
- * - Respeita @@unique([eventoId, userId]): se já existe, apenas reativa (ativo:true).
- */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdmin()
+  const auth = await requireAdminOrDev()
   if (auth instanceof NextResponse) return auth
 
   const { id: eventoId } = await params
@@ -64,7 +54,6 @@ export async function POST(
     )
   }
 
-  // upsert respeitando @@unique([eventoId, userId]) → reativa se já existir
   const operador = await prisma.eventoOperador.upsert({
     where: { eventoId_userId: { eventoId, userId } },
     update: { ativo: true },

@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import CardIngressos from './CardIngressos'
@@ -163,28 +164,38 @@ export default function CampoCliente({
     <div className="mx-auto max-w-2xl px-4 py-6">
       {/* Cabeçalho */}
       <header className="mb-6">
-        <button
-          type="button"
-          onClick={voltarAoEvento}
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-green-700"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+        <div className="mb-3 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={voltarAoEvento}
+            className="inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-green-700"
           >
-            <path d="m12 19-7-7 7-7" />
-            <path d="M19 12H5" />
-          </svg>
-          Voltar ao evento
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m12 19-7-7 7-7" />
+              <path d="M19 12H5" />
+            </svg>
+            Voltar ao evento
+          </button>
+
+          {/* 🆕 Link discreto — gestão fina de recebimentos */}
+          <Link
+            href={`/eventos/${eventoId}/registros`}
+            className="text-sm text-gray-400 transition-colors hover:text-green-700"
+          >
+            Ver registros
+          </Link>
+        </div>
 
         <p className="text-sm text-gray-500">Registro de campo</p>
         <h1 className="text-2xl font-bold text-gray-900">{eventoNome}</h1>

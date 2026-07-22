@@ -1,21 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin } from '@/lib/auth-helpers'
+import { requireAdminOrDev } from '@/lib/auth-helpers'
 
-/**
- * 🆕 17.6-g — Desvincular operador do evento (SOFT: ativo:false).
- *
- * Regras:
- * - Só admin.
- * - Evento não pode estar ENCERRADO.
- * - Soft delete (ativo:false) preserva histórico e casa com EventoOperador { ativo } (Decisão #8).
- *   Recebimentos já feitos NÃO são afetados (operadorId no Recebimento é independente).
- */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string; userId: string }> },
 ) {
-  const auth = await requireAdmin()
+  const auth = await requireAdminOrDev()
   if (auth instanceof NextResponse) return auth
 
   const { id: eventoId, userId } = await params

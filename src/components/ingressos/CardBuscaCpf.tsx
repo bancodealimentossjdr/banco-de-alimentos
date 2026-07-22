@@ -25,7 +25,6 @@ type Resultado = {
 // 🎤 line-up (mesmo do backend)
 const SHOWS = [
   { value: "hugo-guilherme-13", label: "13/08 • Hugo e Guilherme" },
-  { value: "ana-castela-14", label: "14/08 • Ana Castela" },
   { value: "daniel-15", label: "15/08 • Daniel" },
   { value: "mariana-fagundes-16", label: "16/08 • Mariana Fagundes" },
 ];
@@ -87,7 +86,7 @@ export default function CardBuscaCpf({
     setAvulsoShows((p) => (p.length === 1 ? p : p.filter((_, i) => i !== idx)));
   }
 
-  async function buscar() {
+   async function buscar() {
     const digitos = cpf.replace(/\D/g, "");
     if (digitos.length !== 11) {
       toast.error("Digite os 11 dígitos do CPF.");
@@ -99,7 +98,11 @@ export default function CardBuscaCpf({
     setAvulsoEmail("");
     setAvulsoShows([""]); // 🆕 reset
     try {
-      const res = await fetch(`/api/ingressos/buscar?cpf=${digitos}`);
+      const res = await fetch("/api/ingressos/buscar", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ cpf: digitos }),
+});
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error ?? "Erro na busca.");
@@ -115,6 +118,7 @@ export default function CardBuscaCpf({
       setLoading(false);
     }
   }
+
 
   async function exportarPlanilha() {
     setExportando(true);

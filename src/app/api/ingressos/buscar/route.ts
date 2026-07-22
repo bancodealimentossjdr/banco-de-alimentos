@@ -1,72 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { buscarReservasPorCpf } from "@/lib/appcidades";
+import { normalizeCpf } from "@/lib/cpf";
 
-function soDigitos(v: string) {
-  return (v || "").replace(/\D/g, "");
+const rolesPermitidos = ["dev", "admin", "operador"];
+
+async function handle(cpfRaw: string) {
+  const cpf = normalizeCpf(cpfRaw);
+  if (cpf.length !== 11) {
+    return NextResponse.json({ error: "CPF inválido" }, { status: 400 });
+  }
+
+  const reservas = await buscarReservasPorCpf(cpf);
+
+  return NextResponse.json({
+    cpf,
+    encontrado: reservas.length > 0,
+    nome: reservas[0]?.nome ?? null,
+    reservas: reservas.map((r) => ({
+      id: r.protocolo ?? `${r.formId}-${cpf}`,
+      protocolo: r.protocolo ?? "—",
+      showLabel:
+        r.showDia === "2026-08-13"
+          ? "13/08 • Hugo e Guilherme"
+          : r.showDia === "2026-08-15"
+          ? "15/08 • Daniel"
+          : r.showDia === "2026-08-16"
+          ? "16/08 • Mariana Fagundes"
+          : r.showDia,
+      showData: `${r.showDia}T00:00:00.000Z`,
+      retirado: false,
+      retiradoEm: null,
+      retiradoPorNome: null,
+    })),
+  });
 }
 
+// POST — body { cpf }
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  }
+  if (!rolesPermitidos.includes(session.user.role as string)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  }
+  const body = await req.json().catch(() => ({}));
+  return handle(body?.cpf ?? "");
+}
+
+// GET — ?cpf=... (fallback que estava dando 405)
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
-
-  const cpfRaw = req.nextUrl.searchParams.get("cpf") ?? "";
-  const cpf = soDigitos(cpfRaw);
-
-  if (cpf.length !== 11) {
-    return NextResponse.json(
-      { encontrado: false, cpf, reservas: [] },
-      { status: 200 }
-    );
+  if (!rolesPermitidos.includes(session.user.role as string)) {
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
-
-  const reservas = await prisma.reservaIngresso.findMany({
-    where: { cpf },
-    orderBy: { createdAt: "asc" },
-    include: {
-      lote: {
-        select: { showLabel: true, showData: true },
-      },
-      retiradoPor: {
-        select: { name: true },
-      },
-    },
-  });
-
-  if (reservas.length === 0) {
-    return NextResponse.json(
-      { encontrado: false, cpf, reservas: [] },
-      { status: 200 }
-    );
-  }
-
-  const nome = reservas[0].nome;
-  let totalDisponiveis = 0;
-  let totalRetirados = 0;
-
-  const reservasFmt = reservas.map((r) => {
-    if (r.retirado) totalRetirados++;
-    else totalDisponiveis++;
-
-    return {
-      id: r.id,
-      protocolo: r.protocolo,
-      showLabel: r.lote.showLabel,
-      showData: r.lote.showData.toISOString(),
-      retirado: r.retirado,
-      retiradoEm: r.retiradoEm ? r.retiradoEm.toISOString() : null,
-      retiradoPorNome: r.retiradoPor?.name ?? null,
-    };
-  });
-
-  return NextResponse.json({
-    encontrado: true,
-    cpf,
-    nome,
-    reservas: reservasFmt,
-    totalDisponiveis,
-    totalRetirados,
-  });
+  const cpf = req.nextUrl.searchParams.get("cpf") ?? "";
+  return handle(cpf);
 }

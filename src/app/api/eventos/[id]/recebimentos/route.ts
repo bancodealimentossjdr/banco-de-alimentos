@@ -158,3 +158,106 @@ export async function POST(
     { status: 201 },
   )
 }
+
+/**
+ * 🆕 GET — lista paginada/filtrável de recebimentos do evento (gestão fina).
+ * Filtros: localId, alimentoId, cpf (busca por dígitos). Paginação: page/perPage.
+ * Mesmo gate do POST (evento ATIVO + role/vínculo).
+ *
+ * ✅ Relações confirmadas pelo schema (model Recebimento):
+ *   - Local    → relação `local` (model LocalColeta) → nome
+ *   - Alimento → relação `alimento` (model EventoAlimento) → product.name
+ *   - Operador → relação `operador` (via operadorId) → name
+ */
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  const userId = result.user.id
+  const role = result.user.role
+
+  const { id: eventoId } = await params
+
+  const evento = await prisma.evento.findUnique({
+    where: { id: eventoId },
+    select: { id: true, status: true },
+  })
+  if (!evento) {
+    return NextResponse.json({ error: 'Evento não encontrado' }, { status: 404 })
+  }
+  if (evento.status !== 'ATIVO') {
+    return NextResponse.json(
+      { error: 'Só é possível gerir recebimentos em eventos ATIVOS' },
+      { status: 409 },
+    )
+  }
+
+  let temVinculoAtivo = false
+  if (role === 'visualizador') {
+    const vinculo = await prisma.eventoOperador.findUnique({
+      where: { eventoId_userId: { eventoId, userId } },
+      select: { ativo: true },
+    })
+    temVinculoAtivo = vinculo?.ativo === true
+  }
+  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
+    return NextResponse.json(
+      { error: 'Você não tem permissão para gerir recebimentos neste evento' },
+      { status: 403 },
+    )
+  }
+
+  // Query params
+  const url = new URL(req.url)
+  const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
+  const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get('perPage')) || 50))
+  const localId = url.searchParams.get('localId') || undefined
+  const alimentoId = url.searchParams.get('alimentoId') || undefined
+  const cpfRaw = url.searchParams.get('cpf')?.replace(/\D/g, '') || undefined
+
+  const where = {
+    eventoId,
+    ...(localId ? { localId } : {}),
+    ...(alimentoId ? { alimentoId } : {}),
+    ...(cpfRaw ? { doadorCpf: { contains: cpfRaw } } : {}),
+  }
+
+  const [total, registros] = await prisma.$transaction([
+    prisma.recebimento.count({ where }),
+    prisma.recebimento.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * perPage,
+      take: perPage,
+      select: {
+        id: true,
+        quantidade: true,
+        unidade: true,
+        doadorCpf: true,
+        createdAt: true,
+        localId: true,
+        alimentoId: true,
+        local: { select: { nome: true } },
+        alimento: { select: { product: { select: { name: true } } } },
+        operador: { select: { name: true } },
+      },
+    }),
+  ])
+
+  const dados = registros.map((r) => ({
+    id: r.id,
+    quantidade: r.quantidade,
+    unidade: r.unidade,
+    doadorCpf: r.doadorCpf,
+    createdAt: r.createdAt,
+    localId: r.localId,
+    alimentoId: r.alimentoId,
+    localNome: r.local?.nome ?? '—',
+    alimentoNome: r.alimento?.product?.name ?? '—',
+    operadorNome: r.operador?.name ?? '—',
+  }))
+
+  return NextResponse.json({ registros: dados, total, page, perPage })
+}

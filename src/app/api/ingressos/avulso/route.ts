@@ -4,10 +4,9 @@ import { prisma } from "@/lib/prisma";
 
 const EVENTO_ID = "cmrbncyk30001lcocxk7py4rb";
 
-// 🎤 Line-up FIXO (mesmo da arrecadação-extra)
+// 🎤 Line-up de TROCA — Ana Castela NÃO troca (só "Conheça seu Ídolo")
 const SHOWS_VALIDOS = new Set([
   "hugo-guilherme-13",
-  "ana-castela-14",
   "daniel-15",
   "mariana-fagundes-16",
 ]);
@@ -17,7 +16,7 @@ function soDigitos(v: string) {
 }
 function podeVer(role?: string) {
   const r = (role ?? "").toLowerCase();
-  return r === "dev" || r === "admin"; // 🆕 admin também
+  return r === "dev" || r === "admin";
 }
 
 // POST — registra troca avulsa (qualquer operador autenticado)
@@ -38,7 +37,7 @@ export async function POST(req: NextRequest) {
   const nome = (body.nome ?? "").trim();
   const email = (body.email ?? "").trim().toLowerCase();
 
-  // 🆕 shows: dedup + valida contra o line-up
+  // shows: dedup + valida contra o line-up (Ana Castela é descartada aqui)
   const shows = Array.from(new Set(body.shows ?? [])).filter((s) =>
     SHOWS_VALIDOS.has(s)
   );
@@ -97,7 +96,7 @@ export async function GET(req: NextRequest) {
       nome: true,
       email: true,
       createdAt: true,
-      shows: { select: { showDia: true } }, // 🆕
+      shows: { select: { showDia: true } },
     },
   });
 
@@ -112,7 +111,7 @@ export async function GET(req: NextRequest) {
       nome: r.nome,
       email: r.email,
       createdAt: r.createdAt.toISOString(),
-      shows: r.shows.map((s) => s.showDia), // 🆕
+      shows: r.shows.map((s) => s.showDia),
     })),
     proxCursor,
   });
