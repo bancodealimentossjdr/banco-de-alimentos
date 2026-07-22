@@ -7,7 +7,7 @@ type Reserva = {
   id: string;
   protocolo: string;
   showLabel: string;
-  showData: string;
+  showData: string | null;
   retirado: boolean;
   retiradoEm: string | null;
   retiradoPorNome: string | null;
@@ -22,7 +22,6 @@ type Resultado = {
   totalRetirados?: number;
 };
 
-// 🎤 line-up (mesmo do backend)
 const SHOWS = [
   { value: "hugo-guilherme-13", label: "13/08 • Hugo e Guilherme" },
   { value: "daniel-15", label: "15/08 • Daniel" },
@@ -47,12 +46,24 @@ function fmtDataHora(iso: string | null) {
   });
 }
 
-function fmtShowData(iso: string) {
+function fmtShowData(iso: string | null) {
+  if (!iso) return "";
   return new Date(iso).toLocaleDateString("pt-BR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
   });
+}
+
+// ✅ dedup defensivo por protocolo (blindagem contra duplicata da API)
+function dedupReservas(reservas: Reserva[]): Reserva[] {
+  const mapa = new Map<string, Reserva>();
+  for (const r of reservas) {
+    const chave = r.protocolo && r.protocolo !== "—" ? r.protocolo : r.id;
+    const atual = mapa.get(chave);
+    if (!atual || (r.retirado && !atual.retirado)) mapa.set(chave, r);
+  }
+  return Array.from(mapa.values());
 }
 
 export default function CardBuscaCpf({
@@ -68,14 +79,12 @@ export default function CardBuscaCpf({
   const [revertendoId, setRevertendoId] = useState<string | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
 
-  // 🆕 Troca avulsa (CPF sem reserva)
   const [avulsoNome, setAvulsoNome] = useState("");
   const [avulsoEmail, setAvulsoEmail] = useState("");
   const [avulsoShows, setAvulsoShows] = useState<string[]>([""]);
   const [salvandoAvulso, setSalvandoAvulso] = useState(false);
   const [avulsoSalvo, setAvulsoSalvo] = useState(false);
 
-  // 🆕 helpers dos dropdowns de show
   function atualizarShow(idx: number, valor: string) {
     setAvulsoShows((p) => p.map((s, i) => (i === idx ? valor : s)));
   }
@@ -98,7 +107,11 @@ export default function CardBuscaCpf({
     setAvulsoEmail("");
     setAvulsoShows([""]);
     try {
-      const res = await fetch(`/api/ingressos/buscar?cpf=${digitos}`);
+      const res = await fetch("/api/ingressos/buscar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cpf: digitos }),
+      });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error ?? "Erro na busca.");
@@ -197,7 +210,6 @@ export default function CardBuscaCpf({
     }
   }
 
-  // 🆕 Salvar troca avulsa
   async function salvarAvulso() {
     const digitos = cpf.replace(/\D/g, "");
     if (avulsoNome.trim().length < 2) {
@@ -239,6 +251,15 @@ export default function CardBuscaCpf({
     }
   }
 
+  // ✅ lista única + contadores derivados dela
+  const reservasUnicas = resultado?.encontrado
+    ? dedupReservas(resultado.reservas)
+    : [];
+  const totalRetirados =
+    resultado?.totalRetirados ?? reservasUnicas.filter((r) => r.retirado).length;
+  const totalDisponiveis =
+    resultado?.totalDisponiveis ?? reservasUnicas.length - totalRetirados;
+
   return (
     <div className="space-y-4">
       {/* Campo CPF + Exportar */}
@@ -278,30 +299,23 @@ export default function CardBuscaCpf({
             <p className="text-xs text-gray-500">CPF {fmtCpf(resultado.cpf)}</p>
           </div>
 
-          {(resultado.totalDisponiveis != null ||
-            resultado.totalRetirados != null) && (
-            <div className="mb-3 flex gap-2">
-              <div className="flex-1 rounded-lg bg-green-50 px-3 py-2 text-center">
-                <p className="text-2xl font-bold text-green-700">
-                  {resultado.totalDisponiveis ?? 0}
-                </p>
-                <p className="text-xs uppercase text-green-600">Disponíveis</p>
-              </div>
-              <div className="flex-1 rounded-lg bg-red-50 px-3 py-2 text-center">
-                <p className="text-2xl font-bold text-red-700">
-                  {resultado.totalRetirados ?? 0}
-                </p>
-                <p className="text-xs uppercase text-red-600">Retirados</p>
-              </div>
+          <div className="mb-3 flex gap-2">
+            <div className="flex-1 rounded-lg bg-green-50 px-3 py-2 text-center">
+              <p className="text-2xl font-bold text-green-700">{totalDisponiveis}</p>
+              <p className="text-xs uppercase text-green-600">Disponíveis</p>
             </div>
-          )}
+            <div className="flex-1 rounded-lg bg-red-50 px-3 py-2 text-center">
+              <p className="text-2xl font-bold text-red-700">{totalRetirados}</p>
+              <p className="text-xs uppercase text-red-600">Retirados</p>
+            </div>
+          </div>
 
           <p className="mb-2 text-sm font-medium text-gray-700">
-            Shows reservados ({resultado.reservas.length})
+            Shows reservados ({reservasUnicas.length})
           </p>
 
           <ul className="space-y-2">
-            {resultado.reservas.map((r) => (
+            {reservasUnicas.map((r) => (
               <li
                 key={r.id}
                 className={`flex items-center justify-between rounded-lg border p-3 ${
@@ -342,7 +356,7 @@ export default function CardBuscaCpf({
                   ) : (
                     <button
                       onClick={() => marcarRetirada(r)}
-                      disabled={loading || (resultado.totalRetirados ?? 0) >= 3}
+                      disabled={loading || totalRetirados >= 3}
                       className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
                     >
                       Marcar retirada
@@ -355,7 +369,7 @@ export default function CardBuscaCpf({
         </div>
       )}
 
-      {/* 🆕 Sem reserva → formulário de troca avulsa */}
+      {/* Sem reserva → formulário de troca avulsa */}
       {resultado && !resultado.encontrado && (
         <div className="rounded-xl border border-dashed border-amber-400 bg-amber-50 p-4">
           <p className="mb-1 text-sm font-semibold text-amber-800">
@@ -386,7 +400,6 @@ export default function CardBuscaCpf({
                 className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500"
               />
 
-              {/* 🆕 dropdowns de shows */}
               <div className="rounded-lg border border-amber-300 bg-white/60 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-semibold text-amber-800">
