@@ -45,6 +45,13 @@ function fmtData(iso: string) {
   })
 }
 
+function fmtCpf(cpf: string | null) {
+  if (!cpf) return '—'
+  const d = cpf.replace(/\D/g, '')
+  if (d.length !== 11) return cpf
+  return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+}
+
 export default function RegistrosList({
   eventoId,
   eventoNome,
