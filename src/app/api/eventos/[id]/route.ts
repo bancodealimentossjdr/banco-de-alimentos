@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireView, requireAdmin } from '@/lib/auth-helpers'
+import { requireView, requireAdmin, requireAdminOrDev } from '@/lib/auth-helpers'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -163,7 +163,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireAdmin()
+  const authResult = await requireAdminOrDev() 
   if (authResult instanceof NextResponse) return authResult
 
   const { id } = await params

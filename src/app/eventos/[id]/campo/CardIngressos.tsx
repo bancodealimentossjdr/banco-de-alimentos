@@ -55,21 +55,24 @@ function fmtShowData(iso: string | null) {
   });
 }
 
-// ✅ dedup defensivo por protocolo (blindagem contra duplicata da API)
+// ✅ dedup defensivo por protocolo (cinto de segurança; a fonte é o route)
 function dedupReservas(reservas: Reserva[]): Reserva[] {
   const mapa = new Map<string, Reserva>();
   for (const r of reservas) {
     const chave = r.protocolo && r.protocolo !== "—" ? r.protocolo : r.id;
     const atual = mapa.get(chave);
+    // 🔒 retirada sempre vence (blinda contra ordem)
     if (!atual || (r.retirado && !atual.retirado)) mapa.set(chave, r);
   }
   return Array.from(mapa.values());
 }
 
 export default function CardBuscaCpf({
+  eventoId,
   isDev = false,
   onReservaRetirada,
 }: {
+  eventoId?: string;
   isDev?: boolean;
   onReservaRetirada?: (reserva: Reserva) => void;
 }) {
@@ -162,20 +165,20 @@ export default function CardBuscaCpf({
       const res = await fetch("/api/ingressos/retirar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservaId: reserva.id }),
+        // 🔒 #4 — envia eventoId p/ o server validar vínculo do visualizador
+        body: JSON.stringify({ reservaId: reserva.id, eventoId }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error ?? "Erro ao marcar retirada.");
-        await buscar();
-        return;
+      } else {
+        toast.success("Retirada registrada!");
+        onReservaRetirada?.(data.reserva);
       }
-      toast.success("Retirada registrada!");
-      onReservaRetirada?.(data.reserva);
-      await buscar();
     } catch {
       toast.error("Falha de conexão.");
     } finally {
+      await buscar(); // 🔄 SEMPRE re-sincroniza com o banco (fonte da verdade)
       setLoading(false);
     }
   }
@@ -193,19 +196,18 @@ export default function CardBuscaCpf({
       const res = await fetch("/api/ingressos/reverter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservaId: reserva.id }),
+        body: JSON.stringify({ reservaId: reserva.id, eventoId }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error ?? "Erro ao reverter retirada.");
-        await buscar();
-        return;
+      } else {
+        toast.success("Retirada revertida!");
       }
-      toast.success("Retirada revertida!");
-      await buscar();
     } catch {
       toast.error("Falha de conexão.");
     } finally {
+      await buscar(); // 🔄 sempre re-sincroniza
       setRevertendoId(null);
     }
   }
@@ -235,6 +237,7 @@ export default function CardBuscaCpf({
           nome: avulsoNome.trim(),
           email: avulsoEmail.trim(),
           shows,
+          eventoId,
         }),
       });
       const data = await res.json();
@@ -251,7 +254,6 @@ export default function CardBuscaCpf({
     }
   }
 
-  // ✅ lista única + contadores derivados dela
   const reservasUnicas = resultado?.encontrado
     ? dedupReservas(resultado.reservas)
     : [];
@@ -356,10 +358,10 @@ export default function CardBuscaCpf({
                   ) : (
                     <button
                       onClick={() => marcarRetirada(r)}
-                      disabled={loading || totalRetirados >= 3}
+                      disabled={loading}
                       className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
                     >
-                      Marcar retirada
+                      {loading ? "…" : "Marcar retirada"}
                     </button>
                   )}
                 </div>

@@ -3,24 +3,47 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const TETO_POR_CPF = 3;
+
+// 🔒 #4 — quem PODE registrar retirada. Visualizador precisa de vínculo ativo.
+const ROLES_LIVRES = ["dev", "admin", "operador"];
 
 export async function POST(req: NextRequest) {
   const session = await requireAuth();
   if (session instanceof NextResponse) return session;
 
   const userId = session.user.id;
+  const role = session.user.role as string;
 
-  let body: { reservaId?: string };
+  let body: { reservaId?: string; eventoId?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
-  const { reservaId } = body;
+  const { reservaId, eventoId } = body;
   if (!reservaId) {
     return NextResponse.json({ error: "reservaId obrigatório" }, { status: 400 });
+  }
+
+  // 🔒 #4 — Gate de permissão NO SERVER (backend nunca confia no front)
+  let podeRegistrar = ROLES_LIVRES.includes(role);
+  if (!podeRegistrar && role === "visualizador" && eventoId) {
+    const vinculo = await prisma.eventoOperador.findUnique({
+      where: { eventoId_userId: { eventoId, userId } },
+      select: { ativo: true },
+    });
+    podeRegistrar = vinculo?.ativo === true;
+  }
+  if (!podeRegistrar) {
+    return NextResponse.json(
+      { error: "Você não tem permissão para registrar retiradas." },
+      { status: 403 }
+    );
   }
 
   try {
@@ -40,8 +63,7 @@ export async function POST(req: NextRequest) {
       if (alvo.retirado)
         throw { status: 409, msg: "Ingresso já retirado", retiradoEm: alvo.retiradoEm };
 
-      // 🔒 Teto 3 por CPF — conta PROTOCOLOS distintos já retirados (evita
-      // contar duplicatas do mesmo ingresso como se fossem vários).
+      // 🔒 Teto por CPF — conta PROTOCOLOS distintos já retirados
       const retiradosCpf = await tx.reservaIngresso.findMany({
         where: { cpf: alvo.cpf, retirado: true },
         select: { protocolo: true },
@@ -50,11 +72,13 @@ export async function POST(req: NextRequest) {
         retiradosCpf.map((r) => r.protocolo ?? "").filter(Boolean)
       );
       if (protocolosRetirados.size >= TETO_POR_CPF) {
-        throw { status: 422, msg: `Limite de ${TETO_POR_CPF} ingressos por CPF atingido` };
+        throw {
+          status: 422,
+          msg: `Limite de ${TETO_POR_CPF} ingressos por CPF atingido`,
+        };
       }
 
-      // 🔒 Atômico: marca TODAS as linhas do mesmo protocolo (ou só a linha,
-      // se não houver protocolo) que ainda estejam disponíveis.
+      // 🔒 Atômico: marca todas as linhas do mesmo protocolo ainda disponíveis
       const where =
         alvo.protocolo && alvo.protocolo.trim()
           ? { cpf: alvo.cpf, protocolo: alvo.protocolo, retirado: false }
@@ -87,6 +111,7 @@ export async function POST(req: NextRequest) {
         { status: err.status }
       );
     }
+    console.error("[ingressos/retirar] erro:", e);
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }

@@ -28,11 +28,12 @@ type Props = {
 
 const PER_PAGE = 50
 
-function fmtCpf(cpf: string | null) {
-  if (!cpf) return '—'
-  const d = cpf.replace(/\D/g, '')
-  if (d.length !== 11) return cpf
-  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`
+function fmtCpfInput(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 11)
+  return d
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
 }
 
 function fmtData(iso: string) {
@@ -199,13 +200,26 @@ export default function RegistrosList({
         </select>
 
         <input
-          type="text"
-          inputMode="numeric"
-          placeholder="Filtrar por CPF"
-          value={fCpf}
-          onChange={(e) => setFCpf(e.target.value)}
-          className="rounded-md border px-3 py-2 text-sm"
-        />
+  type="text"
+  inputMode="numeric"
+  placeholder="Filtrar por CPF"
+  value={fCpf}
+  onChange={(e) => setFCpf(fmtCpfInput(e.target.value))}
+  className="rounded-md border px-3 py-2 text-sm font-mono"
+/>
+
+{(fLocal || fAlimento || fCpf) && (
+  <button
+    onClick={() => {
+      setFLocal('')
+      setFAlimento('')
+      setFCpf('')
+    }}
+    className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+  >
+    ✕ Limpar filtros
+  </button>
+)}
       </div>
 
       {/* Tabela */}
@@ -321,8 +335,10 @@ export default function RegistrosList({
                           className="w-36 rounded border px-2 py-1"
                         />
                       ) : (
-                        fmtCpf(r.doadorCpf)
-                      )}
+  <span className="font-mono font-medium text-gray-800">
+    {fmtCpf(r.doadorCpf)}
+  </span>
+)}
                     </td>
 
                     <td className="px-3 py-2 text-gray-500">{r.operadorNome}</td>

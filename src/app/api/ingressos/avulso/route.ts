@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const EVENTO_ID = "cmrbncyk30001lcocxk7py4rb";
 
@@ -11,6 +14,9 @@ const SHOWS_VALIDOS = new Set([
   "mariana-fagundes-16",
 ]);
 
+// 🔒 #4 — quem PODE registrar. Visualizador precisa de vínculo ativo.
+const ROLES_LIVRES = ["dev", "admin", "operador"];
+
 function soDigitos(v: string) {
   return (v || "").replace(/\D/g, "");
 }
@@ -19,25 +25,50 @@ function podeVer(role?: string) {
   return r === "dev" || r === "admin";
 }
 
-// POST — registra troca avulsa (qualquer operador autenticado)
+// POST — registra troca avulsa (com gate de permissão no server)
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-  }
+  const session = await requireAuth();
+  if (session instanceof NextResponse) return session;
 
-  let body: { cpf?: string; nome?: string; email?: string; shows?: string[] };
+  const userId = session.user.id;
+  const role = (session.user.role as string)?.toLowerCase() ?? "";
+
+  let body: {
+    cpf?: string;
+    nome?: string;
+    email?: string;
+    shows?: string[];
+    eventoId?: string;
+  };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Corpo inválido" }, { status: 400 });
   }
 
+  // eventoId do front, com fallback pra constante (blindagem)
+  const eventoId = body.eventoId?.trim() || EVENTO_ID;
+
+  // 🔒 #4 — Gate de permissão NO SERVER
+  let podeRegistrar = ROLES_LIVRES.includes(role);
+  if (!podeRegistrar && role === "visualizador") {
+    const vinculo = await prisma.eventoOperador.findUnique({
+      where: { eventoId_userId: { eventoId, userId } },
+      select: { ativo: true },
+    });
+    podeRegistrar = vinculo?.ativo === true;
+  }
+  if (!podeRegistrar) {
+    return NextResponse.json(
+      { error: "Você não tem permissão para registrar trocas." },
+      { status: 403 }
+    );
+  }
+
   const cpf = soDigitos(body.cpf ?? "");
   const nome = (body.nome ?? "").trim();
   const email = (body.email ?? "").trim().toLowerCase();
 
-  // shows: dedup + valida contra o line-up (Ana Castela é descartada aqui)
   const shows = Array.from(new Set(body.shows ?? [])).filter((s) =>
     SHOWS_VALIDOS.has(s)
   );
@@ -60,7 +91,7 @@ export async function POST(req: NextRequest) {
 
   const registro = await prisma.trocaAvulsa.create({
     data: {
-      eventoId: EVENTO_ID,
+      eventoId,
       cpf,
       nome,
       email,
@@ -74,10 +105,9 @@ export async function POST(req: NextRequest) {
 
 // GET — lista paginada (dev/admin) — cursor infinito, 20 por página
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-  }
+  const session = await requireAuth();
+  if (session instanceof NextResponse) return session;
+
   if (!podeVer(session.user.role as string)) {
     return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
   }

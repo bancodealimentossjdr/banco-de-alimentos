@@ -189,12 +189,14 @@ export default function CampoCliente({
           </button>
 
           {/* 🆕 Link discreto — gestão fina de recebimentos */}
-          <Link
-            href={`/eventos/${eventoId}/registros`}
-            className="text-sm text-gray-400 transition-colors hover:text-green-700"
-          >
-            Ver registros
-          </Link>
+          {isDev && (
+  <Link
+    href={`/eventos/${eventoId}/registros`}
+    className="text-sm text-gray-400 transition-colors hover:text-green-700"
+  >
+    Ver registros
+  </Link>
+)}
         </div>
 
         <p className="text-sm text-gray-500">Registro de campo</p>
@@ -226,11 +228,11 @@ export default function CampoCliente({
       </section>
 
       {/* 🎫 Card de ingressos — busca CPF por dentro (Onda 18) */}
-      {localSelecionado && (
-        <section className="mb-6">
-          <CardIngressos isDev={isDev} />
-        </section>
-      )}
+{localSelecionado && (
+  <section className="mb-6">
+    <CardIngressos eventoId={eventoId} isDev={isDev} />
+  </section>
+)}
 
       {/* Passo 2 — quantidades */}
       {localSelecionado && (

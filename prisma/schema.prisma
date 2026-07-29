@@ -417,6 +417,7 @@ model Evento {
 
   @@index([status])
   @@index([criadoPorId])
+  @@index([status, dataInicio])   // ⚡ acelera where(status) + orderBy(dataInicio)
 }
 
 model LocalColeta {
@@ -507,6 +508,7 @@ model Recebimento {
   @@index([alimentoId])
   @@index([operadorId])
   @@index([eventoId, createdAt])
+  @@index([eventoId, doadorCpf])
 }
 
 
