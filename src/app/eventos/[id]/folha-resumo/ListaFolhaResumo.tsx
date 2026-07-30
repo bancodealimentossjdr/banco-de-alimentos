@@ -8,6 +8,7 @@ interface Registro {
   codigoFamiliar: string
   cpf: string
   rendaPerCapita: number
+  show: string | null // 🆕
   createdAt: string
 }
 
@@ -117,6 +118,12 @@ export default function ListaFolhaResumo({
                 <p className="truncate font-medium text-gray-900">
                   🏷️ {r.codigoFamiliar}
                 </p>
+                {/* 🆕 show */}
+                {r.show && (
+                  <p className="truncate text-xs font-medium text-emerald-700">
+                    🎤 {r.show}
+                  </p>
+                )}
                 <p className="text-xs tabular-nums text-gray-500">
                   CPF {r.cpf} ·{' '}
                   {new Date(r.createdAt).toLocaleString('pt-BR', {

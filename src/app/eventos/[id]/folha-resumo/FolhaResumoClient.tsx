@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
@@ -8,6 +8,15 @@ import type { UserRole } from '@/types/next-auth'
 import ListaFolhaResumo from './ListaFolhaResumo'
 
 const LIMITE_RENDA = 810.55
+
+type ShowStatus = {
+  value: string
+  artista: string
+  data: string
+  limite: number
+  usados: number
+  esgotado: boolean
+}
 
 type Props = {
   eventoId: string
@@ -36,15 +45,35 @@ export default function FolhaResumoClient({
   const [codigoFamiliar, setCodigoFamiliar] = useState('')
   const [cpf, setCpf] = useState('')
   const [renda, setRenda] = useState('')
+  const [showDia, setShowDia] = useState('')
   const [salvando, setSalvando] = useState(false)
 
-  // 🆕 força reload da lista após cada registro bem-sucedido
+  const [shows, setShows] = useState<ShowStatus[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
+
+  // 🆕 carrega line-up + status de vagas
+  const carregarShows = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/eventos/${eventoId}/folha-resumo`)
+      if (!res.ok) return
+      const data = await res.json()
+      setShows(data.shows ?? [])
+    } catch {
+      // silencioso — dropdown só não mostra vagas
+    }
+  }, [eventoId])
+
+  useEffect(() => {
+    carregarShows()
+  }, [carregarShows, refreshKey])
 
   const rendaNum = Number(renda.replace(',', '.'))
   const rendaValida = renda !== '' && Number.isFinite(rendaNum) && rendaNum >= 0
   const acimaLimite = rendaValida && rendaNum > LIMITE_RENDA
   const cpfDigits = cpf.replace(/\D/g, '')
+
+  const showSelecionado = shows.find((s) => s.value === showDia)
+  const showEsgotado = showSelecionado?.esgotado ?? false
 
   const podeEnviar =
     !salvando &&
@@ -52,6 +81,8 @@ export default function FolhaResumoClient({
     cpfDigits.length === 11 &&
     rendaValida &&
     !acimaLimite &&
+    showDia !== '' &&
+    !showEsgotado &&
     eventoStatus === 'ATIVO'
 
   async function handleSubmit(e: React.FormEvent) {
@@ -67,6 +98,7 @@ export default function FolhaResumoClient({
           codigoFamiliar: codigoFamiliar.trim(),
           cpf: cpfDigits,
           rendaPerCapita: rendaNum,
+          showDia, // 🆕
         }),
       })
 
@@ -81,7 +113,8 @@ export default function FolhaResumoClient({
       setCodigoFamiliar('')
       setCpf('')
       setRenda('')
-      setRefreshKey((k) => k + 1) // 🆕 recarrega a lista abaixo
+      setShowDia('')
+      setRefreshKey((k) => k + 1) // recarrega lista + vagas
       router.refresh()
     } catch {
       toast.error('Falha de conexão. Tente novamente.')
@@ -122,6 +155,35 @@ export default function FolhaResumoClient({
         os dados antes de confirmar — não há como retirar duas vezes.
       </div>
 
+      {/* 🆕 Painel de vagas dos shows com limite */}
+      {shows.some((s) => s.limite > 0) && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          {shows
+            .filter((s) => s.limite > 0)
+            .map((s) => {
+              const restantes = Math.max(0, s.limite - s.usados)
+              return (
+                <div
+                  key={s.value}
+                  className={`rounded-lg border px-3 py-2 text-sm ${
+                    s.esgotado
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  }`}
+                >
+                  <span className="font-semibold">{s.artista}</span>
+                  <span className="text-xs opacity-70"> · {s.data}</span>
+                  <span className="ml-2 font-bold">
+                    {s.esgotado
+                      ? '🚫 Esgotado'
+                      : `🎫 ${restantes} de ${s.limite} vagas`}
+                  </span>
+                </div>
+              )
+            })}
+        </div>
+      )}
+
       {eventoStatus !== 'ATIVO' && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           Este evento não está ATIVO. Não é possível registrar ingressos.
@@ -161,6 +223,31 @@ export default function FolhaResumoClient({
           )}
         </div>
 
+        {/* 🆕 Show */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            Show que a família quer trocar
+          </label>
+          <select
+            value={showDia}
+            onChange={(e) => setShowDia(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+          >
+            <option value="">Selecione o show...</option>
+            {shows.map((s) => (
+              <option key={s.value} value={s.value} disabled={s.esgotado}>
+                🎤 {s.data} • {s.artista}
+                {s.esgotado ? ' (esgotado)' : ''}
+              </option>
+            ))}
+          </select>
+          {showEsgotado && (
+            <p className="mt-1 text-xs font-medium text-red-600">
+              🚫 Este show está esgotado — selecione outro.
+            </p>
+          )}
+        </div>
+
         {/* Renda per capita */}
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -196,10 +283,10 @@ export default function FolhaResumoClient({
       </form>
 
       <ListaFolhaResumo
-  eventoId={eventoId}
-  isDev={role === 'dev'}
-  refreshKey={refreshKey}
-/>
+        eventoId={eventoId}
+        isDev={role === 'dev'}
+        refreshKey={refreshKey}
+      />
     </div>
   )
 }
