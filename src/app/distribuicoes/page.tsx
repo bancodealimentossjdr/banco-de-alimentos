@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
@@ -17,7 +17,7 @@ interface DistributionItem {
   id: string
   quantity: number
   boxes: number | null
-  origem?: Origem // 🆕 ONDA 18
+  origem?: Origem
   product: { name: string; unit: string }
 }
 
@@ -27,7 +27,7 @@ interface Distribution {
   notes: string | null
   status: 'PENDENTE' | 'ENTREGUE'
   legacy: boolean
-  origem?: Origem // legado (nível distribuição)
+  origem?: Origem
   receipt: { id: string } | null
   beneficiary: { id: string; name: string; type: string }
   employee: { id: string; name: string } | null
@@ -40,7 +40,7 @@ interface FormItem {
   productId: string
   quantity: number
   boxes?: number
-  origem: Origem // 🆕 ONDA 18 — obrigatório, por item
+  origem: Origem
 }
 
 interface DistribuicaoForm {
@@ -55,20 +55,16 @@ interface DistribuicaoForm {
 const novoItem = (): FormItem => ({ productId: '', quantity: 0, origem: 'DOACAO' })
 
 export default function DistribuicoesPage() {
-  // 🔐 Permissões
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeEditar = canEdit('distribuicoes')
   const podeExcluir = canDelete('distribuicoes')
 
-  // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 🚀 Cache global de cadastros
   const { produtos: products } = useProdutos()
   const { beneficiarios: beneficiaries } = useBeneficiarios()
   const { funcionarios: employees } = useFuncionarios()
 
-  // 📋 Lista de distribuições
   const {
     data: distributionsData,
     isLoading: loadingDistributions,
@@ -82,6 +78,14 @@ export default function DistribuicoesPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  // 🆕 FILTRO — instituição selecionada ('' = todas)
+  const [filtroBeneficiaryId, setFiltroBeneficiaryId] = useState('')
+  // 🆕 FILTRO — status ('' = todos | 'PENDENTE' | 'ENTREGUE')
+  const [filtroStatus, setFiltroStatus] = useState('')
+  // 🆕 FILTRO — intervalo de datas (yyyy-mm-dd)
+  const [filtroDataDe, setFiltroDataDe] = useState('')
+  const [filtroDataAte, setFiltroDataAte] = useState('')
+
   const [form, setForm] = useState<DistribuicaoForm>({
     beneficiaryId: '',
     employeeId: '',
@@ -94,7 +98,6 @@ export default function DistribuicoesPage() {
 
   const [calcOpen, setCalcOpen] = useState<number | null>(null)
 
-  // 💾 Rascunho local
   const {
     showSavedIndicator,
     hasDraft,
@@ -112,6 +115,23 @@ export default function DistribuicoesPage() {
     },
     disabled: editingId !== null,
   })
+
+  // 🆕 FILTRO — lista filtrada (instituição + status + data)
+  const distributionsFiltradas = useMemo(() => {
+    return distributions.filter(d => {
+      if (filtroBeneficiaryId && d.beneficiary.id !== filtroBeneficiaryId) return false
+      if (filtroStatus && d.status !== filtroStatus) return false
+
+      const dataDist = d.date.includes('T') ? d.date.split('T')[0] : d.date
+      if (filtroDataDe && dataDist < filtroDataDe) return false
+      if (filtroDataAte && dataDist > filtroDataAte) return false
+
+      return true
+    })
+  }, [distributions, filtroBeneficiaryId, filtroStatus, filtroDataDe, filtroDataAte])
+
+  // 🆕 há algum filtro ativo?
+  const temFiltroAtivo = !!(filtroBeneficiaryId || filtroStatus || filtroDataDe || filtroDataAte)
 
   const resetForm = () => {
     setForm({
@@ -206,7 +226,6 @@ export default function DistribuicoesPage() {
           clearDraft()
           resetForm()
           mutateDistributions()
-          // 🔄 Distribuição mexe no estoque, então invalida o resumo
           invalidate('/api/estoque/resumo')
         } else {
           const data = await res.json()
@@ -245,7 +264,6 @@ export default function DistribuicoesPage() {
     return [dist.employee, dist.employee2, dist.employee3].filter(Boolean) as { id: string; name: string }[]
   }
 
-  // 🆕 ONDA 18 — origens presentes na distribuição (para badges)
   const getOrigens = (dist: Distribution): Origem[] => {
     const set = new Set<Origem>()
     dist.items.forEach(i => set.add(i.origem ?? dist.origem ?? 'DOACAO'))
@@ -372,7 +390,6 @@ export default function DistribuicoesPage() {
 
             {formItems.map((item, index) => (
               <div key={index} className="mb-4 pb-4 border-b border-gray-100 last:border-0 last:pb-0 last:mb-0">
-                {/* Linha 1: Produto + Estoque (origem) dividindo espaço */}
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-2">
                   <div className="flex-1">
                     {index === 0 && <label className="block text-xs text-gray-500 mb-1">Produto</label>}
@@ -396,13 +413,12 @@ export default function DistribuicoesPage() {
                       required
                     >
                       <option value="DOACAO">🥫 Doação / Estoque geral</option>
-<option value="COLHEITA">🌾 Colheita Solidária</option>
-<option value="EVENTO">🎪 Evento de arrecadação</option>
+                      <option value="COLHEITA">🌾 Colheita Solidária</option>
+                      <option value="EVENTO">🎪 Evento de arrecadação</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Linha 2: Quantidade + Calculadora meio a meio */}
                 <div className="flex gap-2 items-stretch">
                   <div className="flex-1">
                     {index === 0 && <label className="block text-xs text-gray-500 mb-1 hidden sm:block">Quantidade</label>}
@@ -502,22 +518,100 @@ export default function DistribuicoesPage() {
         </form>
       )}
 
+      {/* 🆕 FILTRO — painel de busca */}
+      {!showForm && distributions.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-medium text-gray-700">🔍 Filtros</label>
+            {temFiltroAtivo && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFiltroBeneficiaryId('')
+                  setFiltroStatus('')
+                  setFiltroDataDe('')
+                  setFiltroDataAte('')
+                }}
+                className="text-sm text-red-600 hover:text-red-700 font-medium px-3 py-1 rounded-lg hover:bg-red-50 transition"
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Instituição</label>
+              <select
+                value={filtroBeneficiaryId}
+                onChange={e => setFiltroBeneficiaryId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+              >
+                <option value="">Todas</option>
+                {beneficiaries.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Status</label>
+              <select
+                value={filtroStatus}
+                onChange={e => setFiltroStatus(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+              >
+                <option value="">Todos</option>
+                <option value="PENDENTE">⏳ Pendente (falta finalizar)</option>
+                <option value="ENTREGUE">✅ Entregue</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">De</label>
+              <input
+                type="date"
+                value={filtroDataDe}
+                onChange={e => setFiltroDataDe(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Até</label>
+              <input
+                type="date"
+                value={filtroDataAte}
+                onChange={e => setFiltroDataAte(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+              />
+            </div>
+          </div>
+
+          {temFiltroAtivo && (
+            <p className="text-xs text-gray-500 mt-3">
+              {distributionsFiltradas.length} distribuição{distributionsFiltradas.length !== 1 ? 'ões' : ''} encontrada{distributionsFiltradas.length !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Listagem */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500"></div>
         </div>
-      ) : distributions.length === 0 ? (
+      ) : distributionsFiltradas.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">📤</p>
-          <p className="text-xl">Nenhuma distribuição registrada</p>
-          {podeEditar && (
+          <p className="text-xl">
+            {temFiltroAtivo ? 'Nenhuma distribuição encontrada com esses filtros' : 'Nenhuma distribuição registrada'}
+          </p>
+          {podeEditar && !temFiltroAtivo && (
             <p className="text-sm mt-2">Clique em &quot;+ Nova Distribuição&quot; para começar</p>
           )}
         </div>
       ) : (
         <div className="space-y-4">
-          {distributions.map(dist => {
+          {distributionsFiltradas.map(dist => {
             const totalBoxes = dist.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
             const distEmployees = getDistributionEmployees(dist)
             const canEditThis = canEditRecord('distribuicoes', dist.date)
@@ -535,23 +629,21 @@ export default function DistribuicoesPage() {
                           📦 {totalBoxes} cx
                         </span>
                       )}
-                      {/* 🆕 ONDA 18 — Badges de origem (por item) */}
                       {origens.includes('EVENTO') && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
                           🎪 Evento
                         </span>
                       )}
                       {origens.includes('COLHEITA') && (
-  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-    🌾 Colheita
-  </span>
-)}
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                          🌾 Colheita
+                        </span>
+                      )}
                       {origens.includes('DOACAO') && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-lime-100 text-lime-700">
                           🥫 Doação
                         </span>
                       )}
-                      {/* 🆕 Badge de status */}
                       {dist.legacy ? (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
                           🗄️ Legado
