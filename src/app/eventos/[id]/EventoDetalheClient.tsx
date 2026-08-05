@@ -2,16 +2,29 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import toast from 'react-hot-toast'
 import { useRouter } from 'next/navigation'
-import GraficosEvento, {
+
+import {
   type EventoMetrics,
   type Fato,
   type Range,
   derivarMetrics,
   filtrarFatos,
-} from './GraficosEvento'
+} from './graficos-utils'
+
 import ExportarEventoPdf from './ExportarEventoPdf'
+
+const GraficosEvento = dynamic(() => import('./GraficosEvento'), {
+  ssr: false,
+  loading: () => (
+    <div className="text-center py-12 text-gray-400">
+      <p className="text-4xl mb-2 animate-pulse">📊</p>
+      <p>Carregando gráficos…</p>
+    </div>
+  ),
+})
 
 // 🔁 re-export p/ compatibilidade com quem importava daqui
 export type { EventoMetrics }

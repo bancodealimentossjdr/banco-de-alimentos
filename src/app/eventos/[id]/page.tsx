@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { canEdit, podeRegistrarNoEvento } from '@/lib/permissions'
 import EventoDetalheClient from './EventoDetalheClient'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 15
 
 type OperadorComUser = {
   id: string

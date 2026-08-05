@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
@@ -80,6 +80,14 @@ export default function ColheitaSolidariaPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  // 🆕 FILTRO — produtor selecionado ('' = todos)
+  const [filtroProducerId, setFiltroProducerId] = useState('')
+  // 🆕 FILTRO — status ('' = todos | 'agendada' | 'realizada' | 'cancelada')
+  const [filtroStatus, setFiltroStatus] = useState('')
+  // 🆕 FILTRO — intervalo de datas (yyyy-mm-dd)
+  const [filtroDataDe, setFiltroDataDe] = useState('')
+  const [filtroDataAte, setFiltroDataAte] = useState('')
+
   const [form, setForm] = useState<ColheitaForm>({
     producerId: '',
     employeeId: '',
@@ -113,6 +121,35 @@ export default function ColheitaSolidariaPage() {
     },
     disabled: editingId !== null,
   })
+
+  // 🆕 FILTRO — lista filtrada (produtor + status + data)
+  const harvestsFiltradas = useMemo(() => {
+    return harvests.filter(h => {
+      if (filtroProducerId && h.producer.id !== filtroProducerId) return false
+      if (filtroStatus && h.status !== filtroStatus) return false
+
+      const dataHarvest = h.date.includes('T') ? h.date.split('T')[0] : h.date
+      if (filtroDataDe && dataHarvest < filtroDataDe) return false
+      if (filtroDataAte && dataHarvest > filtroDataAte) return false
+
+      return true
+    })
+  }, [harvests, filtroProducerId, filtroStatus, filtroDataDe, filtroDataAte])
+
+  // 🆕 há algum filtro ativo?
+  const temFiltroAtivo = !!(filtroProducerId || filtroStatus || filtroDataDe || filtroDataAte)
+
+  // 🆕 Lista de produtores para o dropdown de filtro.
+  // ⚠️ O hook useProdutores só busca quando podeEditar. Para o filtro funcionar
+  // mesmo para visualizador, derivamos a lista das próprias colheitas carregadas.
+  const produtoresFiltro = useMemo(() => {
+    if (producers.length > 0) return producers
+    const map = new Map<string, { id: string; name: string }>()
+    harvests.forEach(h => {
+      if (!map.has(h.producer.id)) map.set(h.producer.id, h.producer)
+    })
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [producers, harvests])
 
   const resetForm = () => {
     setForm({
@@ -554,21 +591,98 @@ export default function ColheitaSolidariaPage() {
         </form>
       )}
 
+      {/* 🆕 FILTRO — painel de busca */}
+      {!showForm && harvests.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-medium text-gray-700">🔍 Filtros</label>
+            {temFiltroAtivo && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFiltroProducerId('')
+                  setFiltroStatus('')
+                  setFiltroDataDe('')
+                  setFiltroDataAte('')
+                }}
+                className="text-sm text-green-600 hover:text-green-700 font-medium px-3 py-1 rounded-lg hover:bg-green-50 transition"
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Produtor</label>
+              <select
+                value={filtroProducerId}
+                onChange={e => setFiltroProducerId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              >
+                <option value="">Todos</option>
+                {produtoresFiltro.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Status</label>
+              <select
+                value={filtroStatus}
+                onChange={e => setFiltroStatus(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              >
+                <option value="">Todos</option>
+                {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">De</label>
+              <input
+                type="date"
+                value={filtroDataDe}
+                onChange={e => setFiltroDataDe(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Até</label>
+              <input
+                type="date"
+                value={filtroDataAte}
+                onChange={e => setFiltroDataAte(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              />
+            </div>
+          </div>
+
+          {temFiltroAtivo && (
+            <p className="text-xs text-gray-500 mt-3">
+              {harvestsFiltradas.length} colheita{harvestsFiltradas.length !== 1 ? 's' : ''} encontrada{harvestsFiltradas.length !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
         </div>
-      ) : harvests.length === 0 ? (
+      ) : harvestsFiltradas.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">🌿</p>
-          <p className="text-xl">Nenhuma colheita registrada</p>
-          {podeEditar && (
+          <p className="text-xl">
+            {temFiltroAtivo ? 'Nenhuma colheita encontrada com esses filtros' : 'Nenhuma colheita registrada'}
+          </p>
+          {podeEditar && !temFiltroAtivo && (
             <p className="text-sm mt-2">Clique em &quot;+ Nova Colheita&quot; para começar</p>
           )}
         </div>
       ) : (
         <div className="space-y-4">
-          {harvests.map(harvest => {
+          {harvestsFiltradas.map(harvest => {
             const statusStyle = getStatusStyle(harvest.status)
             const ind = getHarvestIndemnity(harvest)
             const harvestEmployees = getHarvestEmployees(harvest)
@@ -636,17 +750,14 @@ export default function ColheitaSolidariaPage() {
                     {harvest.items.map(item => (
                       <div key={item.id} className="px-3 py-1.5 bg-green-50 border border-green-100 rounded-lg text-sm">
                         <span className="text-green-700 font-medium">{item.product.name}</span>
-                        {/* ✅ Peso sempre visível */}
                         <span className="text-gray-500 mx-1">•</span>
                         <span className="text-gray-700">{item.quantity} {item.product.unit}</span>
-                        {/* ✅ Caixas sempre visíveis */}
                         {item.boxes ? (
                           <>
                             <span className="text-gray-500 mx-1">•</span>
                             <span className="text-blue-600 font-medium">{item.boxes}cx</span>
                           </>
                         ) : null}
-                        {/* 🔴 Valor R$ só para quem pode ver */}
                         {!masked && (
                           <>
                             <span className="text-gray-500 mx-1">•</span>
@@ -662,13 +773,11 @@ export default function ColheitaSolidariaPage() {
                       <div key={item.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm">
                         <div className="min-w-0">
                           <span className="text-green-700 font-medium">{item.product.name}</span>
-                          {/* ✅ Peso e caixas sempre visíveis */}
                           <span className="text-gray-500 ml-1">
                             ({item.quantity} {item.product.unit}
                             {item.boxes ? ` · ${item.boxes}cx` : ''})
                           </span>
                         </div>
-                        {/* 🔴 Valor R$ só para quem pode ver */}
                         {!masked && (
                           <span className="text-amber-700 font-semibold shrink-0 ml-2">
                             R$ {(item.quantity * ind.rate).toFixed(2)}
@@ -681,26 +790,22 @@ export default function ColheitaSolidariaPage() {
 
                 <div className="pt-3 border-t border-gray-100">
                   <div className="hidden sm:flex flex-wrap gap-4 items-center">
-                    {/* ✅ Peso Total sempre visível */}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">Peso Total:</span>
                       <span className="text-sm font-bold text-gray-900">{ind.totalKg.toFixed(1)} kg</span>
                     </div>
-                    {/* ✅ Caixas sempre visíveis */}
                     {ind.totalBoxes > 0 && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500">Caixas:</span>
                         <span className="text-sm font-bold text-blue-600">📦 {ind.totalBoxes}</span>
                       </div>
                     )}
-                    {/* 🔴 Valor/kg só para quem pode ver */}
                     {!masked && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500">Valor/kg:</span>
                         <span className="text-sm font-medium text-amber-600">R$ {ind.rate.toFixed(2)}</span>
                       </div>
                     )}
-                    {/* 🔴 Indenização Total só para quem pode ver */}
                     {!masked && (
                       <div className="flex items-center gap-2 ml-auto">
                         <span className="text-xs text-gray-500">Indenização Total:</span>

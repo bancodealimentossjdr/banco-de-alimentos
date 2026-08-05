@@ -17,30 +17,18 @@ import {
   Legend,
 } from 'recharts'
 
-// 🆕 17.5-a — tipos compartilhados agora vivem aqui
-export interface EventoMetrics {
-  totalKg: number
-  totalRefugoKg: number
-  totalLiquidoKg: number
-  kgPorLocal: { nome: string; kg: number }[]
-  kgPorTipo: { tipo: string; kg: number }[]
-  kgPorDia: { dia: string; kg: number }[]
-}
+// 🆕 tipos + funções puras agora vivem no util (sem recharts)
+import {
+  type EventoMetrics,
+  type Fato,
+  type Range,
+  derivarMetrics,
+  filtrarFatos,
+} from './graficos-utils'
 
-export interface Fato {
-  localNome: string
-  tipo: string
-  unidade: string
-  dia: string // YYYY-MM-DD
-  quantidade: number
-}
-
-export interface Range {
-  min: string
-  max: string
-  defaultStart: string
-  defaultEnd: string
-}
+// 🔁 re-export p/ compatibilidade com quem importava daqui
+export type { EventoMetrics, Fato, Range }
+export { derivarMetrics, filtrarFatos }
 
 const CORES = [
   '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6',
@@ -56,42 +44,6 @@ const fmtDia = (iso: string) => {
 }
 
 const round = (n: number) => Math.round(n * 100) / 100
-
-// 🆕 17.5-a — deriva métricas a partir dos fatos filtrados
-export function derivarMetrics(fatos: Fato[]): Pick<
-  EventoMetrics,
-  'totalKg' | 'kgPorLocal' | 'kgPorTipo' | 'kgPorDia'
-> {
-  const porLocal = new Map<string, number>()
-  const porTipo = new Map<string, number>()
-  const porDia = new Map<string, number>()
-  let totalKg = 0
-
-  for (const f of fatos) {
-    totalKg += f.quantidade
-    porLocal.set(f.localNome, (porLocal.get(f.localNome) ?? 0) + f.quantidade)
-    porTipo.set(f.tipo, (porTipo.get(f.tipo) ?? 0) + f.quantidade)
-    porDia.set(f.dia, (porDia.get(f.dia) ?? 0) + f.quantidade)
-  }
-
-  return {
-    totalKg: round(totalKg),
-    kgPorLocal: [...porLocal.entries()]
-      .map(([nome, kg]) => ({ nome, kg: round(kg) }))
-      .sort((a, b) => b.kg - a.kg),
-    kgPorTipo: [...porTipo.entries()]
-      .map(([tipo, kg]) => ({ tipo, kg: round(kg) }))
-      .sort((a, b) => b.kg - a.kg),
-    kgPorDia: [...porDia.entries()]
-      .map(([dia, kg]) => ({ dia, kg: round(kg) }))
-      .sort((a, b) => a.dia.localeCompare(b.dia)),
-  }
-}
-
-// 🆕 17.5-a — filtra fatos por range [inicio, fim] inclusivo
-export function filtrarFatos(fatos: Fato[], inicio: string, fim: string): Fato[] {
-  return fatos.filter((f) => f.dia >= inicio && f.dia <= fim)
-}
 
 export default function GraficosEvento({
   fatos,
@@ -128,7 +80,7 @@ export default function GraficosEvento({
 
   return (
     <div className="w-full min-w-0 space-y-6">
-      {/* 🆕 17.5-a — seletor de período */}
+      {/* seletor de período */}
       <div className="w-full min-w-0 bg-white rounded-xl shadow-sm border p-4">
         <p className="text-xs font-medium text-gray-500 mb-2">
           📅 Período (a partir do início do evento)
