@@ -68,3 +68,29 @@ html {
 .animate-fade-in {
   animation: fade-in 0.2s ease-out;
 }
+
+/* ============================================
+   🏛️ Onda 21 — Loader institucional Annonae
+   ============================================ */
+
+/* Preenche a logo de baixo para cima, segura no topo e esvazia por cima.
+   Loop contínuo sem "pulo" visual entre as iterações. */
+@keyframes annonae-fill {
+  0%   { clip-path: inset(100% 0 0 0); }
+  55%  { clip-path: inset(0 0 0 0); }
+  75%  { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 0 100% 0); }
+}
+
+.annonae-fill {
+  animation: annonae-fill 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: clip-path;
+}
+
+/* Acessibilidade: respeita preferência do sistema por menos movimento */
+@media (prefers-reduced-motion: reduce) {
+  .annonae-fill {
+    animation: none;
+    clip-path: none;
+  }
+}

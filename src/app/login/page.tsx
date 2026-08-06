@@ -5,6 +5,7 @@ import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { LogIn, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { PartnershipLogos } from '@/components/ui/Logo'
+import AnnonaeLoader from '@/components/ui/AnnonaeLoader'
 import { BRANDING } from '@/lib/branding'
 
 function LoginForm() {
@@ -60,7 +61,7 @@ function LoginForm() {
       <div className="w-full max-w-md">
         {/* Logo / Header — Parceria Annonae + Banco SJDR */}
         <div className="text-center mb-8">
-          <PartnershipLogos logoSize={64} className="mb-4" />
+          <PartnershipLogos logoSize={96} className="mb-4" />
           <p className="text-gray-600 mt-3 text-sm italic">
             {BRANDING.tagline}
           </p>
@@ -197,7 +198,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-orange-50 flex items-center justify-center">
-          <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
+          <AnnonaeLoader size={80} />
         </div>
       }
     >

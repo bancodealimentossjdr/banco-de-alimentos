@@ -1,7 +1,6 @@
 ﻿'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import {
@@ -22,6 +21,7 @@ import {
   PartyPopper,
   X,
 } from 'lucide-react'
+import { LogoFull, LogoMark } from '@/components/ui/Logo'
 import { BRANDING } from '@/lib/branding'
 
 type MenuItem = {
@@ -95,26 +95,16 @@ export default function Sidebar({
         {/* Logo */}
         <div className="flex items-center justify-between px-3 h-16 border-b border-green-700">
           {showFullLogo ? (
-            <Link href="/" className="flex items-center gap-2 min-w-0">
-              <Image
-                src={BRANDING.assets.logoMono}
-                alt={BRANDING.name}
-                width={140}
-                height={36}
-                priority
-                className="object-contain h-9 w-auto"
-              />
+            <Link href="/" className="flex items-center min-w-0" title={BRANDING.fullName}>
+              <LogoFull size={36} />
             </Link>
           ) : (
-            <Link href="/" className="flex items-center justify-center w-full">
-              <Image
-                src={BRANDING.assets.logoMono}
-                alt={BRANDING.name}
-                width={32}
-                height={32}
-                priority
-                className="object-contain h-8 w-8"
-              />
+            <Link
+              href="/"
+              className="flex items-center justify-center w-full"
+              title={BRANDING.name}
+            >
+              <LogoMark size={32} />
             </Link>
           )}
 

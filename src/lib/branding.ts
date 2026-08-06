@@ -25,10 +25,20 @@ export const BRANDING = {
     country: "Brasil",
   },
 
+  // Paleta institucional (usada em PDFs e SVGs inline)
+  colors: {
+    green: "#14532D",
+    greenLight: "#166534",
+    gold: "#C9A227",
+    goldLight: "#E3C766",
+  },
+
   // Assets (caminhos públicos)
   assets: {
     logoColor: "/logos/annonae-color.png",
     logoMono: "/logos/annonae-mono.png",
+    /** Brasão dourado com fundo transparente — usado sobre fundos escuros */
+    logoGold: "/logos/annonae-gold.svg",
     logoPartner: "/logos/banco-alimentos-sjdr.png",
     favicon: "/favicon.ico",
   },
