@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
-import CardIngressos from './CardIngressos'
 
 // ==========================================
 // Tipos
@@ -17,7 +16,7 @@ type Props = {
   eventoNome: string
   locais: Local[]
   alimentos: Alimento[]
-  isDev?: boolean // 🆕 controla botão "reverter retirada"
+  isDev?: boolean
 }
 
 // ==========================================
@@ -51,6 +50,21 @@ function fmt(value: number, decimais: number): string {
 }
 
 // ==========================================
+// CPF
+// ==========================================
+function soDigitos(v: string) {
+  return v.replace(/\D/g, '').slice(0, 11)
+}
+
+function mascaraCpf(v: string) {
+  const d = soDigitos(v)
+  if (d.length <= 3) return d
+  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`
+  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`
+}
+
+// ==========================================
 // Componente principal
 // ==========================================
 export default function CampoCliente({
@@ -58,16 +72,19 @@ export default function CampoCliente({
   eventoNome,
   locais,
   alimentos,
-  isDev = false, // 🆕
+  isDev = false,
 }: Props) {
   const router = useRouter()
 
   const [localId, setLocalId] = useState<string>('')
+  const [cpf, setCpf] = useState<string>('')
   const [quantidades, setQuantidades] = useState<Record<string, number>>({})
   const [salvando, setSalvando] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
 
   const localSelecionado = locais.find((l) => l.id === localId) ?? null
+  const cpfDigitos = soDigitos(cpf)
+  const cpfValido = cpfDigitos.length === 11
 
   const itensComQtd = useMemo(
     () =>
@@ -114,6 +131,10 @@ export default function CampoCliente({
       toast.error('Escolha um local primeiro.')
       return
     }
+    if (!cpfValido) {
+      toast.error('Informe o CPF completo (11 dígitos).')
+      return
+    }
     if (!temAlgoParaSalvar) {
       toast.error('Nenhuma quantidade maior que zero para registrar.')
       return
@@ -127,6 +148,7 @@ export default function CampoCliente({
 
     const payload = {
       localId,
+      cpf: cpfDigitos,
       itens: itensComQtd.map((i) => ({
         alimentoId: i.alimento.id,
         quantidade: i.quantidade,
@@ -149,6 +171,7 @@ export default function CampoCliente({
 
       toast.success(`${data.registrados} recebimento(s) registrado(s)! ✅`)
       setQuantidades({})
+      setCpf('')
       router.refresh()
     } catch {
       toast.error('Falha de conexão. Tente novamente.')
@@ -188,15 +211,14 @@ export default function CampoCliente({
             Voltar ao evento
           </button>
 
-          {/* 🆕 Link discreto — gestão fina de recebimentos */}
           {isDev && (
-  <Link
-    href={`/eventos/${eventoId}/registros`}
-    className="text-sm text-gray-400 transition-colors hover:text-green-700"
-  >
-    Ver registros
-  </Link>
-)}
+            <Link
+              href={`/eventos/${eventoId}/registros`}
+              className="text-sm text-gray-400 transition-colors hover:text-green-700"
+            >
+              Ver registros
+            </Link>
+          )}
         </div>
 
         <p className="text-sm text-gray-500">Registro de campo</p>
@@ -227,18 +249,40 @@ export default function CampoCliente({
         )}
       </section>
 
-      {/* 🎫 Card de ingressos — busca CPF por dentro (Onda 18) */}
-{localSelecionado && (
-  <section className="mb-6">
-    <CardIngressos eventoId={eventoId} isDev={isDev} />
-  </section>
-)}
+      {/* Passo 2 — CPF do doador */}
+      {localSelecionado && (
+        <section className="mb-6">
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            2. CPF do doador
+          </label>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={mascaraCpf(cpf)}
+            onChange={(e) => setCpf(e.target.value)}
+            placeholder="000.000.000-00"
+            className={`w-full rounded-lg border px-4 py-3 text-lg tabular-nums tracking-wide focus:ring-green-500 ${
+              cpf.length === 0
+                ? 'border-gray-300'
+                : cpfValido
+                  ? 'border-green-400 bg-green-50'
+                  : 'border-amber-300 bg-amber-50'
+            }`}
+          />
+          {cpf.length > 0 && !cpfValido && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              Faltam {11 - cpfDigitos.length} dígito(s).
+            </p>
+          )}
+        </section>
+      )}
 
-      {/* Passo 2 — quantidades */}
+      {/* Passo 3 — quantidades */}
       {localSelecionado && (
         <section className="mb-24">
           <h2 className="mb-3 text-sm font-medium text-gray-700">
-            2. Quantidades recebidas
+            3. Quantidades recebidas
           </h2>
 
           {alimentos.length === 0 && (
@@ -335,14 +379,16 @@ export default function CampoCliente({
         <div className="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white p-4 shadow-lg">
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-4">
             <span className="text-sm text-gray-600">
-              {temAlgoParaSalvar
-                ? `${itensComQtd.length} alimento(s) com quantidade`
-                : 'Ajuste as quantidades'}
+              {!cpfValido
+                ? 'Informe o CPF'
+                : temAlgoParaSalvar
+                  ? `${itensComQtd.length} alimento(s) com quantidade`
+                  : 'Ajuste as quantidades'}
             </span>
             <button
               type="button"
               onClick={pedirConfirmacao}
-              disabled={!temAlgoParaSalvar || salvando}
+              disabled={!temAlgoParaSalvar || !cpfValido || salvando}
               className="rounded-lg bg-green-600 px-6 py-3 font-semibold text-white shadow disabled:cursor-not-allowed disabled:opacity-40"
             >
               {salvando ? 'Salvando…' : 'Salvar'}
@@ -356,8 +402,11 @@ export default function CampoCliente({
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="mb-1 text-lg font-bold text-gray-900">Confirmar registro</h3>
-            <p className="mb-4 text-sm text-gray-500">
+            <p className="text-sm text-gray-500">
               Local: <span className="font-medium">{localSelecionado?.nome}</span>
+            </p>
+            <p className="mb-4 text-sm text-gray-500">
+              CPF: <span className="font-medium tabular-nums">{mascaraCpf(cpf)}</span>
             </p>
 
             <ul className="mb-6 max-h-64 space-y-2 overflow-y-auto">

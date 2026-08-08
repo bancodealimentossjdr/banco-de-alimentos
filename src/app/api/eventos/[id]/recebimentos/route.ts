@@ -6,7 +6,8 @@ import { podeRegistrarNoEvento } from '@/lib/permissions'
 /**
  * 🆕 ONDA 17.4 — Registro EM LOTE de recebimentos num local do evento.
  * 🔄 17.6-h (Decisão #18) — Gate de registro por evento.
- * 🆕 CPF — doação normal agora grava CPF do doador (opcional) em cada recebimento.
+ * 🆕 CPF — doação normal grava CPF do doador em cada recebimento.
+ *    Aceita `cpf` ou `doadorCpf` no body (compat).
  */
 export async function POST(
   req: Request,
@@ -28,9 +29,10 @@ export async function POST(
     return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
   }
 
-  const { localId, itens, doadorCpf } = (body ?? {}) as {
+  const { localId, itens, doadorCpf, cpf } = (body ?? {}) as {
     localId?: string
     doadorCpf?: string | null
+    cpf?: string | null
     itens?: { alimentoId?: string; quantidade?: number }[]
   }
 
@@ -42,11 +44,18 @@ export async function POST(
     return NextResponse.json({ error: 'Envie ao menos um item' }, { status: 400 })
   }
 
-  // 🆕 CPF — opcional, guarda só dígitos (aceita só se tiver 11 dígitos)
-  const cpfLimpo =
-    typeof doadorCpf === 'string' && doadorCpf.replace(/\D/g, '').length === 11
-      ? doadorCpf.replace(/\D/g, '')
-      : null
+  // 🆕 CPF — aceita `cpf` (novo front) ou `doadorCpf` (legado). Só dígitos, 11 exatos.
+  const cpfBruto = typeof cpf === 'string' ? cpf : typeof doadorCpf === 'string' ? doadorCpf : ''
+  const cpfDigitos = cpfBruto.replace(/\D/g, '')
+
+  if (cpfDigitos.length !== 11) {
+    return NextResponse.json(
+      { error: 'CPF do doador é obrigatório (11 dígitos)' },
+      { status: 400 },
+    )
+  }
+
+  const cpfLimpo = cpfDigitos
 
   // Normaliza + filtra: só quantidades válidas e > 0
   const itensLimpos = itens
@@ -163,11 +172,6 @@ export async function POST(
  * 🆕 GET — lista paginada/filtrável de recebimentos do evento (gestão fina).
  * Filtros: localId, alimentoId, cpf (busca por dígitos). Paginação: page/perPage.
  * Mesmo gate do POST (evento ATIVO + role/vínculo).
- *
- * ✅ Relações confirmadas pelo schema (model Recebimento):
- *   - Local    → relação `local` (model LocalColeta) → nome
- *   - Alimento → relação `alimento` (model EventoAlimento) → product.name
- *   - Operador → relação `operador` (via operadorId) → name
  */
 export async function GET(
   req: Request,

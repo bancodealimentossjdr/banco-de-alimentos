@@ -26,14 +26,12 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  dailyApprovalsCreated DailyApproval[] @relation("DailyApprovalCreatedBy")
-  dailyApprovalsUpdated DailyApproval[] @relation("DailyApprovalUpdatedBy")
-  ingressosRetirados ReservaIngresso[] @relation("IngressoRetiradoPor")
+  dailyApprovalsCreated DailyApproval[]   @relation("DailyApprovalCreatedBy")
+  dailyApprovalsUpdated DailyApproval[]   @relation("DailyApprovalUpdatedBy")
+  ingressosRetirados    ReservaIngresso[] @relation("IngressoRetiradoPor")
 
-  // 🆕 ONDA 16.2 — Marcos de Estoque
   stockMarkersCreated StockMarker[] @relation("StockMarkerCreatedBy")
 
-  // 🆕 ONDA 16.6a — Comprovantes de entrega finalizados (auditoria)
   receiptsFinalized DeliveryReceipt[] @relation("ReceiptFinalizedBy")
 
   eventosCriados          Evento[]         @relation("EventosCriados")
@@ -41,7 +39,6 @@ model User {
   operacoesEmEventos      EventoOperador[] @relation("OperacoesEmEventos")
   recebimentosRegistrados Recebimento[]    @relation("RecebimentosRegistrados")
 
-  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
   arrecadacoesExtra ArrecadacaoExtra[] @relation("ArrecadacaoExtraOperador")
 }
 
@@ -271,7 +268,6 @@ model Producer {
 
 // ==========================================
 // COLHEITA SOLIDÁRIA
-// status: "agendada" | "realizada" | "cancelada"
 // ==========================================
 model SolidarityHarvest {
   id             String   @id @default(cuid())
@@ -308,7 +304,7 @@ model HarvestItem {
 }
 
 // ==========================================
-// APROVEITAMENTO DIÁRIO (triagem das doações)
+// APROVEITAMENTO DIÁRIO
 // ==========================================
 model DailyApproval {
   id          String   @id @default(cuid())
@@ -330,7 +326,7 @@ model DailyApproval {
 }
 
 // ==========================================
-// 🆕 ONDA 16.2 — MARCOS DE ESTOQUE
+// ONDA 16.2 — MARCOS DE ESTOQUE
 // ==========================================
 enum StockMarkerType {
   ZERO
@@ -354,7 +350,7 @@ model StockMarker {
 }
 
 // ==========================================
-// 🆕 ONDA 16.6a — STATUS DE DISTRIBUIÇÃO
+// ONDA 16.6a — STATUS DE DISTRIBUIÇÃO
 // ==========================================
 enum DistributionStatus {
   PENDENTE
@@ -362,7 +358,7 @@ enum DistributionStatus {
 }
 
 // ==========================================
-// 🆕 ONDA 16.6a — COMPROVANTE DE ENTREGA
+// ONDA 16.6a — COMPROVANTE DE ENTREGA
 // ==========================================
 model DeliveryReceipt {
   id             String       @id @default(cuid())
@@ -390,20 +386,19 @@ enum EventoStatus {
 }
 
 model Evento {
-  id             String           @id @default(cuid())
-  nome           String
-  descricao      String?
-  dataInicio     DateTime
-  dataFim        DateTime?
-  status         EventoStatus     @default(RASCUNHO)
-  integraEstoque Boolean          @default(true)
-  locais         LocalColeta[]
-  operadores     EventoOperador[]
-  recebimentos   Recebimento[]
-  alimentos      EventoAlimento[]
+  id                   String                @id @default(cuid())
+  nome                 String
+  descricao            String?
+  dataInicio           DateTime
+  dataFim              DateTime?
+  status               EventoStatus          @default(RASCUNHO)
+  integraEstoque       Boolean               @default(true)
+  locais               LocalColeta[]
+  operadores           EventoOperador[]
+  recebimentos         Recebimento[]
+  alimentos            EventoAlimento[]
   folhasResumoIngresso FolhaResumoIngresso[]
 
-  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
   arrecadacoesExtra ArrecadacaoExtra[]
 
   criadoPorId    String
@@ -417,7 +412,7 @@ model Evento {
 
   @@index([status])
   @@index([criadoPorId])
-  @@index([status, dataInicio])   // ⚡ acelera where(status) + orderBy(dataInicio)
+  @@index([status, dataInicio])
 }
 
 model LocalColeta {
@@ -430,7 +425,6 @@ model LocalColeta {
 
   recebimentos Recebimento[]
 
-  // 🆕 ONDA 17 — Arrecadação Extra (cupons)
   arrecadacoesExtra ArrecadacaoExtra[]
 
   createdAt DateTime @default(now())
@@ -495,7 +489,6 @@ model Recebimento {
   quantidade Float
   unidade    String
 
-  // 🆕 CPF do doador (doação normal) — opcional
   doadorCpf String?
 
   operadorId String
@@ -510,7 +503,6 @@ model Recebimento {
   @@index([eventoId, createdAt])
   @@index([eventoId, doadorCpf])
 }
-
 
 model ArrecadacaoExtra {
   id       String @id @default(cuid())
@@ -554,41 +546,40 @@ model ArrecadacaoItem {
 }
 
 // ============================================
-// INGRESSOS SOLIDÁRIOS (API App minhaSJ troca ingresso → alimento)
+// INGRESSOS SOLIDÁRIOS
 // ============================================
-
 model LoteIngresso {
-  id             String   @id @default(cuid())
-  nomeArquivo String @unique
+  id             String            @id @default(cuid())
+  nomeArquivo    String            @unique
   operador       String?
-  showData       DateTime @db.Date
+  showData       DateTime          @db.Date
   showLabel      String
   importadoPorId String
-  importadoEm    DateTime @default(now())
-  totalLinhas    Int      @default(0)
+  importadoEm    DateTime          @default(now())
+  totalLinhas    Int               @default(0)
   ingressos      ReservaIngresso[]
+
   @@index([showData])
   @@map("lotes_ingresso")
 }
 
 model ReservaIngresso {
-  id            String       @id @default(cuid())
-  loteId        String
-  lote          LoteIngresso @relation(fields: [loteId], references: [id], onDelete: Cascade)
-  protocolo     String
-  cpf           String
-  nome          String
-  dataNasc      String?
-  cidade        String?
-  bairro        String?
-  retirado      Boolean      @default(false)
-  retiradoEm    DateTime?
+  id         String       @id @default(cuid())
+  loteId     String
+  lote       LoteIngresso @relation(fields: [loteId], references: [id], onDelete: Cascade)
+  protocolo  String
+  cpf        String
+  nome       String
+  dataNasc   String?
+  cidade     String?
+  bairro     String?
+  retirado   Boolean      @default(false)
+  retiradoEm DateTime?
 
-  // 🆕 Rastreabilidade da retirada
   retiradoPorId String?
-  retiradoPor   User?        @relation("IngressoRetiradoPor", fields: [retiradoPorId], references: [id])
+  retiradoPor   User?   @relation("IngressoRetiradoPor", fields: [retiradoPorId], references: [id])
 
-  createdAt     DateTime     @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([loteId, protocolo])
   @@index([cpf])
@@ -603,23 +594,22 @@ model FolhaResumoIngresso {
   cpf            String
   rendaPerCapita Decimal  @db.Decimal(10, 2)
   registradoPor  String
-  showDia        String?  // 🆕 show escolhido (line-up fixo)
+  showDia        String?
   createdAt      DateTime @default(now())
 
-  evento  Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  evento Evento @relation(fields: [eventoId], references: [id], onDelete: Cascade)
 
   @@unique([eventoId, codigoFamiliar])
   @@index([eventoId])
-  @@index([eventoId, showDia])   // 🆕 acelera contagem por show
+  @@index([eventoId, showDia])
 }
 
-// 🆕 Limite de trocas por show (editável só por dev)
 model LimiteShow {
   id       String @id @default(cuid())
   eventoId String
   showDia  String
-  limite   Int    @default(0)   // 0 = sem limite
-  usados   Int    @default(0)   // contador atômico
+  limite   Int    @default(0)
+  usados   Int    @default(0)
 
   @@unique([eventoId, showDia])
   @@index([eventoId])
@@ -636,19 +626,18 @@ model ShowContador {
 }
 
 // ============================================
-// TROCA AVULSA — CPF sem reserva (Expo del-Rei)
-// Registra nome+email de quem trocou ingresso sem reserva cadastrada
+// TROCAS AVULSAS — CPF + SHOWS (sem trava)
 // ============================================
 model TrocaAvulsa {
   id        String   @id @default(cuid())
   eventoId  String
   cpf       String
-  nome      String
-  email     String
+  nome      String?
+  email     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  shows TrocaAvulsaShow[]   // 🆕
+  shows TrocaAvulsaShow[]
 
   @@index([eventoId])
   @@index([cpf])
@@ -656,13 +645,12 @@ model TrocaAvulsa {
   @@map("trocas_avulsas")
 }
 
-// 🆕 shows trocados por cada pessoa
 model TrocaAvulsaShow {
-  id            String      @id @default(cuid())
-  trocaId       String
-  troca         TrocaAvulsa @relation(fields: [trocaId], references: [id], onDelete: Cascade)
-  showDia       String
-  createdAt     DateTime    @default(now())
+  id        String      @id @default(cuid())
+  trocaId   String
+  troca     TrocaAvulsa @relation(fields: [trocaId], references: [id], onDelete: Cascade)
+  showDia   String
+  createdAt DateTime    @default(now())
 
   @@index([trocaId])
   @@index([showDia])

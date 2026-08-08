@@ -1,3 +1,4 @@
+// src/app/indicadores/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -15,6 +16,7 @@ import TopFuncionariosCard from '@/components/indicadores/TopFuncionariosCard';
 import TabelaParticipacaoFuncionarios from '@/components/indicadores/TabelaParticipacaoFuncionarios';
 import type { FuncionarioParticipacao } from '@/lib/data/indicadores-data';
 import { useDebounce } from '@/hooks/useDebounce';
+import AnnonaeLoader from '@/components/ui/AnnonaeLoader';
 
 interface Macro {
   totalDoado: number;
@@ -26,14 +28,8 @@ interface Macro {
 }
 
 export default function IndicadoresPage() {
-  // ============================================
-  // Estado unificado de filtros
-  // ============================================
   const [filters, setFilters] = useState<FiltrosState | null>(null);
 
-  // ============================================
-  // Estados dos indicadores antigos
-  // ============================================
   const [macro, setMacro] = useState<Macro | null>(null);
   const [tendencia, setTendencia] = useState<SerieData | null>(null);
   const [topProdutos, setTopProdutos] = useState<any[]>([]);
@@ -42,18 +38,11 @@ export default function IndicadoresPage() {
   const [topProdutores, setTopProdutores] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // ============================================
-  // Estados do Top 5 funcionários (novo)
-  // ============================================
   const [participacao, setParticipacao] = useState<FuncionarioParticipacao[]>([]);
   const [loadingPart, setLoadingPart] = useState(false);
 
-  // Debounce só dos filtros que afetam o Top 5
   const filtersDebounced = useDebounce(filters, 350);
 
-  // ============================================
-  // Carrega KPIs/gráficos antigos (usa from/to)
-  // ============================================
   useEffect(() => {
     if (!filters) return;
     setLoading(true);
@@ -62,27 +51,15 @@ export default function IndicadoresPage() {
 
     Promise.all([
       fetch(`/api/indicadores/macro?${qs}`).then((r) => r.json()),
-      fetch(`/api/indicadores/aproveitamento?${qs}&serie=true`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/indicadores/rankings?${qs}&type=produtos`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/indicadores/rankings?${qs}&type=doadores`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/indicadores/rankings?${qs}&type=beneficiarios`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/indicadores/rankings?${qs}&type=produtores`).then((r) =>
-        r.json()
-      ),
+      fetch(`/api/indicadores/aproveitamento?${qs}&serie=true`).then((r) => r.json()),
+      fetch(`/api/indicadores/rankings?${qs}&type=produtos`).then((r) => r.json()),
+      fetch(`/api/indicadores/rankings?${qs}&type=doadores`).then((r) => r.json()),
+      fetch(`/api/indicadores/rankings?${qs}&type=beneficiarios`).then((r) => r.json()),
+      fetch(`/api/indicadores/rankings?${qs}&type=produtores`).then((r) => r.json()),
     ])
       .then(([m, serie, p, d, b, pr]) => {
         setMacro(m);
-        setTendencia(
-          serie && Array.isArray(serie.points) ? (serie as SerieData) : null
-        );
+        setTendencia(serie && Array.isArray(serie.points) ? (serie as SerieData) : null);
         setTopProdutos(Array.isArray(p) ? p : []);
         setTopDoadores(Array.isArray(d) ? d : []);
         setTopBeneficiarios(Array.isArray(b) ? b : []);
@@ -90,12 +67,8 @@ export default function IndicadoresPage() {
       })
       .catch((e) => console.error('Erro ao carregar indicadores:', e))
       .finally(() => setLoading(false));
-    // 🔑 Só reage a from/to — multiselects NÃO afetam os antigos (Opção A)
   }, [filters?.from, filters?.to]);
 
-  // ============================================
-  // Carrega Top 5 funcionários (usa TODOS os filtros)
-  // ============================================
   useEffect(() => {
     if (!filtersDebounced) return;
 
@@ -124,14 +97,9 @@ export default function IndicadoresPage() {
   const fmt = (n: number) =>
     n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
-  // Deriva o filtro de exportação ({ from, to }) a partir do estado unificado
-  const exportFilters = filters
-    ? { from: filters.from, to: filters.to }
-    : null;
+  const exportFilters = filters ? { from: filters.from, to: filters.to } : null;
 
-  // Mostra tabela detalhada só quando há funcionários filtrados
-  const mostrarTabelaDetalhada =
-    (filters?.funcionarioIds.length ?? 0) > 0;
+  const mostrarTabelaDetalhada = (filters?.funcionarioIds.length ?? 0) > 0;
 
   return (
     <div className="container mx-auto p-6">
@@ -147,94 +115,59 @@ export default function IndicadoresPage() {
 
       <FiltrosIndicadores onChange={setFilters} />
 
-      {loading && (
-        <div className="text-center py-8 text-gray-500">Carregando...</div>
+      {/* 🟡 Loader da marca — primeira carga (sem dados ainda) */}
+      {loading && !macro && (
+        <div className="py-16">
+          <AnnonaeLoader label="Calculando indicadores..." />
+        </div>
       )}
 
-      {macro && !loading && (
-        <>
-          {/* ===== KPIs ===== */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-            <KpiCard
-              label="Total Doado"
-              value={fmt(macro.totalDoado)}
-              unit="kg"
-              emoji="🏪"
-            />
-            <KpiCard
-              label="Distribuído"
-              value={fmt(macro.totalDistribuido)}
-              unit="kg"
-              emoji="📤"
-            />
-            <KpiCard
-              label="Colheita"
-              value={fmt(macro.totalColheita)}
-              unit="kg"
-              emoji="🌾"
-            />
-            <KpiCard
-              label="Em Estoque"
-              value={fmt(macro.emEstoque)}
-              unit="kg"
-              emoji="📦"
-            />
-            <KpiCard
-              label="Aproveitamento"
-              value={fmt(macro.percentualAproveitamento)}
-              unit="%"
-              emoji="✅"
-            />
-            <KpiCard
-              label="Beneficiários"
-              value={macro.beneficiariosAtendidos}
-              emoji="👥"
-            />
-          </div>
+      {macro && (
+        <div className="relative">
+          {/* 🟡 Overlay — recargas por troca de filtro (mantém contexto visível) */}
+          {loading && (
+            <div className="absolute inset-0 z-10 flex items-start justify-center bg-white/70 backdrop-blur-[1px] pt-24">
+              <AnnonaeLoader label="Atualizando..." />
+            </div>
+          )}
 
-          {/* ===== Gráfico tendência ===== */}
-          <div className="mb-6">
-            <GraficoTendencia data={tendencia} />
-          </div>
+          <div className={loading ? 'pointer-events-none select-none' : ''}>
+            {/* ===== KPIs ===== */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+              <KpiCard label="Total Doado" value={fmt(macro.totalDoado)} unit="kg" emoji="🏪" />
+              <KpiCard label="Distribuído" value={fmt(macro.totalDistribuido)} unit="kg" emoji="📤" />
+              <KpiCard label="Colheita" value={fmt(macro.totalColheita)} unit="kg" emoji="🌾" />
+              <KpiCard label="Em Estoque" value={fmt(macro.emEstoque)} unit="kg" emoji="📦" />
+              <KpiCard label="Aproveitamento" value={fmt(macro.percentualAproveitamento)} unit="%" emoji="✅" />
+              <KpiCard label="Beneficiários" value={macro.beneficiariosAtendidos} emoji="👥" />
+            </div>
 
-          {/* ===== Rankings ===== */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <GraficoPizza data={topProdutos} titulo="Top 5 Produtos Doados" />
-            <GraficoBarras
-              data={topDoadores}
-              titulo="Top 10 Doadores"
-              cor="#16a34a"
-            />
-          </div>
+            {/* ===== Gráfico tendência ===== */}
+            <div className="mb-6">
+              <GraficoTendencia data={tendencia} />
+            </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <GraficoBarras
-              data={topBeneficiarios}
-              titulo="Top 10 Beneficiários"
-              cor="#2563eb"
-            />
-            <GraficoBarras
-              data={topProdutores}
-              titulo="Top 10 Produtores Rurais"
-              cor="#ea580c"
-            />
-          </div>
+            {/* ===== Rankings ===== */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <GraficoPizza data={topProdutos} titulo="Top 5 Produtos Doados" />
+              <GraficoBarras data={topDoadores} titulo="Top 10 Doadores" cor="#16a34a" />
+            </div>
 
-          {/* ===== 🆕 Top 5 Funcionários ===== */}
-          <div className="border-t border-gray-200 pt-6 mt-2">
-            <TopFuncionariosCard
-              dados={participacao}
-              loading={loadingPart}
-            />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <GraficoBarras data={topBeneficiarios} titulo="Top 10 Beneficiários" cor="#2563eb" />
+              <GraficoBarras data={topProdutores} titulo="Top 10 Produtores Rurais" cor="#ea580c" />
+            </div>
 
-            {mostrarTabelaDetalhada && (
-              <TabelaParticipacaoFuncionarios
-                dados={participacao}
-                loading={loadingPart}
-              />
-            )}
+            {/* ===== Top 5 Funcionários ===== */}
+            <div className="border-t border-gray-200 pt-6 mt-2">
+              <TopFuncionariosCard dados={participacao} loading={loadingPart} />
+
+              {mostrarTabelaDetalhada && (
+                <TabelaParticipacaoFuncionarios dados={participacao} loading={loadingPart} />
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

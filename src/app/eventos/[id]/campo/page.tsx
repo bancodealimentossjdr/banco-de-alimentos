@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
 import { podeRegistrarNoEvento } from '@/lib/permissions'
 import CampoCliente from './CampoCliente'
-import CardBuscaCpf from './CardIngressos'
 
 export default async function CampoPage({
   params,
@@ -74,17 +73,12 @@ export default async function CampoPage({
   }))
 
   return (
-    <>
-      <CampoCliente
-        eventoId={evento.id}
-        eventoNome={evento.nome}
-        locais={locais}
-        alimentos={alimentos}
-        isDev={isDev}
-      />
-
-      {/* 🎫 Busca de ingressos por CPF — passa eventoId p/ gate de role no server */}
-      <CardBuscaCpf eventoId={evento.id} isDev={isDev} />
-    </>
+    <CampoCliente
+      eventoId={evento.id}
+      eventoNome={evento.nome}
+      locais={locais}
+      alimentos={alimentos}
+      isDev={isDev}
+    />
   )
 }
