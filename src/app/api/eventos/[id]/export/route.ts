@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { canEdit } from '@/lib/permissions'
+import { BRANDING } from '@/lib/branding'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -9,11 +12,139 @@ import autoTable from 'jspdf-autotable'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function maskEmail(email: string | null): string {
-  if (!email) return '—'
-  const [user, domain] = email.split('@')
-  if (!domain) return '***'
-  return `${user.slice(0, 2)}${'*'.repeat(Math.max(user.length - 2, 1))}@${domain}`
+// ─────────────── paleta institucional (hex → rgb) ───────────────
+const VERDE: [number, number, number] = [20, 83, 45] // #14532D
+const VERDE_CLARO: [number, number, number] = [22, 101, 52] // #166534
+const OURO: [number, number, number] = [201, 162, 39] // #C9A227
+const OURO_SUAVE: [number, number, number] = [250, 243, 219]
+const CINZA: [number, number, number] = [110, 110, 110]
+const CINZA_CLARO: [number, number, number] = [215, 215, 215]
+
+const MARGEM = 40
+
+const round = (n: number) => Math.round(n * 100) / 100
+const fmtKg = (n: number) =>
+  `${round(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
+const fmtNum = (n: number) =>
+  round(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })
+const fmtBR = (iso: string) => {
+  const [a, m, d] = iso.split('-')
+  return `${d}/${m}/${a}`
+}
+
+/**
+ * 🖼️ Logo institucional em base64.
+ * Lida do filesystem — em serverless o arquivo precisa estar no bundle.
+ * Falha é silenciosa: o PDF sai sem logo, nunca quebra.
+ */
+function carregarLogo(): string | null {
+  try {
+    const caminho = join(process.cwd(), 'public', 'logos', 'annonae-color.png')
+    return `data:image/png;base64,${readFileSync(caminho).toString('base64')}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 📈 ONDA 21.4 — gráfico de linha temporal desenhado com PRIMITIVAS do jsPDF.
+ * Decisão (opção A do roadmap): sem canvas, sem chartjs-node-canvas.
+ * Vetorial, nítido em qualquer zoom, zero dependência nova.
+ */
+function desenharTimeline(
+  doc: jsPDF,
+  serie: { dia: string; kg: number }[],
+  x: number,
+  y: number,
+  largura: number,
+  altura: number,
+) {
+  const padL = 52 // espaço p/ labels do eixo Y
+  const padB = 26 // espaço p/ labels do eixo X
+  const padT = 10
+  const plotX = x + padL
+  const plotY = y + padT
+  const plotW = largura - padL - 8
+  const plotH = altura - padT - padB
+  const baseY = plotY + plotH
+
+  const maxKg = Math.max(...serie.map((s) => s.kg), 1)
+  // escala "bonita": arredonda o topo para cima
+  const magnitude = Math.pow(10, Math.floor(Math.log10(maxKg)))
+  const topo = Math.ceil(maxKg / magnitude) * magnitude
+
+  // ── grid horizontal + labels Y ──
+  const LINHAS = 4
+  doc.setFontSize(7)
+  doc.setTextColor(...CINZA)
+  doc.setLineWidth(0.4)
+  for (let i = 0; i <= LINHAS; i++) {
+    const gy = baseY - (plotH * i) / LINHAS
+    doc.setDrawColor(...CINZA_CLARO)
+    doc.line(plotX, gy, plotX + plotW, gy)
+    const valor = (topo * i) / LINHAS
+    doc.text(fmtNum(valor), plotX - 6, gy + 2.5, { align: 'right' })
+  }
+
+  // ── eixos ──
+  doc.setDrawColor(...CINZA)
+  doc.setLineWidth(0.8)
+  doc.line(plotX, plotY, plotX, baseY) // Y
+  doc.line(plotX, baseY, plotX + plotW, baseY) // X
+
+  // ── posição de cada ponto ──
+  const n = serie.length
+  const px = (i: number) => (n === 1 ? plotX + plotW / 2 : plotX + (plotW * i) / (n - 1))
+  const py = (kg: number) => baseY - (plotH * kg) / topo
+
+  // ── área sob a curva (verde translúcido simulado por tom claro) ──
+  if (n > 1) {
+    doc.setFillColor(232, 244, 236)
+    const poly: [number, number][] = [
+      [plotX, baseY],
+      ...serie.map((s, i) => [px(i), py(s.kg)] as [number, number]),
+      [plotX + plotW, baseY],
+    ]
+    // jsPDF não tem polygon: aproxima com trapézios verticais
+    for (let i = 1; i < poly.length - 1; i++) {
+      const [x1, y1] = poly[i]
+      const [x2, y2] = poly[i + 1] ?? poly[i]
+      if (i + 1 >= poly.length - 1) break
+      doc.triangle(x1, y1, x2, y2, x1, baseY, 'F')
+      doc.triangle(x2, y2, x2, baseY, x1, baseY, 'F')
+    }
+  }
+
+  // ── polilinha ──
+  doc.setDrawColor(...VERDE_CLARO)
+  doc.setLineWidth(1.6)
+  for (let i = 0; i < n - 1; i++) {
+    doc.line(px(i), py(serie[i].kg), px(i + 1), py(serie[i + 1].kg))
+  }
+
+  // ── pontos ──
+  doc.setFillColor(...VERDE)
+  for (let i = 0; i < n; i++) {
+    doc.circle(px(i), py(serie[i].kg), n > 40 ? 1 : 2.2, 'F')
+  }
+
+  // ── labels do eixo X (no máximo 8 ticks, sempre com primeiro e último) ──
+  const passo = Math.max(1, Math.ceil(n / 8))
+  doc.setFontSize(7)
+  doc.setTextColor(...CINZA)
+  for (let i = 0; i < n; i += passo) {
+    const [, m, d] = serie[i].dia.split('-')
+    doc.text(`${d}/${m}`, px(i), baseY + 12, { align: 'center' })
+  }
+  if ((n - 1) % passo !== 0 && n > 1) {
+    const [, m, d] = serie[n - 1].dia.split('-')
+    doc.text(`${d}/${m}`, px(n - 1), baseY + 12, { align: 'center' })
+  }
+
+  // ── legenda do eixo ──
+  doc.setFontSize(7)
+  doc.setTextColor(...CINZA)
+  doc.text('kg recebidos por dia', plotX, y + altura + 2)
 }
 
 export async function GET(
@@ -27,12 +158,16 @@ export async function GET(
   if (!role) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const isAdmin = canEdit(role, 'eventos')
+  const nomeUsuario = session?.user?.name ?? session?.user?.email ?? '—'
 
   // 🔐 Backend NÃO confia no frontend: só admin pode mask=false.
+  // ⚠️ ONDA 21.4 — a tabela de operadores foi REMOVIDA do relatório, então
+  // hoje o parâmetro não expõe mais nenhum dado sensível. Mantido apenas
+  // para compatibilidade da querystring e do selo no rodapé.
   const querMask = req.nextUrl.searchParams.get('mask')
   const semCensura = isAdmin && querMask === 'false'
 
-  // 🆕 17.5-a — filtro de período (YYYY-MM-DD). Ausentes = tudo.
+  // filtro de período (YYYY-MM-DD). Ausentes = tudo.
   const inicioParam = req.nextUrl.searchParams.get('inicio')
   const fimParam = req.nextUrl.searchParams.get('fim')
   const dtInicio = inicioParam ? new Date(`${inicioParam}T00:00:00.000Z`) : null
@@ -43,22 +178,18 @@ export async function GET(
     include: {
       locais: {
         orderBy: { createdAt: 'asc' },
-        include: { _count: { select: { recebimentos: true } } },
+        select: { id: true, nome: true },
       },
-      // 🔄 17.4 — alimento agora traz o nome via product (catálogo)
       alimentos: {
         orderBy: { ordem: 'asc' },
         select: {
           id: true,
           refugoKg: true,
-          product: { select: { id: true, name: true, unit: true } },
+          product: { select: { name: true, unit: true } },
         },
       },
       criadoPor: { select: { name: true } },
-      operadores: {
-        include: { user: { select: { name: true, email: true, role: true } } },
-      },
-      // 🆕 17.5-a — recebimentos filtrados por período (createdAt)
+      // 🆕 ONDA 21.4 — createdAt necessário para a timeline
       recebimentos: {
         where:
           dtInicio || dtFim
@@ -69,7 +200,12 @@ export async function GET(
                 },
               }
             : undefined,
-        select: { quantidade: true, localId: true, alimentoId: true },
+        select: {
+          quantidade: true,
+          localId: true,
+          alimentoId: true,
+          createdAt: true,
+        },
       },
     },
   })
@@ -78,78 +214,116 @@ export async function GET(
 
   // ─── Mapas de apoio ───
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
-  // 🔄 17.4 — nome do alimento vem do product
-  const alimentoNome = new Map(evento.alimentos.map((a) => [a.id, a.product.name]))
 
-  // ─── Agregações ───
+  // ─── Agregações (loop único) ───
   const porLocal = new Map<string, number>()
-  const recebidoPorAlimento = new Map<string, number>()
+  const porAlimentoId = new Map<string, number>()
+  const porDia = new Map<string, number>()
   let totalKg = 0
 
   for (const r of evento.recebimentos) {
     totalKg += r.quantidade
 
-    // por local
     const ln = localNome.get(r.localId) ?? '—'
     porLocal.set(ln, (porLocal.get(ln) ?? 0) + r.quantidade)
 
-    // 🆕 por alimento (chave = id, evita colisão de nomes iguais)
-    const an = alimentoNome.get(r.alimentoId) ?? '—'
-    recebidoPorAlimento.set(an, (recebidoPorAlimento.get(an) ?? 0) + r.quantidade)
+    porAlimentoId.set(
+      r.alimentoId,
+      (porAlimentoId.get(r.alimentoId) ?? 0) + r.quantidade,
+    )
+
+    const dia = r.createdAt.toISOString().slice(0, 10)
+    porDia.set(dia, (porDia.get(dia) ?? 0) + r.quantidade)
   }
 
-  // 🆕 17.3 — refugo agora vem do EventoAlimento (não mais do recebimento)
-  // ⚠️ 17.5-a — refugo NÃO tem data: continua sendo do evento inteiro
+  // ⚠️ refugo NÃO tem data: é sempre do evento inteiro
   const refugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
 
-  const round = (n: number) => Math.round(n * 100) / 100
-  const fmtKg = (n: number) =>
-    `${round(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`
+  // 🥇 locais em ordem DECRESCENTE — lista completa
+  const locaisRank = [...porLocal.entries()]
+    .map(([nome, kg]) => ({ nome, kg: round(kg) }))
+    .sort((a, b) => b.kg - a.kg)
+
+  // 🥇 alimentos em ordem DECRESCENTE — lista completa
+  const alimentosRank = evento.alimentos
+    .map((a) => ({
+      nome: a.product.name,
+      unit: a.product.unit,
+      recebido: round(porAlimentoId.get(a.id) ?? 0),
+      refugo: round(a.refugoKg ?? 0),
+    }))
+    .sort((a, b) => b.recebido - a.recebido)
+
+  const serieDias = [...porDia.entries()]
+    .map(([dia, kg]) => ({ dia, kg: round(kg) }))
+    .sort((a, b) => a.dia.localeCompare(b.dia))
 
   const temFiltro = Boolean(inicioParam || fimParam)
+  const periodoTxt = temFiltro
+    ? `${inicioParam ? fmtBR(inicioParam) : 'início'} a ${fimParam ? fmtBR(fimParam) : 'hoje'}`
+    : 'Todo o período do evento'
 
-  // ─── Monta o PDF (jsPDF) ───
+  // ══════════════════════ MONTAGEM DO PDF ══════════════════════
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-  const verde: [number, number, number] = [34, 140, 82]
-  const pageHeight = doc.internal.pageSize.getHeight()
-  let y = 48
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const contentW = pageW - MARGEM * 2
 
-  // Cabeçalho
+  // ─────── 1. CABEÇALHO INSTITUCIONAL ───────
+  doc.setFillColor(...VERDE)
+  doc.rect(0, 0, pageW, 96, 'F')
+
+  const logo = carregarLogo()
+  let textoX = MARGEM
+  if (logo) {
+    try {
+      doc.addImage(logo, 'PNG', MARGEM, 20, 56, 56)
+      textoX = MARGEM + 70
+    } catch {
+      /* logo inválida: segue sem ela */
+    }
+  }
+
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(18)
-  doc.setTextColor(...verde)
-  doc.text('Relatório do Evento de Arrecadação', 40, y)
-  y += 26
-
-  doc.setFontSize(14)
-  doc.setTextColor(20, 20, 20)
-  doc.text(evento.nome, 40, y)
-  y += 22
+  doc.setFontSize(20)
+  doc.setTextColor(255, 255, 255)
+  doc.text(BRANDING.name, textoX, 44)
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(90, 90, 90)
-  doc.text(`Status: ${evento.status}`, 40, y)
-  y += 14
-  if (evento.criadoPor) {
-    doc.text(`Criado por: ${evento.criadoPor.name}`, 40, y)
-    y += 14
-  }
+  doc.setFontSize(8.5)
+  doc.setTextColor(...[226, 232, 226] as [number, number, number])
+  doc.text('Relatório de Evento de Arrecadação', textoX, 58)
 
-  // 🆕 17.5-a — período do relatório
-  if (temFiltro) {
-    const fmtBR = (iso: string) => {
-      const [a, m, d] = iso.split('-')
-      return `${d}/${m}/${a}`
-    }
-    const de = inicioParam ? fmtBR(inicioParam) : 'início'
-    const ate = fimParam ? fmtBR(fimParam) : 'hoje'
-    doc.text(`Período: ${de} a ${ate}`, 40, y)
-    y += 14
-  }
-  y += 8
+  doc.setFontSize(7.5)
+  doc.text(BRANDING.tagline, textoX, 70)
 
-  // ─── Resumo ───
+  // faixa dourada divisória
+  doc.setFillColor(...OURO)
+  doc.rect(0, 96, pageW, 3, 'F')
+
+  let y = 124
+
+  // nome do evento
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(15)
+  doc.setTextColor(25, 25, 25)
+  const nomeLinhas = doc.splitTextToSize(evento.nome, contentW)
+  doc.text(nomeLinhas, MARGEM, y)
+  y += nomeLinhas.length * 18 + 2
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...CINZA)
+  doc.text(`Período do relatório: ${periodoTxt}`, MARGEM, y)
+  y += 13
+  doc.text(
+    `Status: ${evento.status}${evento.criadoPor ? `  ·  Criado por: ${evento.criadoPor.name}` : ''}`,
+    MARGEM,
+    y,
+  )
+  y += 22
+
+  // ─────── 2. INDICADORES (mantidos como estavam) ───────
   autoTable(doc, {
     startY: y,
     head: [['Indicador', 'Valor']],
@@ -162,85 +336,176 @@ export async function GET(
       ['Alimentos', String(evento.alimentos.length)],
     ],
     theme: 'striped',
-    headStyles: { fillColor: verde },
-    styles: { fontSize: 10 },
-    margin: { left: 40, right: 40 },
+    headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
+    styles: { fontSize: 10, cellPadding: 5 },
+    columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
+    margin: { left: MARGEM, right: MARGEM },
   })
   // @ts-expect-error lastAutoTable é injetado pelo plugin
-  y = doc.lastAutoTable.finalY + 24
+  y = doc.lastAutoTable.finalY + 26
 
-  // ─── Quantidade por local ───
-  const locaisBody = [...porLocal.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([nome, kg]) => [nome, fmtKg(kg)])
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Local de coleta', 'Recebido']],
-    body: locaisBody.length > 0 ? locaisBody : [['— sem recebimentos —', '']],
-    theme: 'grid',
-    headStyles: { fillColor: verde },
-    styles: { fontSize: 10 },
-    margin: { left: 40, right: 40 },
-  })
-  // @ts-expect-error lastAutoTable é injetado pelo plugin
-  y = doc.lastAutoTable.finalY + 24
-
-  // ─── Recebido e refugo POR ALIMENTO ───
-  const alimentosBody = evento.alimentos.map((a) => {
-    const recebido = recebidoPorAlimento.get(a.product.name) ?? 0
-    return [a.product.name, fmtKg(recebido), fmtKg(a.refugoKg ?? 0)]
-  })
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Alimento', 'Recebido', 'Refugo']],
-    body: alimentosBody.length > 0 ? alimentosBody : [['— sem alimentos —', '', '']],
-    theme: 'striped',
-    headStyles: { fillColor: verde },
-    styles: { fontSize: 10 },
-    margin: { left: 40, right: 40 },
-  })
-  // @ts-expect-error lastAutoTable é injetado pelo plugin
-  y = doc.lastAutoTable.finalY + 24
-
-  // ─── 🎭 Operadores: só no PDF do admin; mascarado salvo "sem censura" ───
-  if (isAdmin && evento.operadores) {
-    const opBody = evento.operadores.map((op) => [
-      op.user.name ?? '—',
-      semCensura ? (op.user.email ?? '—') : maskEmail(op.user.email),
-      op.user.role,
-    ])
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Operador', 'E-mail', 'Perfil']],
-      body: opBody.length > 0 ? opBody : [['— nenhum —', '', '']],
-      theme: 'striped',
-      headStyles: { fillColor: verde },
-      styles: { fontSize: 9 },
-      margin: { left: 40, right: 40 },
-    })
-  }
-
-  // ─── Rodapé ───
-  const tag = semCensura ? 'DADOS SEM CENSURA (admin)' : 'Dados sensíveis mascarados'
+  // ─────── 3. LOCAIS DE COLETA — completo, TOP 5 destacado ───────
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.setTextColor(...VERDE)
+  doc.text('Locais de coleta', MARGEM, y)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
-  doc.setTextColor(150, 150, 150)
-  doc.text(
-    `${tag} — gerado em ${new Date().toLocaleString('pt-BR')} — by Annonae`,
-    40,
-    pageHeight - 24,
-  )
+  doc.setTextColor(...CINZA)
+  doc.text('(ordem decrescente — 5 maiores em destaque)', MARGEM + 92, y)
+  y += 12
+
+  autoTable(doc, {
+    startY: y,
+    head: [['#', 'Local', 'Recebido', '% do total']],
+    body:
+      locaisRank.length > 0
+        ? locaisRank.map((l, i) => [
+            `${i + 1}º`,
+            l.nome,
+            fmtKg(l.kg),
+            totalKg > 0 ? `${((l.kg / totalKg) * 100).toFixed(1)}%` : '—',
+          ])
+        : [['—', 'sem recebimentos no período', '', '']],
+    theme: 'grid',
+    headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
+    styles: { fontSize: 9.5, cellPadding: 4 },
+    columnStyles: {
+      0: { cellWidth: 30, halign: 'center' },
+      2: { halign: 'right', cellWidth: 90 },
+      3: { halign: 'right', cellWidth: 66 },
+    },
+    margin: { left: MARGEM, right: MARGEM },
+    // 🏅 TOP 5 em destaque (fundo dourado + negrito)
+    didParseCell: (data) => {
+      if (data.section !== 'body') return
+      if (locaisRank.length === 0) return
+      if (data.row.index < 5) {
+        data.cell.styles.fillColor = OURO_SUAVE
+        data.cell.styles.fontStyle = 'bold'
+        if (data.row.index < 3) data.cell.styles.textColor = VERDE
+      }
+    },
+  })
+  // @ts-expect-error lastAutoTable é injetado pelo plugin
+  y = doc.lastAutoTable.finalY + 26
+
+  // ─────── 4. GRÁFICO — linha temporal ───────
+  const alturaGrafico = 190
+  if (y + alturaGrafico + 40 > pageH - 50) {
+    doc.addPage()
+    y = 56
+  }
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.setTextColor(...VERDE)
+  doc.text('Evolução das doações', MARGEM, y)
+  y += 14
+
+  if (serieDias.length > 0) {
+    doc.setDrawColor(...CINZA_CLARO)
+    doc.setLineWidth(0.6)
+    doc.roundedRect(MARGEM, y, contentW, alturaGrafico, 4, 4, 'S')
+    desenharTimeline(doc, serieDias, MARGEM, y, contentW, alturaGrafico - 8)
+    y += alturaGrafico + 26
+  } else {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(...CINZA)
+    doc.text('Sem dados no período selecionado.', MARGEM, y + 12)
+    y += 34
+  }
+
+  // ─────── 5. ALIMENTOS — completo, TOP 3 destacado ───────
+  if (y + 90 > pageH - 50) {
+    doc.addPage()
+    y = 56
+  }
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.setTextColor(...VERDE)
+  doc.text('Alimentos arrecadados', MARGEM, y)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(...CINZA)
+  doc.text('(ordem decrescente — 3 maiores em destaque)', MARGEM + 118, y)
+  y += 12
+
+  autoTable(doc, {
+    startY: y,
+    head: [['#', 'Alimento', 'Un.', 'Recebido', 'Refugo']],
+    body:
+      alimentosRank.length > 0
+        ? alimentosRank.map((a, i) => [
+            `${i + 1}º`,
+            a.nome,
+            a.unit,
+            fmtKg(a.recebido),
+            a.refugo > 0 ? fmtKg(a.refugo) : '—',
+          ])
+        : [['—', 'sem alimentos cadastrados', '', '', '']],
+    theme: 'striped',
+    headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
+    styles: { fontSize: 9.5, cellPadding: 4 },
+    columnStyles: {
+      0: { cellWidth: 30, halign: 'center' },
+      2: { cellWidth: 42, halign: 'center' },
+      3: { halign: 'right', cellWidth: 84 },
+      4: { halign: 'right', cellWidth: 74 },
+    },
+    margin: { left: MARGEM, right: MARGEM },
+    // 🏅 TOP 3 em destaque
+    didParseCell: (data) => {
+      if (data.section !== 'body') return
+      if (alimentosRank.length === 0) return
+      if (data.row.index < 3) {
+        data.cell.styles.fillColor = OURO_SUAVE
+        data.cell.styles.fontStyle = 'bold'
+        data.cell.styles.textColor = VERDE
+      }
+    },
+  })
+
+  // ❌ ONDA 21.4 — tabela de OPERADORES removida (fora do escopo do relatório)
+
+  // ─────── 6. RODAPÉ em todas as páginas ───────
+  const totalPaginas = doc.getNumberOfPages()
+  const geradoEm = new Date().toLocaleString('pt-BR')
+  const selo = semCensura ? ' · dados sem censura (admin)' : ''
+
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p)
+    doc.setDrawColor(...OURO)
+    doc.setLineWidth(1)
+    doc.line(MARGEM, pageH - 38, pageW - MARGEM, pageH - 38)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(140, 140, 140)
+    doc.text(
+      `Gerado em ${geradoEm} por ${nomeUsuario}${selo}  ·  ${BRANDING.name}`,
+      MARGEM,
+      pageH - 24,
+    )
+    doc.text(`${p}/${totalPaginas}`, pageW - MARGEM, pageH - 24, { align: 'right' })
+  }
 
   const bytes = doc.output('arraybuffer')
+  const slug = evento.nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+    .slice(0, 50)
 
   return new NextResponse(Buffer.from(bytes) as unknown as BodyInit, {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="banco-de-alimentos-evento-${id}-by-annonae.pdf"`,
+      'Content-Disposition': `attachment; filename="annonae-evento-${slug || id}.pdf"`,
       'Cache-Control': 'no-store',
     },
   })
