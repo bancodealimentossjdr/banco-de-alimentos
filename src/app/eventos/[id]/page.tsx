@@ -51,22 +51,19 @@ export default async function EventoDetalhePage({
             },
           }
         : false,
+      // ⚡ ONDA 21.3 — select enxuto: só o necessário para agregar.
+      // Removidos: id, alimentoId, alimento.id, product.id (não usados).
+      // orderBy removido: a ordenação é feita nos arrays agregados.
       recebimentos: {
         select: {
-          id: true,
-          alimentoId: true,
-          alimento: {
-            select: {
-              id: true,
-              product: { select: { id: true, name: true, unit: true } },
-            },
-          },
           quantidade: true,
           unidade: true,
           localId: true,
           createdAt: true,
+          alimento: {
+            select: { product: { select: { name: true, unit: true } } },
+          },
         },
-        orderBy: { createdAt: 'asc' },
       },
       _count: {
         select: { recebimentos: true, operadores: true, locais: true, alimentos: true },
@@ -113,49 +110,79 @@ export default async function EventoDetalhePage({
         }))
       : []
 
-  // ════════════ AGREGAÇÕES (server-side) p/ gráficos ════════════
+  const round = (n: number) => Math.round(n * 100) / 100
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
+
+  // ════════════════════════════════════════════════════════════════
+  // ⚡ ONDA 21.3 — LOOP ÚNICO
+  // Antes: 2 varreduras sobre recebimentos (gráficos + doações).
+  // Agora: 1 varredura alimentando todos os acumuladores.
+  // ════════════════════════════════════════════════════════════════
 
   const kgPorLocalMap = new Map<string, number>()
   const kgPorTipoMap = new Map<string, number>()
   const kgPorDiaMap = new Map<string, number>()
-
   let totalKg = 0
 
-  // 🆕 17.5-a — array de FATOS cru (base para filtragem por data no client)
-  const fatos: {
-    localNome: string
-    tipo: string
-    unidade: string
-    dia: string
-    quantidade: number
-  }[] = []
+  // 🔥 ONDA 21.3 — fatos AGREGADOS por (dia | localNome | tipo | unidade).
+  // O tipo Fato não possui campo único por recebimento, então a agregação
+  // é matematicamente equivalente: filtrarFatos/derivarMetrics não mudam.
+  // Payload deixa de crescer com nº de recebimentos.
+  const fatosMap = new Map<
+    string,
+    { localNome: string; tipo: string; unidade: string; dia: string; quantidade: number }
+  >()
+
+  // Acumuladores da aba Doações
+  type ProdAcc = Map<string, { nome: string; unidade: string; quantidade: number }>
+  const porLocalAcc = new Map<string, { id: string; nome: string; produtos: ProdAcc }>()
+  const totalGeralMap = new Map<string, number>()
 
   for (const r of evento.recebimentos) {
-    totalKg += r.quantidade
-
+    const prod = r.alimento?.product
     const ln = localNome.get(r.localId) ?? '—'
-    kgPorLocalMap.set(ln, (kgPorLocalMap.get(ln) ?? 0) + r.quantidade)
-
-    const tipo = r.alimento?.product?.name ?? 'Não informado'
-    kgPorTipoMap.set(tipo, (kgPorTipoMap.get(tipo) ?? 0) + r.quantidade)
-
+    const tipo = prod?.name ?? 'Não informado'
+    const unidade = r.unidade ?? prod?.unit ?? 'kg'
     const dia = r.createdAt.toISOString().slice(0, 10)
-    kgPorDiaMap.set(dia, (kgPorDiaMap.get(dia) ?? 0) + r.quantidade)
+    const qtd = r.quantidade
 
-    // 🆕 fato individual
-    fatos.push({
-      localNome: ln,
-      tipo,
-      unidade: r.unidade ?? r.alimento?.product?.unit ?? 'kg',
-      dia,
-      quantidade: r.quantidade,
-    })
+    // — métricas globais —
+    totalKg += qtd
+    kgPorLocalMap.set(ln, (kgPorLocalMap.get(ln) ?? 0) + qtd)
+    kgPorTipoMap.set(tipo, (kgPorTipoMap.get(tipo) ?? 0) + qtd)
+    kgPorDiaMap.set(dia, (kgPorDiaMap.get(dia) ?? 0) + qtd)
+
+    // — fatos agregados —
+    const fatoKey = `${dia}|${ln}|${tipo}|${unidade}`
+    const fato = fatosMap.get(fatoKey)
+    if (fato) {
+      fato.quantidade += qtd
+    } else {
+      fatosMap.set(fatoKey, { localNome: ln, tipo, unidade, dia, quantidade: qtd })
+    }
+
+    // — aba Doações —
+    if (!porLocalAcc.has(r.localId)) {
+      porLocalAcc.set(r.localId, { id: r.localId, nome: ln, produtos: new Map() })
+    }
+    const localEntry = porLocalAcc.get(r.localId)!
+    const prodKey = `${tipo}__${unidade}`
+    const prodEntry = localEntry.produtos.get(prodKey)
+    if (prodEntry) {
+      prodEntry.quantidade += qtd
+    } else {
+      localEntry.produtos.set(prodKey, { nome: tipo, unidade, quantidade: qtd })
+    }
+
+    totalGeralMap.set(unidade, (totalGeralMap.get(unidade) ?? 0) + qtd)
   }
 
-  const totalRefugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
+  // 🔥 arredonda na saída (evita drift de float acumulado no loop)
+  const fatos = [...fatosMap.values()]
+    .map((f) => ({ ...f, quantidade: round(f.quantidade) }))
+    .sort((a, b) => a.dia.localeCompare(b.dia))
 
-  const round = (n: number) => Math.round(n * 100) / 100
+  const totalRefugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
 
   const kgPorLocal = [...kgPorLocalMap.entries()]
     .map(([nome, kg]) => ({ nome, kg: round(kg) }))
@@ -178,59 +205,20 @@ export default async function EventoDetalhePage({
     kgPorDia,
   }
 
-  // ════════════ 🆕 17.5-a — RANGE do filtro de data ════════════
-  // min = data de início do evento (travado)
-  // max = dataFim (se houver) ou hoje
-  // default = últimos 7 dias, sem estourar o min
+  // ════════════ RANGE do filtro de data (17.5-a) ════════════
   const hojeISO = new Date().toISOString().slice(0, 10)
   const inicioISO = evento.dataInicio.toISOString().slice(0, 10)
   const fimISO = evento.dataFim ? evento.dataFim.toISOString().slice(0, 10) : hojeISO
   const max = fimISO < hojeISO ? fimISO : hojeISO
 
-  // default start = 7 dias antes do max, mas nunca antes do início do evento
   const d = new Date(`${max}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() - 6)
   const seteDiasISO = d.toISOString().slice(0, 10)
   const defaultStart = seteDiasISO < inicioISO ? inicioISO : seteDiasISO
 
-  const range = {
-    min: inicioISO,
-    max,
-    defaultStart,
-    defaultEnd: max,
-  }
+  const range = { min: inicioISO, max, defaultStart, defaultEnd: max }
 
-  // ════════════ AGREGAÇÃO DE DOAÇÕES ════════════
-  type ProdAcc = Map<string, { nome: string; unidade: string; quantidade: number }>
-
-  const porLocalAcc = new Map<
-    string,
-    { id: string; nome: string; produtos: ProdAcc }
-  >()
-  const totalGeralMap = new Map<string, number>()
-
-  for (const r of evento.recebimentos) {
-    const localId = r.localId
-    const localNm = localNome.get(localId) ?? '—'
-    const nomeProd = r.alimento?.product?.name ?? 'Não informado'
-    const unidade = r.unidade ?? r.alimento?.product?.unit ?? 'kg'
-    const qtd = r.quantidade
-
-    if (!porLocalAcc.has(localId)) {
-      porLocalAcc.set(localId, { id: localId, nome: localNm, produtos: new Map() })
-    }
-    const localEntry = porLocalAcc.get(localId)!
-    const prodKey = `${nomeProd}__${unidade}`
-    const prodEntry = localEntry.produtos.get(prodKey)
-    if (prodEntry) {
-      prodEntry.quantidade += qtd
-    } else {
-      localEntry.produtos.set(prodKey, { nome: nomeProd, unidade, quantidade: qtd })
-    }
-
-    totalGeralMap.set(unidade, (totalGeralMap.get(unidade) ?? 0) + qtd)
-  }
-
+  // ════════════ SAÍDA da aba Doações ════════════
   const doacoesPorLocal = [...porLocalAcc.values()].map((local) => {
     const produtos = [...local.produtos.values()]
       .map((p) => ({ ...p, quantidade: round(p.quantidade) }))
@@ -251,10 +239,7 @@ export default async function EventoDetalhePage({
     .map(([unidade, quantidade]) => ({ unidade, quantidade: round(quantidade) }))
     .sort((a, b) => a.unidade.localeCompare(b.unidade))
 
-  const doacoes = {
-    porLocal: doacoesPorLocal,
-    totalGeral,
-  }
+  const doacoes = { porLocal: doacoesPorLocal, totalGeral }
 
   const eventoView = {
     id: evento.id,
@@ -290,8 +275,8 @@ export default async function EventoDetalhePage({
       alimentos: evento._count.alimentos,
     },
     metrics,
-    fatos, // 🆕 17.5-a
-    range, // 🆕 17.5-a
+    fatos,
+    range,
     doacoes,
   }
 
