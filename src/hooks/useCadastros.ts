@@ -1,12 +1,13 @@
 'use client'
 
+import { useMemo } from 'react'
 import { useApi } from './useApi'
 
-interface Product { id: string; name: string; unit: string }
-interface Donor { id: string; name: string }
-interface Beneficiary { id: string; name: string }
-interface Employee { id: string; name: string }
-interface Producer { id: string; name: string }
+interface Product { id: string; name: string; unit: string; active?: boolean }
+interface Donor { id: string; name: string; active?: boolean }
+interface Beneficiary { id: string; name: string; status?: string }
+interface Employee { id: string; name: string; active?: boolean }
+interface Producer { id: string; name: string; active?: boolean }
 
 /**
  * 📦 Cache de cadastros (dados estruturais que mudam pouco)
@@ -33,6 +34,25 @@ interface CadastroOptions {
 }
 
 /**
+ * 🚦 SubOnda 2 — Filtro de ativos.
+ *
+ * Regra: um cadastro INATIVO não deve aparecer em NENHUM dropdown de
+ * lançamento novo (doação, distribuição, colheita), mas o histórico e as
+ * páginas de cadastro continuam mostrando tudo.
+ *
+ * ⚠️ Por que client-side e não `?apenasAtivos=1` na API:
+ *   - a API é a MESMA usada pelas páginas de cadastro, que PRECISAM ver inativos
+ *   - duas querystrings = duas keys no SWR = cache duplicado (perde o ganho)
+ *
+ * 🛡️ Fail-open intencional: se `active` vier `undefined` (registro legado,
+ * campo ausente, máscara que não preservou), tratamos como ATIVO. É melhor
+ * mostrar um item a mais do que esconder um doador válido em produção.
+ */
+function filtrarAtivos<T extends { active?: boolean }>(list: T[]): T[] {
+  return list.filter(item => item.active !== false)
+}
+
+/**
  * 🛒 Lista de produtos cadastrados
  */
 export function useProdutos({ enabled = true }: CadastroOptions = {}) {
@@ -40,8 +60,14 @@ export function useProdutos({ enabled = true }: CadastroOptions = {}) {
     enabled ? '/api/produtos' : null,
     CADASTRO_CONFIG
   )
+  const todos = data ?? []
+  const ativos = useMemo(() => filtrarAtivos(todos), [data]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
-    produtos: data ?? [],
+    /** ✅ Só ativos — use em dropdowns de lançamento */
+    produtos: ativos,
+    /** 📚 Tudo, inclusive inativos — use em telas de cadastro/histórico */
+    produtosTodos: todos,
     error,
     isLoading,
     mutate,
@@ -56,8 +82,12 @@ export function useDoadores({ enabled = true }: CadastroOptions = {}) {
     enabled ? '/api/doadores' : null,
     CADASTRO_CONFIG
   )
+  const todos = data ?? []
+  const ativos = useMemo(() => filtrarAtivos(todos), [data]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
-    doadores: data ?? [],
+    doadores: ativos,
+    doadoresTodos: todos,
     error,
     isLoading,
     mutate,
@@ -66,14 +96,26 @@ export function useDoadores({ enabled = true }: CadastroOptions = {}) {
 
 /**
  * 👥 Lista de beneficiários
+ *
+ * ⚠️ ATENÇÃO: o model Beneficiary NÃO tem `active: boolean`.
+ * Ele usa `status: string` com valor 'ativo' (ver /api/beneficiarios).
+ * Por isso o filtro aqui é diferente dos demais.
  */
 export function useBeneficiarios({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Beneficiary[]>(
     enabled ? '/api/beneficiarios' : null,
     CADASTRO_CONFIG
   )
+  const todos = data ?? []
+  const ativos = useMemo(
+    // fail-open: status ausente = considera ativo
+    () => todos.filter(b => !b.status || b.status === 'ativo'),
+    [data] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
   return {
-    beneficiarios: data ?? [],
+    beneficiarios: ativos,
+    beneficiariosTodos: todos,
     error,
     isLoading,
     mutate,
@@ -88,8 +130,12 @@ export function useFuncionarios({ enabled = true }: CadastroOptions = {}) {
     enabled ? '/api/funcionarios' : null,
     CADASTRO_CONFIG
   )
+  const todos = data ?? []
+  const ativos = useMemo(() => filtrarAtivos(todos), [data]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
-    funcionarios: data ?? [],
+    funcionarios: ativos,
+    funcionariosTodos: todos,
     error,
     isLoading,
     mutate,
@@ -104,8 +150,12 @@ export function useProdutores({ enabled = true }: CadastroOptions = {}) {
     enabled ? '/api/produtores' : null,
     CADASTRO_CONFIG
   )
+  const todos = data ?? []
+  const ativos = useMemo(() => filtrarAtivos(todos), [data]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
-    produtores: data ?? [],
+    produtores: ativos,
+    produtoresTodos: todos,
     error,
     isLoading,
     mutate,

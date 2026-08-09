@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { requireView, requireEdit, requireAdminOrDev } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
 import { maskDoador } from '@/lib/mask-by-role'
 
@@ -51,7 +51,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
     }
 
-    const updated = await prisma.donor.update({
+        const updated = await prisma.donor.update({
       where: { id },
       data: {
         name: body.name,
@@ -61,8 +61,10 @@ export async function PUT(
         phone: body.phone || null,
         email: body.email || null,
         address: body.address || null,
+        active: typeof body.active === 'boolean' ? body.active : undefined,
       },
     })
+
 
     return NextResponse.json(updated)
   } catch (error) {
@@ -104,5 +106,44 @@ export async function DELETE(
   } catch (error) {
     console.error('Erro DELETE doador:', error)
     return NextResponse.json({ error: 'Erro ao excluir doador' }, { status: 500 })
+  }
+}
+/**
+ * PATCH → alterna apenas o status (ativo/inativo). Admin ou DEV.
+ * Não desvincula nada: preserva o histórico de doações.
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authResult = await requireAdminOrDev()
+  if (authResult instanceof NextResponse) return authResult
+
+  try {
+    const { id } = await params
+    const body = await request.json()
+
+    if (typeof body.active !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Campo "active" (boolean) é obrigatório' },
+        { status: 400 }
+      )
+    }
+
+    const donor = await prisma.donor.findUnique({ where: { id } })
+    if (!donor) {
+      return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
+    }
+
+    const updated = await prisma.donor.update({
+      where: { id },
+      data: { active: body.active },
+      select: { id: true, name: true, active: true },
+    })
+
+    return NextResponse.json(updated)
+  } catch (error) {
+    console.error('Erro PATCH doador:', error)
+    return NextResponse.json({ error: 'Erro ao alterar status' }, { status: 500 })
   }
 }

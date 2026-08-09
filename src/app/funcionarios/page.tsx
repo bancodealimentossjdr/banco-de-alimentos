@@ -15,20 +15,26 @@ interface Employee {
     donationsAsEmployee1: number
     donationsAsEmployee2: number
     donationsAsEmployee3: number
-    distributions: number
+    distributionsAsEmployee1: number
+    distributionsAsEmployee2: number
+    distributionsAsEmployee3: number
     harvestsAsEmployee1: number
     harvestsAsEmployee2: number
     harvestsAsEmployee3: number
   }
 }
 
-// Helper: soma as 3 relações de coletas (doações)
+// 📥 Helper: soma as 3 relações de coletas (doações)
 const getColetas = (emp: Employee) =>
   (emp._count?.donationsAsEmployee1 || 0) +
   (emp._count?.donationsAsEmployee2 || 0) +
   (emp._count?.donationsAsEmployee3 || 0)
 
-const getEntregas = (emp: Employee) => emp._count?.distributions || 0
+// 📤 Helper: soma as 3 relações de entregas (distribuições)
+const getEntregas = (emp: Employee) =>
+  (emp._count?.distributionsAsEmployee1 || 0) +
+  (emp._count?.distributionsAsEmployee2 || 0) +
+  (emp._count?.distributionsAsEmployee3 || 0)
 
 // 🌾 Helper: soma as 3 relações de colheitas
 const getColheitas = (emp: Employee) =>
@@ -47,6 +53,9 @@ export default function FuncionariosPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [alterandoId, setAlterandoId] = useState<string | null>(null)
+  // 🆕 mostrar/ocultar inativos na listagem
+  const [mostrarInativos, setMostrarInativos] = useState(true)
   const [form, setForm] = useState({ name: '', role: '', phone: '' })
 
   const fetchEmployees = async () => {
@@ -84,7 +93,6 @@ export default function FuncionariosPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // 🔒 Envolve a chamada de salvar na trava de duplo clique
     await runSubmit(async () => {
       try {
         const url = editingId ? `/api/funcionarios/${editingId}` : '/api/funcionarios'
@@ -107,8 +115,37 @@ export default function FuncionariosPage() {
     })
   }
 
+  // 🔁 Inativar / reativar sem apagar histórico
+  const toggleStatus = async (emp: Employee) => {
+    const acao = emp.active ? 'inativar' : 'reativar'
+    const aviso = emp.active
+      ? `Inativar "${emp.name}"?\n\nEle deixará de aparecer nos formulários de coleta, entrega e colheita, mas todo o histórico é preservado.`
+      : `Reativar "${emp.name}"?\n\nEle voltará a aparecer nos formulários.`
+    if (!confirm(aviso)) return
+
+    setAlterandoId(emp.id)
+    try {
+      const res = await fetch(`/api/funcionarios/${emp.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !emp.active }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || `Erro ao ${acao} funcionário`)
+        return
+      }
+      await fetchEmployees()
+    } catch (error) {
+      console.error('Erro ao alterar status:', error)
+      alert('Falha de conexão')
+    } finally {
+      setAlterandoId(null)
+    }
+  }
+
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja excluir "${name}"?`)) return
+    if (!confirm(`Tem certeza que deseja excluir "${name}"?\n\nSe houver histórico vinculado, prefira INATIVAR.`)) return
     try {
       const res = await fetch(`/api/funcionarios/${id}`, { method: 'DELETE' })
       if (res.ok) {
@@ -122,6 +159,11 @@ export default function FuncionariosPage() {
       alert('Erro ao excluir funcionário')
     }
   }
+
+  const totalInativos = employees.filter(e => !e.active).length
+  const employeesVisiveis = mostrarInativos
+    ? employees
+    : employees.filter(e => e.active)
 
   return (
     <div>
@@ -200,12 +242,28 @@ export default function FuncionariosPage() {
         </form>
       )}
 
+      {/* 🆕 Toggle de inativos */}
+      {!loading && totalInativos > 0 && (
+        <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border px-4 py-3 mb-4">
+          <span className="text-sm text-gray-600">
+            {totalInativos} funcionário{totalInativos !== 1 ? 's' : ''} inativo{totalInativos !== 1 ? 's' : ''}
+          </span>
+          <button
+            type="button"
+            onClick={() => setMostrarInativos(v => !v)}
+            className="text-sm font-medium text-amber-600 hover:text-amber-700 px-3 py-1 rounded-lg hover:bg-amber-50 transition"
+          >
+            {mostrarInativos ? 'Ocultar inativos' : 'Mostrar inativos'}
+          </button>
+        </div>
+      )}
+
       {/* Listagem */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div>
         </div>
-      ) : employees.length === 0 ? (
+      ) : employeesVisiveis.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">👷</p>
           <p className="text-xl">Nenhum funcionário cadastrado</p>
@@ -234,8 +292,11 @@ export default function FuncionariosPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map(emp => (
-                    <tr key={emp.id} className="border-b last:border-0 hover:bg-gray-50">
+                  {employeesVisiveis.map(emp => (
+                    <tr
+                      key={emp.id}
+                      className={`border-b last:border-0 hover:bg-gray-50 ${!emp.active ? 'opacity-60' : ''}`}
+                    >
                       <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
                       <td className="px-6 py-4 text-gray-600">{emp.role || '-'}</td>
                       <td className="px-6 py-4 text-gray-600">
@@ -245,9 +306,24 @@ export default function FuncionariosPage() {
                       <td className="px-6 py-4 text-gray-600">{getEntregas(emp)}</td>
                       <td className="px-6 py-4 text-gray-600">{getColheitas(emp)}</td>
                       <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${emp.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {emp.active ? 'Ativo' : 'Inativo'}
-                        </span>
+                        {podeEditar ? (
+                          <button
+                            onClick={() => toggleStatus(emp)}
+                            disabled={alterandoId === emp.id}
+                            title={emp.active ? 'Clique para inativar' : 'Clique para reativar'}
+                            className={`px-2 py-1 rounded-full text-xs font-medium transition disabled:opacity-40 ${
+                              emp.active
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-red-100 text-red-700 hover:bg-red-200'
+                            }`}
+                          >
+                            {alterandoId === emp.id ? '…' : emp.active ? 'Ativo' : 'Inativo'}
+                          </button>
+                        ) : (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${emp.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {emp.active ? 'Ativo' : 'Inativo'}
+                          </span>
+                        )}
                       </td>
                       {podeEditar && (
                         <td className="px-6 py-4">
@@ -257,6 +333,13 @@ export default function FuncionariosPage() {
                               className="text-blue-500 hover:text-blue-700 text-sm font-medium"
                             >
                               Editar
+                            </button>
+                            <button
+                              onClick={() => toggleStatus(emp)}
+                              disabled={alterandoId === emp.id}
+                              className="text-amber-600 hover:text-amber-700 text-sm font-medium disabled:opacity-40"
+                            >
+                              {emp.active ? 'Inativar' : 'Reativar'}
                             </button>
                             <button
                               onClick={() => handleDelete(emp.id, emp.name)}
@@ -276,13 +359,16 @@ export default function FuncionariosPage() {
 
           {/* ====== CARDS - só aparece no mobile (< md) ====== */}
           <div className="md:hidden space-y-3">
-            {employees.map(emp => {
+            {employeesVisiveis.map(emp => {
               const coletas = getColetas(emp)
               const entregas = getEntregas(emp)
               const colheitas = getColheitas(emp)
               const totalAtividades = coletas + entregas + colheitas
               return (
-                <div key={emp.id} className="bg-white rounded-xl shadow-sm border p-4">
+                <div
+                  key={emp.id}
+                  className={`bg-white rounded-xl shadow-sm border p-4 ${!emp.active ? 'opacity-60' : ''}`}
+                >
                   {/* Topo: nome + status */}
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0">
@@ -304,7 +390,7 @@ export default function FuncionariosPage() {
                     </div>
                   )}
 
-                  {/* Contadores: coletas + entregas + colheitas + total */}
+                  {/* Contadores */}
                   <div className="grid grid-cols-4 gap-2 text-center mb-3">
                     <div className="bg-blue-50 rounded-lg py-2">
                       <p className="text-[10px] text-blue-600 font-medium">Coletas</p>
@@ -324,7 +410,7 @@ export default function FuncionariosPage() {
                     </div>
                   </div>
 
-                  {/* Ações — só aparecem pra quem pode editar */}
+                  {/* Ações */}
                   {podeEditar && (
                     <div className="flex gap-2 pt-2 border-t border-gray-100">
                       <button
@@ -332,6 +418,13 @@ export default function FuncionariosPage() {
                         className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
                       >
                         ✏️ Editar
+                      </button>
+                      <button
+                        onClick={() => toggleStatus(emp)}
+                        disabled={alterandoId === emp.id}
+                        className="flex-1 text-center text-amber-600 hover:bg-amber-50 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40"
+                      >
+                        {emp.active ? '🚫 Inativar' : '✅ Reativar'}
                       </button>
                       <button
                         onClick={() => handleDelete(emp.id, emp.name)}

@@ -4,6 +4,7 @@ import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useProdutos, useDoadores, useFuncionarios } from '@/hooks/useCadastros'
+import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
 import { useState } from 'react'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
@@ -42,10 +43,10 @@ export default function DoacoesPage() {
   // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 🚀 Cache global de cadastros (carrega 1x, compartilha entre páginas)
-  const { produtos: products } = useProdutos()
-  const { doadores: donors } = useDoadores()
-  const { funcionarios: employees } = useFuncionarios()
+  // 🚀 Cache global de cadastros — `*Todos` inclui inativos (para edição)
+  const { produtos: products, produtosTodos: productsAll } = useProdutos()
+  const { doadores: donors, doadoresTodos: donorsAll } = useDoadores()
+  const { funcionarios: employees, funcionariosTodos: employeesAll } = useFuncionarios()
 
   // 📋 Lista de doações — cache local, revalida quando muda
   const {
@@ -116,7 +117,8 @@ export default function DoacoesPage() {
     })
     setFormItems(
       donation.items.map(item => ({
-        productId: products.find(p => p.name === item.product.name)?.id || '',
+        // ⚠️ productsAll: produto inativado não está em `products`
+        productId: productsAll.find(p => p.name === item.product.name)?.id || '',
         quantity: item.quantity,
         boxes: item.boxes ?? undefined,
       }))
@@ -223,7 +225,7 @@ export default function DoacoesPage() {
         )}
       </div>
 
-      {/* 💾 Banner de rascunho (aparece quando há rascunho válido) */}
+      {/* 💾 Banner de rascunho */}
       {hasDraft && podeCriar && !editingId && (
         <DraftBanner
           savedAt={draftSavedAt}
@@ -250,7 +252,9 @@ export default function DoacoesPage() {
                 required
               >
                 <option value="">Selecione...</option>
-                {donors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {comSelecionado(donors, donorsAll, form.donorId).map(d => (
+                  <option key={d.id} value={d.id}>{d.name}{sufixoInativo(d)}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -278,9 +282,9 @@ export default function DoacoesPage() {
                   required
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employeeId)
                     .filter(emp => emp.id !== form.employee2Id && emp.id !== form.employee3Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
               <div>
@@ -294,9 +298,9 @@ export default function DoacoesPage() {
                   disabled={!form.employeeId}
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employee2Id)
                     .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee3Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
               <div>
@@ -310,9 +314,9 @@ export default function DoacoesPage() {
                   disabled={!form.employee2Id}
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employee3Id)
                     .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee2Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
             </div>
@@ -342,7 +346,9 @@ export default function DoacoesPage() {
                       required
                     >
                       <option value="">Selecione o produto...</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
+                      {comSelecionado(products, productsAll, item.productId).map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.unit}){sufixoInativo(p)}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -502,7 +508,6 @@ export default function DoacoesPage() {
                       {donation.items.length} {donation.items.length === 1 ? 'item' : 'itens'}
                     </span>
 
-                    {/* ✏️ Editar: admin sempre / operador só se data = hoje */}
                     {podeEditarEsse && (
                       <button
                         onClick={() => startEdit(donation)}
@@ -512,7 +517,6 @@ export default function DoacoesPage() {
                       </button>
                     )}
 
-                    {/* 🗑️ Excluir: apenas admin */}
                     {podeExcluir && (
                       <button
                         onClick={() => handleDelete(donation.id)}

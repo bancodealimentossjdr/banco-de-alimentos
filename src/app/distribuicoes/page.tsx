@@ -7,6 +7,7 @@ import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useProdutos, useBeneficiarios, useFuncionarios } from '@/hooks/useCadastros'
+import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
@@ -61,9 +62,10 @@ export default function DistribuicoesPage() {
 
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  const { produtos: products } = useProdutos()
-  const { beneficiarios: beneficiaries } = useBeneficiarios()
-  const { funcionarios: employees } = useFuncionarios()
+  // 🚦 `*Todos` inclui inativos — usado em edição e nos filtros
+  const { produtos: products, produtosTodos: productsAll } = useProdutos()
+  const { beneficiarios: beneficiaries, beneficiariosTodos: beneficiariesAll } = useBeneficiarios()
+  const { funcionarios: employees, funcionariosTodos: employeesAll } = useFuncionarios()
 
   const {
     data: distributionsData,
@@ -159,7 +161,8 @@ export default function DistribuicoesPage() {
     })
     setFormItems(
       dist.items.map(item => ({
-        productId: products.find(p => p.name === item.product.name)?.id || '',
+        // ⚠️ productsAll: inclui produtos inativados
+        productId: productsAll.find(p => p.name === item.product.name)?.id || '',
         quantity: item.quantity,
         boxes: item.boxes ?? undefined,
         origem: item.origem ?? dist.origem ?? 'DOACAO',
@@ -311,7 +314,9 @@ export default function DistribuicoesPage() {
                 required
               >
                 <option value="">Selecione...</option>
-                {beneficiaries.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {comSelecionado(beneficiaries, beneficiariesAll, form.beneficiaryId).map(b => (
+                  <option key={b.id} value={b.id}>{b.name}{sufixoInativo(b)}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -337,9 +342,9 @@ export default function DistribuicoesPage() {
                   className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employeeId)
                     .filter(emp => emp.id !== form.employee2Id && emp.id !== form.employee3Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
               <div>
@@ -353,9 +358,9 @@ export default function DistribuicoesPage() {
                   disabled={!form.employeeId}
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employee2Id)
                     .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee3Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
               <div>
@@ -369,9 +374,9 @@ export default function DistribuicoesPage() {
                   disabled={!form.employee2Id}
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employee3Id)
                     .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee2Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
             </div>
@@ -400,7 +405,9 @@ export default function DistribuicoesPage() {
                       required
                     >
                       <option value="">Selecione o produto...</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
+                      {comSelecionado(products, productsAll, item.productId).map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.unit}){sufixoInativo(p)}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -548,7 +555,10 @@ export default function DistribuicoesPage() {
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
               >
                 <option value="">Todas</option>
-                {beneficiaries.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {/* ⚠️ Todos (inclui inativas): filtrar histórico antigo deve continuar possível */}
+                {beneficiariesAll.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}{sufixoInativo(b)}</option>
+                ))}
               </select>
             </div>
 

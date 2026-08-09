@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
+import { validarCadastrosAtivos } from '@/lib/validar-ativos'
 import {
   maskNotesListIfReadOnly,
   maskProdutor,
@@ -40,14 +41,11 @@ export async function GET() {
     if (shouldMaskPersonalData(role)) {
       colheitasSeguras = colheitasSeguras.map((c) => ({
         ...c,
-        // 🎭 Dados pessoais
         producer: c.producer ? maskProdutor(c.producer, role) : c.producer,
         employee: c.employee ? maskFuncionario(c.employee, role) : c.employee,
         employee2: c.employee2 ? maskFuncionario(c.employee2, role) : c.employee2,
         employee3: c.employee3 ? maskFuncionario(c.employee3, role) : c.employee3,
-        // 💰 Só o valor financeiro é anulado. Pesos/caixas continuam crus.
         indemnityValue: null,
-        // 🏷️ Flag para o front esconder APENAS os campos em R$
         isMasked: true,
       }))
     }
@@ -94,6 +92,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // 🛡️ SubOnda 2 — bloqueia cadastros INATIVOS em lançamentos NOVOS
+    const invalido = await validarCadastrosAtivos({
+      producerId,
+      employeeIds: [employeeId, employee2Id, employee3Id],
+      productIds: (items as { productId: string }[]).map(i => i.productId),
+    })
+    if (invalido) return invalido
 
     const dateValue = date ? new Date(date + 'T12:00:00') : new Date()
 

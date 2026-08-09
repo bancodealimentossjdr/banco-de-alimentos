@@ -37,6 +37,8 @@ export default function DoadoresPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [alterandoId, setAlterandoId] = useState<string | null>(null)
+  const [mostrarInativos, setMostrarInativos] = useState(true)
   const [form, setForm] = useState({
     name: '', type: 'PJ', category: 'supermercado',
     contact: '', phone: '', email: '', address: '',
@@ -81,7 +83,6 @@ export default function DoadoresPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // 🔒 Envolve a chamada de salvar na trava de duplo clique
     await runSubmit(async () => {
       try {
         const url = editingId ? `/api/doadores/${editingId}` : '/api/doadores'
@@ -104,8 +105,36 @@ export default function DoadoresPage() {
     })
   }
 
+  // 🔁 Inativar / reativar sem apagar histórico
+  const toggleStatus = async (donor: Donor) => {
+    const aviso = donor.active
+      ? `Inativar "${donor.name}"?\n\nEle deixará de aparecer no formulário de doações, mas o histórico é preservado.`
+      : `Reativar "${donor.name}"?\n\nEle voltará a aparecer no formulário de doações.`
+    if (!confirm(aviso)) return
+
+    setAlterandoId(donor.id)
+    try {
+      const res = await fetch(`/api/doadores/${donor.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !donor.active }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Erro ao alterar status')
+        return
+      }
+      await fetchDonors()
+    } catch (error) {
+      console.error('Erro ao alterar status:', error)
+      alert('Falha de conexão')
+    } finally {
+      setAlterandoId(null)
+    }
+  }
+
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja excluir "${name}"?`)) return
+    if (!confirm(`Tem certeza que deseja excluir "${name}"?\n\nSe houver doações vinculadas, prefira INATIVAR.`)) return
     try {
       const res = await fetch(`/api/doadores/${id}`, { method: 'DELETE' })
       if (res.ok) {
@@ -122,6 +151,9 @@ export default function DoadoresPage() {
 
   const getCategoryLabel = (value: string) =>
     DONOR_CATEGORIES.find(c => c.value === value)?.label || value
+
+  const totalInativos = donors.filter(d => !d.active).length
+  const donorsVisiveis = mostrarInativos ? donors : donors.filter(d => d.active)
 
   return (
     <div>
@@ -240,12 +272,28 @@ export default function DoadoresPage() {
         </form>
       )}
 
+      {/* 🆕 Toggle de inativos */}
+      {!loading && totalInativos > 0 && (
+        <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border px-4 py-3 mb-4">
+          <span className="text-sm text-gray-600">
+            {totalInativos} doador{totalInativos !== 1 ? 'es' : ''} inativo{totalInativos !== 1 ? 's' : ''}
+          </span>
+          <button
+            type="button"
+            onClick={() => setMostrarInativos(v => !v)}
+            className="text-sm font-medium text-green-600 hover:text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 transition"
+          >
+            {mostrarInativos ? 'Ocultar inativos' : 'Mostrar inativos'}
+          </button>
+        </div>
+      )}
+
       {/* Listagem */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
         </div>
-      ) : donors.length === 0 ? (
+      ) : donorsVisiveis.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">🤝</p>
           <p className="text-xl">Nenhum doador cadastrado</p>
@@ -273,8 +321,11 @@ export default function DoadoresPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {donors.map(donor => (
-                    <tr key={donor.id} className="border-b last:border-0 hover:bg-gray-50">
+                  {donorsVisiveis.map(donor => (
+                    <tr
+                      key={donor.id}
+                      className={`border-b last:border-0 hover:bg-gray-50 ${!donor.active ? 'opacity-60' : ''}`}
+                    >
                       <td className="px-6 py-4 font-medium text-gray-900">{donor.name}</td>
                       <td className="px-6 py-4 text-gray-600">{donor.type}</td>
                       <td className="px-6 py-4">
@@ -287,9 +338,24 @@ export default function DoadoresPage() {
                       </td>
                       <td className="px-6 py-4 text-gray-600">{donor._count.donations}</td>
                       <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${donor.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {donor.active ? 'Ativo' : 'Inativo'}
-                        </span>
+                        {podeEditar ? (
+                          <button
+                            onClick={() => toggleStatus(donor)}
+                            disabled={alterandoId === donor.id}
+                            title={donor.active ? 'Clique para inativar' : 'Clique para reativar'}
+                            className={`px-2 py-1 rounded-full text-xs font-medium transition disabled:opacity-40 ${
+                              donor.active
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-red-100 text-red-700 hover:bg-red-200'
+                            }`}
+                          >
+                            {alterandoId === donor.id ? '…' : donor.active ? 'Ativo' : 'Inativo'}
+                          </button>
+                        ) : (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${donor.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {donor.active ? 'Ativo' : 'Inativo'}
+                          </span>
+                        )}
                       </td>
                       {podeEditar && (
                         <td className="px-6 py-4">
@@ -299,6 +365,13 @@ export default function DoadoresPage() {
                               className="text-blue-500 hover:text-blue-700 text-sm font-medium"
                             >
                               Editar
+                            </button>
+                            <button
+                              onClick={() => toggleStatus(donor)}
+                              disabled={alterandoId === donor.id}
+                              className="text-amber-600 hover:text-amber-700 text-sm font-medium disabled:opacity-40"
+                            >
+                              {donor.active ? 'Inativar' : 'Reativar'}
                             </button>
                             <button
                               onClick={() => handleDelete(donor.id, donor.name)}
@@ -318,8 +391,11 @@ export default function DoadoresPage() {
 
           {/* ====== CARDS - só aparece no mobile (< md) ====== */}
           <div className="md:hidden space-y-3">
-            {donors.map(donor => (
-              <div key={donor.id} className="bg-white rounded-xl shadow-sm border p-4">
+            {donorsVisiveis.map(donor => (
+              <div
+                key={donor.id}
+                className={`bg-white rounded-xl shadow-sm border p-4 ${!donor.active ? 'opacity-60' : ''}`}
+              >
                 {/* Topo: nome + status */}
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="min-w-0">
@@ -370,7 +446,7 @@ export default function DoadoresPage() {
                   </div>
                 </div>
 
-                {/* Ações — só aparecem pra quem pode editar */}
+                {/* Ações */}
                 {podeEditar && (
                   <div className="flex gap-2 pt-2 border-t border-gray-100">
                     <button
@@ -378,6 +454,13 @@ export default function DoadoresPage() {
                       className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
                     >
                       ✏️ Editar
+                    </button>
+                    <button
+                      onClick={() => toggleStatus(donor)}
+                      disabled={alterandoId === donor.id}
+                      className="flex-1 text-center text-amber-600 hover:bg-amber-50 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40"
+                    >
+                      {donor.active ? '🚫 Inativar' : '✅ Reativar'}
                     </button>
                     <button
                       onClick={() => handleDelete(donor.id, donor.name)}

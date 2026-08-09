@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
+import { validarCadastrosAtivos } from '@/lib/validar-ativos'
 import {
   maskNotesListIfReadOnly,
   maskBeneficiario,
@@ -88,6 +89,13 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
 
+    if (!body.beneficiaryId) {
+      return NextResponse.json(
+        { error: 'Instituição é obrigatória' },
+        { status: 400 },
+      )
+    }
+
     const empIds = [body.employeeId, body.employee2Id, body.employee3Id].filter(
       Boolean,
     )
@@ -129,6 +137,14 @@ export async function POST(request: Request) {
       }
     }
 
+    // 🛡️ SubOnda 2 — bloqueia cadastros INATIVOS em lançamentos NOVOS
+    const invalido = await validarCadastrosAtivos({
+      beneficiaryId: body.beneficiaryId,
+      employeeIds: [body.employeeId, body.employee2Id, body.employee3Id],
+      productIds: incomingItems.map(i => i.productId),
+    })
+    if (invalido) return invalido
+
     // origem legado (enum: só DOACAO|EVENTO). COLHEITA cai como DOACAO no legado.
     const primeira = normOrigem(incomingItems[0].origem)
     const origemLegado = primeira === 'EVENTO' ? 'EVENTO' : 'DOACAO'
@@ -152,7 +168,7 @@ export async function POST(request: Request) {
             origem: normOrigem(item.origem),
           })),
         },
-      }, // ✅ fecha o data (ESTAVA FALTANDO)
+      },
       include: {
         beneficiary: { select: { id: true, name: true, type: true } },
         employee: { select: { id: true, name: true } },

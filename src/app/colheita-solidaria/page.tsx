@@ -6,6 +6,7 @@ import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useDraft } from '@/hooks/useDraft'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useProdutos, useProdutores, useFuncionarios } from '@/hooks/useCadastros'
+import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
@@ -49,9 +50,6 @@ const STATUS_OPTIONS = [
   { value: 'cancelada', label: 'Cancelada', color: 'bg-red-100 text-red-700' },
 ]
 
-// 🎭 Placeholder visual para valores ocultos do visualizador
-const MASK = '•••'
-
 export default function ColheitaSolidariaPage() {
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeEditar = canEdit('colheita-solidaria')
@@ -60,11 +58,10 @@ export default function ColheitaSolidariaPage() {
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
   // 🚀 Cache global de cadastros
-  // ⚠️ produtos/produtores/funcionários só são buscados quando o usuário PODE EDITAR.
-  // Visualizador não vê o formulário, então essas chamadas dariam 403 à toa.
-  const { produtos: products } = useProdutos({ enabled: podeEditar })
-  const { funcionarios: employees } = useFuncionarios({ enabled: podeEditar })
-  const { produtores: producers } = useProdutores({ enabled: podeEditar })
+  // ⚠️ Só busca quando o usuário PODE EDITAR (visualizador não vê o formulário).
+  const { produtos: products, produtosTodos: productsAll } = useProdutos({ enabled: podeEditar })
+  const { funcionarios: employees, funcionariosTodos: employeesAll } = useFuncionarios({ enabled: podeEditar })
+  const { produtores: producers, produtoresTodos: producersAll } = useProdutores({ enabled: podeEditar })
 
   // 📋 Lista de colheitas
   const {
@@ -80,11 +77,9 @@ export default function ColheitaSolidariaPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  // 🆕 FILTRO — produtor selecionado ('' = todos)
+  // 🆕 FILTROS
   const [filtroProducerId, setFiltroProducerId] = useState('')
-  // 🆕 FILTRO — status ('' = todos | 'agendada' | 'realizada' | 'cancelada')
   const [filtroStatus, setFiltroStatus] = useState('')
-  // 🆕 FILTRO — intervalo de datas (yyyy-mm-dd)
   const [filtroDataDe, setFiltroDataDe] = useState('')
   const [filtroDataAte, setFiltroDataAte] = useState('')
 
@@ -122,7 +117,7 @@ export default function ColheitaSolidariaPage() {
     disabled: editingId !== null,
   })
 
-  // 🆕 FILTRO — lista filtrada (produtor + status + data)
+  // 🆕 FILTRO — lista filtrada
   const harvestsFiltradas = useMemo(() => {
     return harvests.filter(h => {
       if (filtroProducerId && h.producer.id !== filtroProducerId) return false
@@ -136,20 +131,19 @@ export default function ColheitaSolidariaPage() {
     })
   }, [harvests, filtroProducerId, filtroStatus, filtroDataDe, filtroDataAte])
 
-  // 🆕 há algum filtro ativo?
   const temFiltroAtivo = !!(filtroProducerId || filtroStatus || filtroDataDe || filtroDataAte)
 
-  // 🆕 Lista de produtores para o dropdown de filtro.
-  // ⚠️ O hook useProdutores só busca quando podeEditar. Para o filtro funcionar
-  // mesmo para visualizador, derivamos a lista das próprias colheitas carregadas.
+  // 🆕 Produtores do dropdown de filtro.
+  // ⚠️ producersAll (inclui inativos) — filtrar histórico antigo deve continuar possível.
+  // Fallback: visualizador não carrega o cadastro, então derivamos das colheitas.
   const produtoresFiltro = useMemo(() => {
-    if (producers.length > 0) return producers
+    if (producersAll.length > 0) return producersAll
     const map = new Map<string, { id: string; name: string }>()
     harvests.forEach(h => {
       if (!map.has(h.producer.id)) map.set(h.producer.id, h.producer)
     })
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [producers, harvests])
+  }, [producersAll, harvests])
 
   const resetForm = () => {
     setForm({
@@ -315,7 +309,9 @@ export default function ColheitaSolidariaPage() {
                 required
               >
                 <option value="">Selecione um produtor</option>
-                {producers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {comSelecionado(producers, producersAll, form.producerId).map(p => (
+                  <option key={p.id} value={p.id}>{p.name}{sufixoInativo(p)}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -371,9 +367,9 @@ export default function ColheitaSolidariaPage() {
                   className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employeeId)
                     .filter(emp => emp.id !== form.employee2Id && emp.id !== form.employee3Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
               <div>
@@ -385,9 +381,9 @@ export default function ColheitaSolidariaPage() {
                   disabled={!form.employeeId}
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employee2Id)
                     .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee3Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
               <div>
@@ -399,9 +395,9 @@ export default function ColheitaSolidariaPage() {
                   disabled={!form.employee2Id}
                 >
                   <option value="">Selecione...</option>
-                  {employees
+                  {comSelecionado(employees, employeesAll, form.employee3Id)
                     .filter(emp => emp.id !== form.employeeId && emp.id !== form.employee2Id)
-                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                    .map(emp => <option key={emp.id} value={emp.id}>{emp.name}{sufixoInativo(emp)}</option>)}
                 </select>
               </div>
             </div>
@@ -437,7 +433,9 @@ export default function ColheitaSolidariaPage() {
                         className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
                       >
                         <option value="">Selecione um produto</option>
-                        {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
+                        {comSelecionado(products, productsAll, item.productId).map(p => (
+                          <option key={p.id} value={p.id}>{p.name} ({p.unit}){sufixoInativo(p)}</option>
+                        ))}
                       </select>
                     </div>
 
@@ -532,7 +530,8 @@ export default function ColheitaSolidariaPage() {
 
               <div className="space-y-1 mb-3">
                 {form.items.filter(i => i.quantity > 0).map((item, idx) => {
-                  const prod = products.find(p => p.id === item.productId)
+                  // ⚠️ productsAll: produto inativado ainda deve exibir o nome
+                  const prod = productsAll.find(p => p.id === item.productId)
                   return (
                     <div key={idx} className="flex justify-between text-sm gap-2">
                       <span className="text-gray-600 truncate">
@@ -621,7 +620,9 @@ export default function ColheitaSolidariaPage() {
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
               >
                 <option value="">Todos</option>
-                {produtoresFiltro.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {produtoresFiltro.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}{sufixoInativo(p)}</option>
+                ))}
               </select>
             </div>
 
@@ -688,7 +689,7 @@ export default function ColheitaSolidariaPage() {
             const harvestEmployees = getHarvestEmployees(harvest)
             const canEditThis = canEditRecord('colheita-solidaria', harvest.date)
             const canDeleteThis = podeExcluir
-            // 🎭 Se a API marcou como mascarado, ocultamos TODOS os números
+            // 🎭 Se a API marcou como mascarado, ocultamos os valores em R$
             const masked = harvest.isMasked === true
 
             return (

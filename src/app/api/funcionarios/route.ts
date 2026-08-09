@@ -4,7 +4,19 @@ import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
 import { maskFuncionarioList } from '@/lib/mask-by-role'
 
-export async function GET() {
+const COUNT_SELECT = {
+  donationsAsEmployee1: true,
+  donationsAsEmployee2: true,
+  donationsAsEmployee3: true,
+  distributionsAsEmployee1: true,
+  distributionsAsEmployee2: true,
+  distributionsAsEmployee3: true,
+  harvestsAsEmployee1: true,
+  harvestsAsEmployee2: true,
+  harvestsAsEmployee3: true,
+} as const
+
+export async function GET(request: Request) {
   const authResult = await requireView('funcionarios')
   if (authResult instanceof NextResponse) return authResult
 
@@ -12,23 +24,18 @@ export async function GET() {
     const session = await auth()
     const role = session?.user?.role
 
+    const { searchParams } = new URL(request.url)
+    const apenasAtivos = searchParams.get('apenasAtivos') === '1'
+    const incluir = searchParams.get('incluir')
+
     const employees = await prisma.employee.findMany({
+      where: apenasAtivos
+        ? incluir
+          ? { OR: [{ active: true }, { id: incluir }] }
+          : { active: true }
+        : undefined,
       orderBy: { name: 'asc' },
-      include: {
-        _count: {
-          select: {
-            donationsAsEmployee1: true,
-            donationsAsEmployee2: true,
-            donationsAsEmployee3: true,
-            distributionsAsEmployee1: true,
-            distributionsAsEmployee2: true,
-            distributionsAsEmployee3: true,
-            harvestsAsEmployee1: true,
-            harvestsAsEmployee2: true,
-            harvestsAsEmployee3: true,
-          },
-        },
-      },
+      include: { _count: { select: COUNT_SELECT } },
     })
 
     const masked = maskFuncionarioList(employees, role)
@@ -50,6 +57,7 @@ export async function POST(request: Request) {
         name: body.name,
         role: body.role || null,
         phone: body.phone || null,
+        active: typeof body.active === 'boolean' ? body.active : true,
       },
     })
     return NextResponse.json(employee, { status: 201 })

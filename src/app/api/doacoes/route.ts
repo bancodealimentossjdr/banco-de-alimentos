@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
+import { validarCadastrosAtivos } from '@/lib/validar-ativos'
 import {
   maskNotesListIfReadOnly,
   maskDoador,
@@ -107,6 +108,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // 🛡️ SubOnda 2 — bloqueia cadastros INATIVOS em lançamentos NOVOS
+    const invalido = await validarCadastrosAtivos({
+      donorId,
+      employeeIds: [employeeId, employee2Id, employee3Id],
+      productIds: (items as { productId: string }[]).map(i => i.productId),
+    })
+    if (invalido) return invalido
 
     const donation = await prisma.donation.create({
       data: {

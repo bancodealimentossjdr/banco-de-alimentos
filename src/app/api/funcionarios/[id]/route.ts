@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireEdit } from '@/lib/auth-helpers'
+import { requireEdit, requireAdminOrDev } from '@/lib/auth-helpers'
 
 export async function PUT(
   request: Request,
@@ -24,6 +24,7 @@ export async function PUT(
         name: body.name,
         role: body.role || null,
         phone: body.phone || null,
+        active: typeof body.active === 'boolean' ? body.active : undefined,
       },
     })
 
@@ -99,5 +100,44 @@ export async function DELETE(
   } catch (error) {
     console.error('Erro DELETE funcionário:', error)
     return NextResponse.json({ error: 'Erro ao excluir funcionário' }, { status: 500 })
+  }
+}
+/**
+ * PATCH → alterna apenas o status (ativo/inativo). Admin ou DEV.
+ * Alternativa segura ao DELETE: preserva todo o histórico de vínculos.
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authResult = await requireAdminOrDev()
+  if (authResult instanceof NextResponse) return authResult
+
+  try {
+    const { id } = await params
+    const body = await request.json()
+
+    if (typeof body.active !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Campo "active" (boolean) é obrigatório' },
+        { status: 400 }
+      )
+    }
+
+    const employee = await prisma.employee.findUnique({ where: { id } })
+    if (!employee) {
+      return NextResponse.json({ error: 'Funcionário não encontrado' }, { status: 404 })
+    }
+
+    const updated = await prisma.employee.update({
+      where: { id },
+      data: { active: body.active },
+      select: { id: true, name: true, active: true },
+    })
+
+    return NextResponse.json(updated)
+  } catch (error) {
+    console.error('Erro PATCH funcionário:', error)
+    return NextResponse.json({ error: 'Erro ao alterar status' }, { status: 500 })
   }
 }
