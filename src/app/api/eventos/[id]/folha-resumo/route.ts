@@ -219,10 +219,14 @@ export async function POST(
 }
 
 /**
- * GET → lista últimos 20 ingressos + line-up fixo + status de limites.
+ * GET → lista ingressos + line-up fixo + status de limites.
+ *
+ * 🎭 ONDA 21.5 — máscara agora depende do ROLE (decidido no SERVIDOR):
+ *   role 'dev' → cpf e codigoFamiliar CRUS + lista completa
+ *   demais     → mascarados + take de LIMITE_LISTA
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const result = await requireAuth()
@@ -248,10 +252,17 @@ export async function GET(
     )
   }
 
+  // 🔓 DEV vê tudo, cru. Ninguém mais.
+  const isDev = role === 'dev'
+
+  // ?all=1 só tem efeito para dev (backend não confia no frontend)
+  const url = new URL(req.url)
+  const querTudo = isDev && url.searchParams.get('all') === '1'
+
   const registros = await prisma.folhaResumoIngresso.findMany({
     where: { eventoId },
     orderBy: { createdAt: 'desc' },
-    take: LIMITE_LISTA,
+    ...(querTudo ? {} : { take: LIMITE_LISTA }),
     select: {
       id: true,
       codigoFamiliar: true,
@@ -264,14 +275,16 @@ export async function GET(
 
   const lista = registros.map((r) => ({
     id: r.id,
-    codigoFamiliar: mascararCodigo(r.codigoFamiliar),
-    cpf: mascararCpf(r.cpf),
+    codigoFamiliar: isDev ? r.codigoFamiliar : mascararCodigo(r.codigoFamiliar),
+    cpf: isDev ? r.cpf : mascararCpf(r.cpf),
     rendaPerCapita: Number(r.rendaPerCapita),
     show: labelShow(r.showDia),
     createdAt: r.createdAt,
   }))
 
-  // 🆕 status de limites por show (só shows com limite configurado aparecem com números)
+  // 🆕 contagem real (a lista pode estar truncada)
+  const totalGeral = await prisma.folhaResumoIngresso.count({ where: { eventoId } })
+
   const limites = await prisma.limiteShow.findMany({
     where: { eventoId },
     select: { showDia: true, limite: true, usados: true },
@@ -284,14 +297,21 @@ export async function GET(
       value: s.value,
       artista: s.artista,
       data: s.data,
-      limite: lim?.limite ?? 0, // 0 = sem limite
+      limite: lim?.limite ?? 0,
       usados: lim?.usados ?? 0,
       esgotado: lim ? lim.limite > 0 && lim.usados >= lim.limite : false,
     }
   })
 
-  return NextResponse.json({ total: lista.length, registros: lista, shows })
+  return NextResponse.json({
+    total: lista.length,
+    totalGeral,
+    truncado: lista.length < totalGeral,
+    registros: lista,
+    shows,
+  })
 }
+
 
 /**
  * DELETE → remove um ingresso da folha resumo. SÓ dev.
