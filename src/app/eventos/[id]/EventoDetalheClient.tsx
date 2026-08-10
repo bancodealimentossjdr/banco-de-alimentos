@@ -958,7 +958,6 @@ export default function EventoDetalheClient({
           <div className="flex justify-end">
             <ExportarEventoPdf
               eventoId={evento.id}
-              isAdmin={isAdmin}
               dataInicio={inicio}
               dataFim={fim}
             />

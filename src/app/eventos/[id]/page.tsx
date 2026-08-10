@@ -6,6 +6,25 @@ import EventoDetalheClient from './EventoDetalheClient'
 
 export const revalidate = 15
 
+const TZ = 'America/Sao_Paulo'
+
+/**
+ * 🕐 CORREÇÃO CRÍTICA — agrupamento por dia no fuso de Brasília.
+ *
+ * `toISOString().slice(0,10)` agrupa em UTC. Como a Vercel roda em UTC,
+ * qualquer recebimento após 21h BRT era contabilizado no DIA SEGUINTE.
+ * Em evento de show (público chega à noite), isso deslocava o volume inteiro.
+ *
+ * `en-CA` produz YYYY-MM-DD, que é ordenável lexicograficamente.
+ */
+const fmtDiaBR = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+const diaISO = (d: Date) => fmtDiaBR.format(d)
+
 type OperadorComUser = {
   id: string
   ativo: boolean
@@ -52,8 +71,6 @@ export default async function EventoDetalhePage({
           }
         : false,
       // ⚡ ONDA 21.3 — select enxuto: só o necessário para agregar.
-      // Removidos: id, alimentoId, alimento.id, product.id (não usados).
-      // orderBy removido: a ordenação é feita nos arrays agregados.
       recebimentos: {
         select: {
           quantidade: true,
@@ -65,8 +82,15 @@ export default async function EventoDetalhePage({
           },
         },
       },
+      // 🆕 ONDA 21.6 — contagem de arrecadação extra (cupons)
       _count: {
-        select: { recebimentos: true, operadores: true, locais: true, alimentos: true },
+        select: {
+          recebimentos: true,
+          operadores: true,
+          locais: true,
+          alimentos: true,
+          arrecadacoesExtra: true,
+        },
       },
     },
   })
@@ -84,10 +108,24 @@ export default async function EventoDetalhePage({
 
   const podeRegistrar = podeRegistrarNoEvento(role, temVinculoAtivo)
 
+  /**
+   * 🎟️ ONDA 21.6 — total de cupons emitidos por show.
+   * Agregado no BANCO (groupBy), não em memória: não carrega os itens.
+   */
+  const cuponsPorShowRaw = await prisma.arrecadacaoItem.groupBy({
+    by: ['showDia'],
+    where: { arrecadacao: { eventoId: id } },
+    _sum: { quantidade: true },
+  })
+  const cuponsPorShow = cuponsPorShowRaw
+    .map((c) => ({ showDia: c.showDia, cupons: c._sum.quantidade ?? 0 }))
+    .sort((a, b) => a.showDia.localeCompare(b.showDia))
+  const totalCupons = cuponsPorShow.reduce((a, c) => a + c.cupons, 0)
+
   const usuariosVinculaveis = isAdmin
     ? (
         await prisma.user.findMany({
-          where: { role: 'visualizador' },
+          where: { role: 'visualizador', active: true },
           select: { id: true, name: true, email: true },
           orderBy: { name: 'asc' },
         })
@@ -114,9 +152,7 @@ export default async function EventoDetalhePage({
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
 
   // ════════════════════════════════════════════════════════════════
-  // ⚡ ONDA 21.3 — LOOP ÚNICO
-  // Antes: 2 varreduras sobre recebimentos (gráficos + doações).
-  // Agora: 1 varredura alimentando todos os acumuladores.
+  // ⚡ ONDA 21.3 — LOOP ÚNICO (1 varredura, todos os acumuladores)
   // ════════════════════════════════════════════════════════════════
 
   const kgPorLocalMap = new Map<string, number>()
@@ -124,18 +160,23 @@ export default async function EventoDetalhePage({
   const kgPorDiaMap = new Map<string, number>()
   let totalKg = 0
 
-  // 🔥 ONDA 21.3 — fatos AGREGADOS por (dia | localNome | tipo | unidade).
-  // O tipo Fato não possui campo único por recebimento, então a agregação
-  // é matematicamente equivalente: filtrarFatos/derivarMetrics não mudam.
-  // Payload deixa de crescer com nº de recebimentos.
+  // 🔥 fatos AGREGADOS por (dia | localNome | tipo | unidade)
   const fatosMap = new Map<
     string,
-    { localNome: string; tipo: string; unidade: string; dia: string; quantidade: number }
+    {
+      localNome: string
+      tipo: string
+      unidade: string
+      dia: string
+      quantidade: number
+    }
   >()
 
-  // Acumuladores da aba Doações
   type ProdAcc = Map<string, { nome: string; unidade: string; quantidade: number }>
-  const porLocalAcc = new Map<string, { id: string; nome: string; produtos: ProdAcc }>()
+  const porLocalAcc = new Map<
+    string,
+    { id: string; nome: string; produtos: ProdAcc }
+  >()
   const totalGeralMap = new Map<string, number>()
 
   for (const r of evento.recebimentos) {
@@ -143,7 +184,7 @@ export default async function EventoDetalhePage({
     const ln = localNome.get(r.localId) ?? '—'
     const tipo = prod?.name ?? 'Não informado'
     const unidade = r.unidade ?? prod?.unit ?? 'kg'
-    const dia = r.createdAt.toISOString().slice(0, 10)
+    const dia = diaISO(r.createdAt) // 🕐 fuso de Brasília
     const qtd = r.quantidade
 
     // — métricas globais —
@@ -162,10 +203,11 @@ export default async function EventoDetalhePage({
     }
 
     // — aba Doações —
-    if (!porLocalAcc.has(r.localId)) {
-      porLocalAcc.set(r.localId, { id: r.localId, nome: ln, produtos: new Map() })
+    let localEntry = porLocalAcc.get(r.localId)
+    if (!localEntry) {
+      localEntry = { id: r.localId, nome: ln, produtos: new Map() }
+      porLocalAcc.set(r.localId, localEntry)
     }
-    const localEntry = porLocalAcc.get(r.localId)!
     const prodKey = `${tipo}__${unidade}`
     const prodEntry = localEntry.produtos.get(prodKey)
     if (prodEntry) {
@@ -182,7 +224,10 @@ export default async function EventoDetalhePage({
     .map((f) => ({ ...f, quantidade: round(f.quantidade) }))
     .sort((a, b) => a.dia.localeCompare(b.dia))
 
-  const totalRefugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
+  const totalRefugoKg = evento.alimentos.reduce(
+    (acc, a) => acc + (a.refugoKg ?? 0),
+    0,
+  )
 
   const kgPorLocal = [...kgPorLocalMap.entries()]
     .map(([nome, kg]) => ({ nome, kg: round(kg) }))
@@ -206,34 +251,52 @@ export default async function EventoDetalhePage({
   }
 
   // ════════════ RANGE do filtro de data (17.5-a) ════════════
-  const hojeISO = new Date().toISOString().slice(0, 10)
-  const inicioISO = evento.dataInicio.toISOString().slice(0, 10)
-  const fimISO = evento.dataFim ? evento.dataFim.toISOString().slice(0, 10) : hojeISO
+  // 🕐 também no fuso BR: em UTC, das 21h à meia-noite "hoje" virava amanhã
+  // e o input date recebia um max no futuro.
+  const hojeISO = diaISO(new Date())
+  const inicioISO = diaISO(evento.dataInicio)
+  const fimISO = evento.dataFim ? diaISO(evento.dataFim) : hojeISO
   const max = fimISO < hojeISO ? fimISO : hojeISO
 
-  const d = new Date(`${max}T00:00:00Z`)
+  // 7 dias para trás a partir de `max`
+  const d = new Date(`${max}T12:00:00Z`) // meio-dia: imune a DST
   d.setUTCDate(d.getUTCDate() - 6)
   const seteDiasISO = d.toISOString().slice(0, 10)
-  const defaultStart = seteDiasISO < inicioISO ? inicioISO : seteDiasISO
 
-  const range = { min: inicioISO, max, defaultStart, defaultEnd: max }
+  // ✅ guarda: evento futuro (max < inicioISO) não gera range invertido
+  const defaultStart = seteDiasISO < inicioISO ? inicioISO : seteDiasISO
+  const rangeMin = inicioISO <= max ? inicioISO : max
+
+  const range = {
+    min: rangeMin,
+    max,
+    defaultStart: defaultStart <= max ? defaultStart : max,
+    defaultEnd: max,
+  }
 
   // ════════════ SAÍDA da aba Doações ════════════
-  const doacoesPorLocal = [...porLocalAcc.values()].map((local) => {
-    const produtos = [...local.produtos.values()]
-      .map((p) => ({ ...p, quantidade: round(p.quantidade) }))
-      .sort((a, b) => b.quantidade - a.quantidade)
+  const doacoesPorLocal = [...porLocalAcc.values()]
+    .map((local) => {
+      const produtos = [...local.produtos.values()]
+        .map((p) => ({ ...p, quantidade: round(p.quantidade) }))
+        .sort((a, b) => b.quantidade - a.quantidade)
 
-    const subMap = new Map<string, number>()
-    for (const p of produtos) {
-      subMap.set(p.unidade, (subMap.get(p.unidade) ?? 0) + p.quantidade)
-    }
-    const subtotais = [...subMap.entries()]
-      .map(([unidade, quantidade]) => ({ unidade, quantidade: round(quantidade) }))
-      .sort((a, b) => a.unidade.localeCompare(b.unidade))
+      const subMap = new Map<string, number>()
+      for (const p of produtos) {
+        subMap.set(p.unidade, (subMap.get(p.unidade) ?? 0) + p.quantidade)
+      }
+      const subtotais = [...subMap.entries()]
+        .map(([unidade, quantidade]) => ({ unidade, quantidade: round(quantidade) }))
+        .sort((a, b) => a.unidade.localeCompare(b.unidade))
 
-    return { id: local.id, nome: local.nome, produtos, subtotais }
-  })
+      return { id: local.id, nome: local.nome, produtos, subtotais }
+    })
+    // ✅ ordena locais por volume (antes vinha na ordem aleatória do Map)
+    .sort((a, b) => {
+      const sa = a.subtotais.reduce((x, s) => x + s.quantidade, 0)
+      const sb = b.subtotais.reduce((x, s) => x + s.quantidade, 0)
+      return sb - sa
+    })
 
   const totalGeral = [...totalGeralMap.entries()]
     .map(([unidade, quantidade]) => ({ unidade, quantidade: round(quantidade) }))
@@ -273,11 +336,14 @@ export default async function EventoDetalhePage({
       locais: evento._count.locais,
       operadores: evento._count.operadores,
       alimentos: evento._count.alimentos,
+      arrecadacoesExtra: evento._count.arrecadacoesExtra, // 🆕
     },
     metrics,
     fatos,
     range,
     doacoes,
+    // 🆕 ONDA 21.6 — cupons de arrecadação extra
+    cupons: { total: totalCupons, porShow: cuponsPorShow },
   }
 
   return (

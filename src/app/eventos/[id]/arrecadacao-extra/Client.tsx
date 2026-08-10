@@ -11,6 +11,7 @@ type ShowOption = { value: string; artista: string; data: string }
 type ItemRegistro = {
   id: string
   showDia: string
+  alimentoId: string
   alimentoNome: string
   quantidade: number
   numeroInicio: number
@@ -20,6 +21,7 @@ type Registro = {
   id: string
   doadorNome: string
   doadorCpf: string | null
+  localId: string | null
   localNome: string | null
   itens: ItemRegistro[]
 }
@@ -37,7 +39,17 @@ function labelShow(v: string): string {
   return s ? `${s.data} — ${s.artista}` : v
 }
 
+/** máscara progressiva de CPF na digitação */
+function mascararEntradaCpf(v: string): string {
+  const d = v.replace(/\D/g, '').slice(0, 11)
+  if (d.length <= 3) return d
+  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`
+  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`
+}
+
 type ItemForm = { showDia: string; alimentoId: string; quantidade: string }
+type Formato = 'pdf' | 'xlsx' | 'csv'
 
 export default function Client({
   eventoId,
@@ -53,6 +65,9 @@ export default function Client({
   const [registros, setRegistros] = useState<Registro[]>([])
   const [totaisPorShow, setTotaisPorShow] = useState<Record<string, number>>({})
   const [podeEditar, setPodeEditar] = useState(false)
+  const [podeExportar, setPodeExportar] = useState(false) // 🆕 ONDA 21.6
+  const [cpfMascarado, setCpfMascarado] = useState(true) // 🆕
+  const [exportando, setExportando] = useState<Formato | null>(null) // 🆕
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
 
@@ -75,6 +90,8 @@ export default function Client({
       setRegistros(data.registros ?? [])
       setTotaisPorShow(data.totaisPorShow ?? {})
       setPodeEditar(Boolean(data.podeEditar))
+      setPodeExportar(Boolean(data.podeExportar)) // 🆕
+      setCpfMascarado(Boolean(data.cpfMascarado)) // 🆕
     } catch {
       toast.error('Erro ao carregar dados.')
     } finally {
@@ -111,34 +128,48 @@ export default function Client({
   function iniciarEdicao(r: Registro) {
     setEditandoId(r.id)
     setDoadorNome(r.doadorNome)
-    setDoadorCpf(r.doadorCpf ?? '')
-    const loc = locais.find((l) => l.nome === r.localNome)
-    setLocalId(loc?.id ?? '')
+    // ⚠️ CPF mascarado NÃO volta ao formulário — evitaria gravar "***" no banco.
+    //    Campo vazio na edição = servidor preserva o CPF atual.
+    setDoadorCpf(cpfMascarado ? '' : (r.doadorCpf ?? ''))
+    setLocalId(r.localId ?? '') // ✅ id vindo da API, sem match por nome
     setItens(
-      r.itens.map((i) => {
-        const al = alimentos.find((a) => a.nome === i.alimentoNome)
-        return {
-          showDia: i.showDia,
-          alimentoId: al?.id ?? '',
-          quantidade: String(i.quantidade),
-        }
-      }),
+      r.itens.map((i) => ({
+        showDia: i.showDia,
+        alimentoId: i.alimentoId,
+        quantidade: String(i.quantidade),
+      })),
     )
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function excluir(id: string) {
     if (!confirm('Excluir este registro? Esta ação não pode ser desfeita.')) return
-    const res = await fetch(
-      `/api/eventos/${eventoId}/arrecadacao-extra/${id}`,
-      { method: 'DELETE' },
-    )
+    const res = await fetch(`/api/eventos/${eventoId}/arrecadacao-extra/${id}`, {
+      method: 'DELETE',
+    })
     if (res.ok) {
       toast.success('Registro excluído.')
       carregar()
     } else {
-      toast.error('Erro ao excluir.')
+      const err = await res.json().catch(() => ({}))
+      toast.error(err.error ?? 'Erro ao excluir.')
     }
+  }
+
+  /**
+   * 🆕 ONDA 21.6 — exportação dev/admin.
+   * O gate real é no SERVIDOR: admin recebe CPF mascarado, dev recebe cru.
+   * Este botão é apenas conveniência de UI.
+   */
+  function exportar(formato: Formato) {
+    setExportando(formato)
+    const a = document.createElement('a')
+    a.href = `/api/eventos/${eventoId}/arrecadacao-extra/export?format=${formato}`
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => setExportando(null), 1500)
   }
 
   async function enviar(e: React.FormEvent) {
@@ -148,10 +179,22 @@ export default function Client({
       toast.error('Informe o nome do doador.')
       return
     }
-    if (doadorCpf.trim().length === 0) {
-      toast.error('Informe o CPF do doador.')
+
+    const cpfDigitos = doadorCpf.replace(/\D/g, '')
+    // na criação o CPF é obrigatório; na edição, vazio = preservar o atual
+    if (!editandoId && cpfDigitos.length !== 11) {
+      toast.error('Informe um CPF válido (11 dígitos).')
       return
     }
+    if (editandoId && cpfDigitos.length > 0 && cpfDigitos.length !== 11) {
+      toast.error('CPF incompleto.')
+      return
+    }
+    if (!localId) {
+      toast.error('Selecione o local da doação.')
+      return
+    }
+
     const itensPayload = itens
       .filter((it) => it.showDia && it.alimentoId && it.quantidade)
       .map((it) => ({
@@ -164,7 +207,9 @@ export default function Client({
       toast.error('Preencha ao menos um item completo (show + alimento + quantidade).')
       return
     }
-    if (itensPayload.some((it) => !Number.isInteger(it.quantidade) || it.quantidade < 1)) {
+    if (
+      itensPayload.some((it) => !Number.isInteger(it.quantidade) || it.quantidade < 1)
+    ) {
       toast.error('Quantidade inválida.')
       return
     }
@@ -173,7 +218,7 @@ export default function Client({
     try {
       const payload = {
         doadorNome: doadorNome.trim(),
-        doadorCpf: doadorCpf.trim() || null,
+        doadorCpf: cpfDigitos || null,
         localId: localId || null,
         itens: itensPayload,
       }
@@ -274,14 +319,20 @@ export default function Client({
 
         <div className="mb-4">
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            CPF <span className="text-red-500">*</span>
+            CPF {!editandoId && <span className="text-red-500">*</span>}
           </label>
           <input
             value={doadorCpf}
-            onChange={(e) => setDoadorCpf(e.target.value)}
+            onChange={(e) => setDoadorCpf(mascararEntradaCpf(e.target.value))}
+            inputMode="numeric"
             placeholder="000.000.000-00"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900"
           />
+          {editandoId && cpfMascarado && (
+            <p className="mt-1 text-xs text-gray-400">
+              Deixe vazio para manter o CPF já registrado.
+            </p>
+          )}
         </div>
 
         <div className="mb-6">
@@ -305,7 +356,9 @@ export default function Client({
         {/* caixa de itens (show + alimento + qtd) */}
         <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">🎤 Shows &amp; alimentos</h3>
+            <h3 className="text-sm font-semibold text-gray-800">
+              🎤 Shows &amp; alimentos
+            </h3>
             <button
               type="button"
               onClick={adicionarItem}
@@ -319,7 +372,9 @@ export default function Client({
             {itens.map((it, idx) => (
               <div key={idx} className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-500">Item {idx + 1}</span>
+                  <span className="text-xs font-medium text-gray-500">
+                    Item {idx + 1}
+                  </span>
                   {itens.length > 1 && (
                     <button
                       type="button"
@@ -391,15 +446,57 @@ export default function Client({
           disabled={salvando}
           className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
         >
-          {salvando ? 'Salvando...' : editandoId ? 'Salvar alterações' : 'Registrar doação'}
+          {salvando
+            ? 'Salvando...'
+            : editandoId
+              ? 'Salvar alterações'
+              : 'Registrar doação'}
         </button>
       </form>
 
       {/* lista de registros */}
       <div className="mt-8">
-        <h2 className="mb-4 text-lg font-bold text-gray-900">
-          Registros ({registros.length})
-        </h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-gray-900">
+            Registros ({registros.length})
+          </h2>
+
+          {/* ⬇️ ONDA 21.6 — export dev/admin */}
+          {podeExportar && registros.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => exportar('pdf')}
+                disabled={exportando !== null}
+                className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 active:scale-95 disabled:opacity-40"
+              >
+                {exportando === 'pdf' ? '⏳…' : '📄 PDF'}
+              </button>
+              <button
+                type="button"
+                onClick={() => exportar('xlsx')}
+                disabled={exportando !== null}
+                className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700 transition hover:bg-teal-100 active:scale-95 disabled:opacity-40"
+              >
+                {exportando === 'xlsx' ? '⏳…' : '⬇️ Excel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => exportar('csv')}
+                disabled={exportando !== null}
+                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50 active:scale-95 disabled:opacity-40"
+              >
+                {exportando === 'csv' ? '⏳…' : '⬇️ CSV'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {podeExportar && cpfMascarado && registros.length > 0 && (
+          <p className="mb-3 text-xs text-gray-400">
+            🔒 CPFs saem mascarados nas exportações.
+          </p>
+        )}
 
         {loading ? (
           <p className="text-sm text-gray-500">Carregando...</p>
@@ -407,62 +504,83 @@ export default function Client({
           <p className="text-sm text-gray-500">Nenhum registro ainda.</p>
         ) : (
           <div className="space-y-4">
-            {registros.map((r) => (
-              <div key={r.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="mb-3 flex items-start justify-between border-b border-gray-100 pb-3">
-                  <div>
-                    <div className="text-base font-bold text-gray-900">{r.doadorNome}</div>
-                    <div className="text-xs text-gray-500">
-                      CPF: {r.doadorCpf ?? '—'}
-                      {r.localNome && (
-                        <>
-                          {' '}· Local:{' '}
-                          <span className="font-medium text-gray-700">{r.localNome}</span>
-                        </>
-                      )}
+            {registros.map((r) => {
+              const cuponsRegistro = r.itens.reduce((a, i) => a + i.quantidade, 0)
+              return (
+                <div
+                  key={r.id}
+                  className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="mb-3 flex items-start justify-between border-b border-gray-100 pb-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-base font-bold text-gray-900">
+                          {r.doadorNome}
+                        </span>
+                        {/* 🏷️ badge com total de cupons do registro */}
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                          {cuponsRegistro} cupom{cuponsRegistro > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        CPF: {r.doadorCpf ?? '—'}
+                        {r.localNome && (
+                          <>
+                            {' '}
+                            · Local:{' '}
+                            <span className="font-medium text-gray-700">
+                              {r.localNome}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
+                    {podeEditar && (
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => iniciarEdicao(r)}
+                          className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          ✏️ Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => excluir(r.id)}
+                          className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {podeEditar && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => iniciarEdicao(r)}
-                        className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        ✏️ Editar
-                      </button>
-                      <button
-                        onClick={() => excluir(r.id)}
-                        className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                      >
-                        Excluir
-                      </button>
-                    </div>
-                  )}
-                </div>
 
-                <div className="space-y-2">
-                  {r.itens.map((i) => (
-                    <div
-                      key={i.id}
-                      className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"
-                    >
-                      <div>
-                        <span className="font-semibold text-emerald-700">{labelShow(i.showDia)}</span>
-                        <span className="text-gray-400"> · {i.alimentoNome}</span>
+                  <div className="space-y-2">
+                    {r.itens.map((i) => (
+                      <div
+                        key={i.id}
+                        className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"
+                      >
+                        <div>
+                          <span className="font-semibold text-emerald-700">
+                            {labelShow(i.showDia)}
+                          </span>
+                          <span className="text-gray-400"> · {i.alimentoNome}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="rounded-md bg-emerald-100 px-2 py-0.5 font-mono text-xs font-bold text-emerald-700">
+                            {i.numeroInicio}–{i.numeroFim}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {i.quantidade} cupom{i.quantidade > 1 ? 's' : ''}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="rounded-md bg-emerald-100 px-2 py-0.5 font-mono text-xs font-bold text-emerald-700">
-                          {i.numeroInicio}–{i.numeroFim}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {i.quantidade} cupom{i.quantidade > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

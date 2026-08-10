@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
 
+export const dynamic = 'force-dynamic'
+
 export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string; registroId: string }> },
@@ -30,9 +32,12 @@ export async function PUT(
   }
 
   if (typeof doadorNome !== 'string' || doadorNome.trim().length < 2) {
-    return NextResponse.json({ error: 'Nome do doador é obrigatório.' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Nome do doador é obrigatório.' },
+      { status: 400 },
+    )
   }
-  if (localId !== null && typeof localId !== 'string') {
+  if (localId !== null && localId !== undefined && typeof localId !== 'string') {
     return NextResponse.json({ error: 'Local inválido.' }, { status: 400 })
   }
   if (!Array.isArray(itens) || itens.length === 0) {
@@ -41,18 +46,19 @@ export async function PUT(
 
   const registro = await prisma.arrecadacaoExtra.findFirst({
     where: { id: registroId, eventoId },
-    select: { id: true },
+    select: { id: true, doadorCpf: true },
   })
   if (!registro) {
     return NextResponse.json({ error: 'Registro não encontrado.' }, { status: 404 })
   }
 
-  const itensValidados: { showDia: string; alimentoId: string; quantidade: number }[] = []
+  const itensValidados: { showDia: string; alimentoId: string; quantidade: number }[] =
+    []
   for (const it of itens) {
     if (typeof it?.showDia !== 'string' || it.showDia.trim().length === 0) {
       return NextResponse.json({ error: 'Show inválido.' }, { status: 400 })
     }
-    if (typeof it?.alimentoId !== 'string') {
+    if (typeof it?.alimentoId !== 'string' || it.alimentoId.length === 0) {
       return NextResponse.json({ error: 'Alimento inválido.' }, { status: 400 })
     }
     if (!Number.isInteger(it?.quantidade) || it.quantidade < 1) {
@@ -65,21 +71,66 @@ export async function PUT(
     })
   }
 
+  // ✅ alimentos precisam pertencer ao evento (faltava no PUT original)
+  const alims = await prisma.eventoAlimento.findMany({
+    where: { eventoId, id: { in: itensValidados.map((i) => i.alimentoId) } },
+    select: { id: true },
+  })
+  const alimsSet = new Set(alims.map((a) => a.id))
+  if (itensValidados.some((i) => !alimsSet.has(i.alimentoId))) {
+    return NextResponse.json(
+      { error: 'Alimento não pertence ao evento' },
+      { status: 400 },
+    )
+  }
+
+  if (typeof localId === 'string' && localId.length > 0) {
+    const local = await prisma.localColeta.findFirst({
+      where: { id: localId, eventoId },
+      select: { id: true },
+    })
+    if (!local) {
+      return NextResponse.json(
+        { error: 'Local não pertence ao evento' },
+        { status: 400 },
+      )
+    }
+  }
+
+  /**
+   * 🎭 CPF na edição:
+   * o dev enxerga o CPF cru, então pode reenviá-lo. Mas se vier vazio,
+   * PRESERVAMOS o valor existente em vez de apagar — evita perda silenciosa
+   * de dado quando o formulário não repopula o campo.
+   */
+  const cpfDigitos =
+    typeof doadorCpf === 'string' ? doadorCpf.replace(/\D/g, '') : ''
+  let doadorCpfFinal: string | null = registro.doadorCpf
+  if (cpfDigitos.length === 11) doadorCpfFinal = cpfDigitos
+  else if (typeof doadorCpf === 'string' && doadorCpf.trim() === '__LIMPAR__')
+    doadorCpfFinal = null
+  else if (cpfDigitos.length > 0 && cpfDigitos.length !== 11) {
+    return NextResponse.json({ error: 'CPF deve ter 11 dígitos' }, { status: 400 })
+  }
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.arrecadacaoExtra.update({
         where: { id: registroId },
         data: {
           doadorNome: doadorNome.trim(),
-          doadorCpf:
-            typeof doadorCpf === 'string' && doadorCpf.trim().length > 0
-              ? doadorCpf.trim()
-              : null,
-          localId: localId ?? null,
+          doadorCpf: doadorCpfFinal,
+          localId: (localId as string | null) ?? null,
         },
       })
 
-      // apaga itens antigos e regenera com faixas ATÔMICAS por show
+      /**
+       * ⚠️ DECISÃO CONSCIENTE (ONDA 21.6):
+       * ao editar, as faixas antigas são DESCARTADAS e novas são emitidas
+       * a partir do contador. Os números antigos NÃO são reciclados —
+       * cupons já impressos/entregues nunca são reutilizados por outro doador.
+       * Custo: buracos na sequência. Benefício: rastreabilidade e zero colisão.
+       */
       await tx.arrecadacaoItem.deleteMany({ where: { arrecadacaoId: registroId } })
 
       const qtdPorShow = new Map<string, number>()
@@ -99,21 +150,22 @@ export async function PUT(
       }
 
       const cursorPorShow = new Map(baseInicio)
-      for (const it of itensValidados) {
+      const novos = itensValidados.map((it) => {
         const inicio = cursorPorShow.get(it.showDia)!
         const fim = inicio + it.quantidade - 1
         cursorPorShow.set(it.showDia, fim + 1)
-        await tx.arrecadacaoItem.create({
-          data: {
-            arrecadacaoId: registroId,
-            showDia: it.showDia,
-            alimentoId: it.alimentoId,
-            quantidade: it.quantidade,
-            numeroInicio: inicio,
-            numeroFim: fim,
-          },
-        })
-      }
+        return {
+          arrecadacaoId: registroId,
+          showDia: it.showDia,
+          alimentoId: it.alimentoId,
+          quantidade: it.quantidade,
+          numeroInicio: inicio,
+          numeroFim: fim,
+        }
+      })
+
+      // ✅ createMany: 1 round-trip em vez de N (era create em loop)
+      await tx.arrecadacaoItem.createMany({ data: novos })
     })
 
     return NextResponse.json({ ok: true })
@@ -145,6 +197,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'Registro não encontrado.' }, { status: 404 })
   }
 
+  // itens caem por onDelete: Cascade no schema
   await prisma.arrecadacaoExtra.delete({ where: { id: registroId } })
   return NextResponse.json({ ok: true })
 }

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
-// xlsx precisa de runtime Node
+// exceljs precisa de runtime Node
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+const HEX_VERDE = 'FF14532D'
+const HEX_OURO = 'FFC9A227'
 
 // 🎤 Line-up FIXO — espelha o de ../route.ts
 const SHOWS = [
@@ -115,7 +118,8 @@ export async function GET(
     renda: Number(r.rendaPerCapita),
     show: labelShow(r.showDia),
     operador: nomeOperador.get(r.registradoPor) ?? r.registradoPor,
-    data: r.createdAt.toLocaleString('pt-BR'),
+    // 🕐 fuso explícito: a Vercel roda em UTC, sem isso a hora sai 3h adiantada
+    data: r.createdAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
   }))
 
   const slug = evento.nome
@@ -146,7 +150,7 @@ export async function GET(
       .join('\r\n')
 
     // 🔤 BOM UTF-8 — sem ele o Excel-BR estraga acentuação
-    const csv = `\uFEFF${head}\r\n${body}\r\n`
+    const csv = `\uFEFF${head}\r\n${body}${body ? '\r\n' : ''}`
 
     return new NextResponse(csv, {
       status: 200,
@@ -158,46 +162,49 @@ export async function GET(
     })
   }
 
-  // ─────────────────────── XLSX ───────────────────────
-  const aoa: (string | number)[][] = [
-    [...COLUNAS],
-    ...linhas.map((l) => [
-      l.codigoFamiliar,
-      l.cpf, // 👈 mantido como TEXTO (evita perder zero à esquerda)
-      l.renda,
-      l.show,
-      l.operador,
-      l.data,
-    ]),
+  // ─────────────────────── XLSX (exceljs) ───────────────────────
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'Annonae'
+  wb.created = new Date()
+
+  const ws = wb.addWorksheet('Folha Resumo')
+  ws.columns = [
+    { header: COLUNAS[0], key: 'codigoFamiliar', width: 20 },
+    { header: COLUNAS[1], key: 'cpf', width: 18 },
+    { header: COLUNAS[2], key: 'renda', width: 20 },
+    { header: COLUNAS[3], key: 'show', width: 26 },
+    { header: COLUNAS[4], key: 'operador', width: 24 },
+    { header: COLUNAS[5], key: 'data', width: 20 },
   ]
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  // cabeçalho institucional
+  const head = ws.getRow(1)
+  head.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  head.height = 20
+  head.alignment = { vertical: 'middle' }
+  head.eachCell((c) => {
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEX_VERDE } }
+    c.border = { bottom: { style: 'thin', color: { argb: HEX_OURO } } }
+  })
 
-  // força CPF e código como texto + formato monetário na renda
-  const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
-  for (let R = 1; R <= range.e.r; R++) {
-    for (const C of [0, 1]) {
-      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })]
-      if (cell) cell.t = 's'
-    }
-    const cellRenda = ws[XLSX.utils.encode_cell({ r: R, c: 2 })]
-    if (cellRenda) cellRenda.z = '#,##0.00'
+  for (const l of linhas) {
+    const row = ws.addRow(l)
+    // 👇 código e CPF como TEXTO (preserva zero à esquerda)
+    row.getCell('codigoFamiliar').numFmt = '@'
+    row.getCell('cpf').numFmt = '@'
+    row.getCell('renda').numFmt = '#,##0.00'
+    row.getCell('renda').alignment = { horizontal: 'right' }
   }
 
-  ws['!cols'] = [
-    { wch: 20 }, // código
-    { wch: 18 }, // cpf
-    { wch: 20 }, // renda
-    { wch: 26 }, // show
-    { wch: 24 }, // operador
-    { wch: 20 }, // data
-  ]
-  ws['!autofilter'] = { ref: ws['!ref'] ?? 'A1' }
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+  if (linhas.length > 0) {
+    ws.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: COLUNAS.length },
+    }
+  }
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Folha Resumo')
-
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+  const buf = await wb.xlsx.writeBuffer()
 
   return new NextResponse(buf as unknown as BodyInit, {
     status: 200,

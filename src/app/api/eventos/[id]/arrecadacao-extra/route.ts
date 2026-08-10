@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
 import { podeRegistrarNoEvento } from '@/lib/permissions'
+import { cpfPorRole } from '@/lib/mask'
+
+export const dynamic = 'force-dynamic'
 
 type ItemValido = {
   showDia: string
@@ -12,7 +15,7 @@ type ItemValido = {
 
 async function autorizar(eventoId: string) {
   const result = await requireAuth()
-  if (('user' in result) === false) {
+  if (result instanceof NextResponse) {
     return { ok: false as const, status: 401, error: 'Não autenticado' }
   }
   const userId = result.user.id
@@ -40,7 +43,17 @@ async function autorizar(eventoId: string) {
     return { ok: false as const, status: 403, error: 'Permissão negada' }
   }
 
-  return { ok: true as const, userId, role, podeEditar: role === 'dev' }
+  return {
+    ok: true as const,
+    userId,
+    role,
+    podeEditar: role === 'dev',
+    // 🆕 ONDA 21.6 — export liberado p/ dev e admin
+    podeExportar: role === 'dev' || role === 'admin',
+    // 🎭 ONDA 21.6 — CPF cru SOMENTE para dev.
+    //    Decidido aqui, no servidor: admin/operador nunca recebem o dado bruto.
+    revelarCpf: role === 'dev',
+  }
 }
 
 // ==========================================
@@ -48,7 +61,7 @@ async function autorizar(eventoId: string) {
 // ==========================================
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: eventoId } = await params
   const auth = await autorizar(eventoId)
@@ -80,7 +93,7 @@ export async function GET(
       id: true,
       doadorNome: true,
       doadorCpf: true,
-      local: { select: { nome: true } },
+      local: { select: { id: true, nome: true } },
       itens: {
         orderBy: { numeroInicio: 'asc' },
         select: {
@@ -89,6 +102,7 @@ export async function GET(
           quantidade: true,
           numeroInicio: true,
           numeroFim: true,
+          alimentoId: true,
           alimento: { select: { product: { select: { name: true } } } },
         },
       },
@@ -98,11 +112,14 @@ export async function GET(
   const registros = registrosRaw.map((r) => ({
     id: r.id,
     doadorNome: r.doadorNome,
-    doadorCpf: r.doadorCpf,
+    // 🔒 máscara no servidor
+    doadorCpf: cpfPorRole(r.doadorCpf, auth.revelarCpf),
+    localId: r.local?.id ?? null, // ✅ id, não nome — edição confiável
     localNome: r.local?.nome ?? null,
     itens: r.itens.map((it) => ({
       id: it.id,
       showDia: it.showDia,
+      alimentoId: it.alimentoId, // ✅ id direto, sem match por nome
       alimentoNome: it.alimento.product.name,
       quantidade: it.quantidade,
       numeroInicio: it.numeroInicio,
@@ -125,6 +142,8 @@ export async function GET(
     totaisPorShow,
     showsDistintos,
     podeEditar: auth.podeEditar,
+    podeExportar: auth.podeExportar, // 🆕
+    cpfMascarado: !auth.revelarCpf, // 🆕 avisa a UI
   })
 }
 
@@ -133,7 +152,7 @@ export async function GET(
 // ==========================================
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: eventoId } = await params
   const auth = await autorizar(eventoId)
@@ -148,11 +167,17 @@ export async function POST(
 
   const { doadorNome, doadorCpf, localId, itens } = body
   const doadorNomeTrim = (doadorNome ?? '').trim()
-  const doadorCpfTrim = (doadorCpf ?? '').trim() || null
+  // 🧹 CPF normalizado: só dígitos no banco (formatação é da apresentação)
+  const cpfDigitos =
+    typeof doadorCpf === 'string' ? doadorCpf.replace(/\D/g, '') : ''
+  const doadorCpfNorm = cpfDigitos.length > 0 ? cpfDigitos : null
   const localIdValid = localId || null
 
   if (doadorNomeTrim.length < 2) {
     return NextResponse.json({ error: 'Nome do doador inválido' }, { status: 400 })
+  }
+  if (doadorCpfNorm && doadorCpfNorm.length !== 11) {
+    return NextResponse.json({ error: 'CPF deve ter 11 dígitos' }, { status: 400 })
   }
   if (!Array.isArray(itens)) {
     return NextResponse.json({ error: 'Itens inválidos' }, { status: 400 })
@@ -182,19 +207,34 @@ export async function POST(
   })
   const alimsSet = new Set(alims.map((a) => a.id))
   if (itensValidos.some((i) => !alimsSet.has(i.alimentoId))) {
-    return NextResponse.json({ error: 'Alimento não pertence ao evento' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Alimento não pertence ao evento' },
+      { status: 400 },
+    )
+  }
+
+  // ✅ local precisa pertencer ao evento
+  if (localIdValid) {
+    const local = await prisma.localColeta.findFirst({
+      where: { id: localIdValid, eventoId },
+      select: { id: true },
+    })
+    if (!local) {
+      return NextResponse.json(
+        { error: 'Local não pertence ao evento' },
+        { status: 400 },
+      )
+    }
   }
 
   try {
     const criado = await prisma.$transaction(async (tx) => {
       // 🔑 numeração ATÔMICA por (eventoId, showDia)
-      // Agrupa quantidade por show p/ 1 incremento por show
       const qtdPorShow = new Map<string, number>()
       for (const it of itensValidos) {
         qtdPorShow.set(it.showDia, (qtdPorShow.get(it.showDia) ?? 0) + it.quantidade)
       }
 
-      // baseInicio[showDia] = primeiro número livre daquele show
       const baseInicio = new Map<string, number>()
       for (const [showDia, qtd] of qtdPorShow) {
         // upsert + increment atômico: dois pontos simultâneos NUNCA colidem
@@ -208,7 +248,6 @@ export async function POST(
         baseInicio.set(showDia, contador.ultimoNumero - qtd + 1)
       }
 
-      // distribui números dentro da faixa reservada de cada show
       const cursorPorShow = new Map(baseInicio)
       const itensComFaixa = itensValidos.map((it) => {
         const inicio = cursorPorShow.get(it.showDia)!
@@ -227,7 +266,7 @@ export async function POST(
         data: {
           eventoId,
           doadorNome: doadorNomeTrim,
-          doadorCpf: doadorCpfTrim,
+          doadorCpf: doadorCpfNorm,
           localId: localIdValid,
           operadorId: auth.userId,
           itens: { create: itensComFaixa },
@@ -241,7 +280,7 @@ export async function POST(
 
     return NextResponse.json(
       { ok: true, id: criado.id, itens: criado.itens },
-      { status: 201 }
+      { status: 201 },
     )
   } catch (e) {
     console.error('Erro POST arrecadacao-extra:', e)

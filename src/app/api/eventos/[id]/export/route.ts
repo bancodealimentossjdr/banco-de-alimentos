@@ -1,9 +1,9 @@
+// src/app/api/eventos/[id]/export/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { canEdit } from '@/lib/permissions'
 import { BRANDING } from '@/lib/branding'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -34,7 +34,6 @@ const fmtBR = (iso: string) => {
 
 /**
  * 🖼️ Logo institucional em base64.
- * Lida do filesystem — em serverless o arquivo precisa estar no bundle.
  * Falha é silenciosa: o PDF sai sem logo, nunca quebra.
  */
 function carregarLogo(): string | null {
@@ -47,9 +46,8 @@ function carregarLogo(): string | null {
 }
 
 /**
- * 📈 ONDA 21.4 — gráfico de linha temporal desenhado com PRIMITIVAS do jsPDF.
- * Decisão (opção A do roadmap): sem canvas, sem chartjs-node-canvas.
- * Vetorial, nítido em qualquer zoom, zero dependência nova.
+ * 📈 ONDA 21.4 — gráfico de linha temporal com PRIMITIVAS do jsPDF.
+ * Sem canvas, sem chartjs-node-canvas. Vetorial, zero dependência nova.
  */
 function desenharTimeline(
   doc: jsPDF,
@@ -59,8 +57,8 @@ function desenharTimeline(
   largura: number,
   altura: number,
 ) {
-  const padL = 52 // espaço p/ labels do eixo Y
-  const padB = 26 // espaço p/ labels do eixo X
+  const padL = 52
+  const padB = 26
   const padT = 10
   const plotX = x + padL
   const plotY = y + padT
@@ -69,11 +67,9 @@ function desenharTimeline(
   const baseY = plotY + plotH
 
   const maxKg = Math.max(...serie.map((s) => s.kg), 1)
-  // escala "bonita": arredonda o topo para cima
   const magnitude = Math.pow(10, Math.floor(Math.log10(maxKg)))
   const topo = Math.ceil(maxKg / magnitude) * magnitude
 
-  // ── grid horizontal + labels Y ──
   const LINHAS = 4
   doc.setFontSize(7)
   doc.setTextColor(...CINZA)
@@ -86,49 +82,41 @@ function desenharTimeline(
     doc.text(fmtNum(valor), plotX - 6, gy + 2.5, { align: 'right' })
   }
 
-  // ── eixos ──
   doc.setDrawColor(...CINZA)
   doc.setLineWidth(0.8)
   doc.line(plotX, plotY, plotX, baseY) // Y
   doc.line(plotX, baseY, plotX + plotW, baseY) // X
 
-  // ── posição de cada ponto ──
   const n = serie.length
-  const px = (i: number) => (n === 1 ? plotX + plotW / 2 : plotX + (plotW * i) / (n - 1))
+  const px = (i: number) =>
+    n === 1 ? plotX + plotW / 2 : plotX + (plotW * i) / (n - 1)
   const py = (kg: number) => baseY - (plotH * kg) / topo
 
-  // ── área sob a curva (verde translúcido simulado por tom claro) ──
+  // ── área sob a curva (tom claro simulando translucidez) ──
   if (n > 1) {
     doc.setFillColor(232, 244, 236)
-    const poly: [number, number][] = [
-      [plotX, baseY],
-      ...serie.map((s, i) => [px(i), py(s.kg)] as [number, number]),
-      [plotX + plotW, baseY],
-    ]
-    // jsPDF não tem polygon: aproxima com trapézios verticais
-    for (let i = 1; i < poly.length - 1; i++) {
-      const [x1, y1] = poly[i]
-      const [x2, y2] = poly[i + 1] ?? poly[i]
-      if (i + 1 >= poly.length - 1) break
+    for (let i = 0; i < n - 1; i++) {
+      const x1 = px(i)
+      const y1 = py(serie[i].kg)
+      const x2 = px(i + 1)
+      const y2 = py(serie[i + 1].kg)
+      // trapézio = 2 triângulos
       doc.triangle(x1, y1, x2, y2, x1, baseY, 'F')
       doc.triangle(x2, y2, x2, baseY, x1, baseY, 'F')
     }
   }
 
-  // ── polilinha ──
   doc.setDrawColor(...VERDE_CLARO)
   doc.setLineWidth(1.6)
   for (let i = 0; i < n - 1; i++) {
     doc.line(px(i), py(serie[i].kg), px(i + 1), py(serie[i + 1].kg))
   }
 
-  // ── pontos ──
   doc.setFillColor(...VERDE)
   for (let i = 0; i < n; i++) {
     doc.circle(px(i), py(serie[i].kg), n > 40 ? 1 : 2.2, 'F')
   }
 
-  // ── labels do eixo X (no máximo 8 ticks, sempre com primeiro e último) ──
   const passo = Math.max(1, Math.ceil(n / 8))
   doc.setFontSize(7)
   doc.setTextColor(...CINZA)
@@ -141,7 +129,6 @@ function desenharTimeline(
     doc.text(`${d}/${m}`, px(n - 1), baseY + 12, { align: 'center' })
   }
 
-  // ── legenda do eixo ──
   doc.setFontSize(7)
   doc.setTextColor(...CINZA)
   doc.text('kg recebidos por dia', plotX, y + altura + 2)
@@ -157,15 +144,13 @@ export async function GET(
   const role = session?.user?.role
   if (!role) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const isAdmin = canEdit(role, 'eventos')
   const nomeUsuario = session?.user?.name ?? session?.user?.email ?? '—'
 
-  // 🔐 Backend NÃO confia no frontend: só admin pode mask=false.
-  // ⚠️ ONDA 21.4 — a tabela de operadores foi REMOVIDA do relatório, então
-  // hoje o parâmetro não expõe mais nenhum dado sensível. Mantido apenas
-  // para compatibilidade da querystring e do selo no rodapé.
-  const querMask = req.nextUrl.searchParams.get('mask')
-  const semCensura = isAdmin && querMask === 'false'
+  // ❌ ONDA 21.6 — parâmetro `mask` REMOVIDO.
+  // A tabela de operadores saiu na 21.4; não sobrou dado sensível neste
+  // relatório, então o flag "sem censura" virou código morto e foi eliminado
+  // junto com o checkbox da UI. Dados de CPF vivem no relatório de
+  // arrecadação extra, que tem gate próprio (dev = cru, admin = mascarado).
 
   // filtro de período (YYYY-MM-DD). Ausentes = tudo.
   const inicioParam = req.nextUrl.searchParams.get('inicio')
@@ -189,7 +174,6 @@ export async function GET(
         },
       },
       criadoPor: { select: { name: true } },
-      // 🆕 ONDA 21.4 — createdAt necessário para a timeline
       recebimentos: {
         where:
           dtInicio || dtFim
@@ -212,7 +196,6 @@ export async function GET(
 
   if (!evento) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-  // ─── Mapas de apoio ───
   const localNome = new Map(evento.locais.map((l) => [l.id, l.nome]))
 
   // ─── Agregações (loop único) ───
@@ -239,12 +222,10 @@ export async function GET(
   // ⚠️ refugo NÃO tem data: é sempre do evento inteiro
   const refugoKg = evento.alimentos.reduce((acc, a) => acc + (a.refugoKg ?? 0), 0)
 
-  // 🥇 locais em ordem DECRESCENTE — lista completa
   const locaisRank = [...porLocal.entries()]
     .map(([nome, kg]) => ({ nome, kg: round(kg) }))
     .sort((a, b) => b.kg - a.kg)
 
-  // 🥇 alimentos em ordem DECRESCENTE — lista completa
   const alimentosRank = evento.alimentos
     .map((a) => ({
       nome: a.product.name,
@@ -291,7 +272,7 @@ export async function GET(
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
-  doc.setTextColor(...[226, 232, 226] as [number, number, number])
+  doc.setTextColor(226, 232, 226)
   doc.text('Relatório de Evento de Arrecadação', textoX, 58)
 
   doc.setFontSize(7.5)
@@ -323,7 +304,7 @@ export async function GET(
   )
   y += 22
 
-  // ─────── 2. INDICADORES (mantidos como estavam) ───────
+  // ─────── 2. INDICADORES ───────
   autoTable(doc, {
     startY: y,
     head: [['Indicador', 'Valor']],
@@ -468,12 +449,11 @@ export async function GET(
     },
   })
 
-  // ❌ ONDA 21.4 — tabela de OPERADORES removida (fora do escopo do relatório)
-
   // ─────── 6. RODAPÉ em todas as páginas ───────
   const totalPaginas = doc.getNumberOfPages()
-  const geradoEm = new Date().toLocaleString('pt-BR')
-  const selo = semCensura ? ' · dados sem censura (admin)' : ''
+  const geradoEm = new Date().toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+  })
 
   for (let p = 1; p <= totalPaginas; p++) {
     doc.setPage(p)
@@ -485,7 +465,7 @@ export async function GET(
     doc.setFontSize(7.5)
     doc.setTextColor(140, 140, 140)
     doc.text(
-      `Gerado em ${geradoEm} por ${nomeUsuario}${selo}  ·  ${BRANDING.name}`,
+      `Gerado em ${geradoEm} por ${nomeUsuario}  ·  ${BRANDING.name}`,
       MARGEM,
       pageH - 24,
     )

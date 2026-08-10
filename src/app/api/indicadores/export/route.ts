@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   )}-${fileDatePart(to)}-by-annonae`;
 
   if (format === 'excel' || format === 'xlsx') {
-    const buf = gerarExcelIndicadores(data);
+    const buf = await gerarExcelIndicadores(data);
     return new NextResponse(buf as unknown as BodyInit, {
       status: 200,
       headers: {
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (format === 'pdf') {
-    const buf = gerarPdfIndicadores(data);
+    const buf = await gerarExcelIndicadores(data);
     return new NextResponse(buf as unknown as BodyInit, {
       status: 200,
       headers: {

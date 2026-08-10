@@ -4,31 +4,27 @@ import { useState } from 'react'
 
 export default function ExportarEventoPdf({
   eventoId,
-  isAdmin,
   dataInicio,
   dataFim,
 }: {
   eventoId: string
-  isAdmin: boolean
-  dataInicio?: string // 🆕 17.5-a — YYYY-MM-DD
+  dataInicio?: string // 17.5-a — YYYY-MM-DD
   dataFim?: string
 }) {
-  const [semCensura, setSemCensura] = useState(false)
   const [baixando, setBaixando] = useState(false)
 
+  // ❌ ONDA 21.6 — prop `isAdmin` e o checkbox "sem censura" removidos:
+  //    o relatório de evento não expõe mais dado sensível (operadores saíram
+  //    na 21.4), então o parâmetro `mask` era órfão.
   const exportar = () => {
     setBaixando(true)
 
     const params = new URLSearchParams({ format: 'pdf' })
-    if (isAdmin && semCensura) params.set('mask', 'false')
-    // 🆕 17.5-a — repassa o filtro de período ao PDF
     if (dataInicio) params.set('inicio', dataInicio)
     if (dataFim) params.set('fim', dataFim)
 
-    const url = `/api/eventos/${eventoId}/export?${params.toString()}`
-
     const a = document.createElement('a')
-    a.href = url
+    a.href = `/api/eventos/${eventoId}/export?${params.toString()}`
     a.rel = 'noopener'
     document.body.appendChild(a)
     a.click()
@@ -47,19 +43,6 @@ export default function ExportarEventoPdf({
       >
         {baixando ? '⏳ Gerando...' : '📄 Exportar PDF'}
       </button>
-
-      {isAdmin && (
-        <label className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm text-gray-600 select-none cursor-pointer">
-          <input
-            type="checkbox"
-            checked={semCensura}
-            onChange={(e) => setSemCensura(e.target.checked)}
-            className="h-4 w-4 shrink-0 rounded border-gray-300 text-green-600 focus:ring-green-500"
-          />
-          <span>Exportar sem censura</span>
-          <span className="text-xs text-amber-600">(dados sensíveis)</span>
-        </label>
-      )}
     </div>
   )
 }
