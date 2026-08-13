@@ -19,7 +19,6 @@ const OURO: [number, number, number] = [201, 162, 39]
 const CINZA: [number, number, number] = [110, 110, 110]
 const MARGEM = 40
 
-// hex p/ exceljs (ARGB)
 const HEX_VERDE = 'FF14532D'
 const HEX_OURO = 'FFC9A227'
 
@@ -54,6 +53,32 @@ function carregarLogo(): string | null {
   }
 }
 
+// ─── 🎭 máscara de sobrenome (LGPD-friendly p/ divulgação) ───
+const CONECTORES = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
+
+function mascararNome(nome: string): string {
+  const partes = nome.trim().replace(/\s+/g, ' ').split(' ').filter(Boolean)
+  if (partes.length === 0) return '—'
+  if (partes.length === 1) return capitalizar(partes[0])
+  return [
+    capitalizar(partes[0]),
+    ...partes.slice(1).map((p) =>
+      CONECTORES.has(p.toLowerCase()) ? p.toLowerCase() : `${p[0].toUpperCase()}.`,
+    ),
+  ].join(' ')
+}
+
+function capitalizar(p: string): string {
+  return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+}
+
+/** chave de identidade: CPF normalizado; sem CPF → nome normalizado */
+function chaveDoador(cpf: string | null, nome: string): string {
+  const d = (cpf ?? '').replace(/\D/g, '')
+  if (d.length > 0) return `cpf:${d}`
+  return `nome:${nome.trim().toLowerCase().replace(/\s+/g, ' ')}`
+}
+
 const COLUNAS = [
   'Doador',
   'CPF',
@@ -70,8 +95,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  // 🔐 ONDA 21.6 — gate server-side: dev OU admin.
-  // ⚠️ NÃO exige evento ATIVO: relatório precisa funcionar após encerramento.
+  // 🔐 gate server-side: dev OU admin. Não exige evento ATIVO.
   const result = await requireAuth()
   if (result instanceof NextResponse) return result
 
@@ -93,7 +117,6 @@ export async function GET(
     )
   }
 
-  // filtro de período (YYYY-MM-DD) sobre createdAt do registro
   const inicioParam = req.nextUrl.searchParams.get('inicio')
   const fimParam = req.nextUrl.searchParams.get('fim')
   const dtInicio = inicioParam ? new Date(`${inicioParam}T00:00:00.000Z`) : null
@@ -139,42 +162,62 @@ export async function GET(
     },
   })
 
-  // 🎭 CPF: dev → cru | admin → mascarado. Decidido no SERVIDOR.
   const revelarCpf = isDev
 
-  // uma linha por ITEM (granularidade da faixa de cupons)
-  const linhas = registros.flatMap((r) =>
+  type Linha = {
+    showDia: string
+    doador: string
+    doadorMasc: string
+    cpf: string
+    chave: string
+    local: string
+    show: string
+    alimento: string
+    qtd: number
+    ini: number
+    fim: number
+    faixa: string
+    operador: string
+    dia: string
+    hora: string
+    data: string
+    ts: number
+  }
+
+  const linhas: Linha[] = registros.flatMap((r) =>
     r.itens.map((it) => ({
+      showDia: it.showDia,
       doador: r.doadorNome,
+      doadorMasc: mascararNome(r.doadorNome),
       cpf: cpfPorRole(r.doadorCpf, revelarCpf),
+      chave: chaveDoador(r.doadorCpf, r.doadorNome),
       local: r.local?.nome ?? '—',
       show: labelShow(it.showDia),
       alimento: it.alimento.product.name,
       qtd: it.quantidade,
+      ini: it.numeroInicio,
+      fim: it.numeroFim,
       faixa: `${it.numeroInicio}–${it.numeroFim}`,
       operador: r.operador?.name ?? r.operador?.email ?? '—',
+      dia: r.createdAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      hora: r.createdAt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
       data: r.createdAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      ts: r.createdAt.getTime(),
     })),
   )
 
   const totalCupons = linhas.reduce((a, l) => a + l.qtd, 0)
 
-  // totais por show
   const porShow = new Map<string, number>()
-  for (const r of registros) {
-    for (const it of r.itens) {
-      porShow.set(it.showDia, (porShow.get(it.showDia) ?? 0) + it.quantidade)
-    }
-  }
+  for (const l of linhas) porShow.set(l.showDia, (porShow.get(l.showDia) ?? 0) + l.qtd)
 
-  // shows fora do line-up fixo não somem do relatório
-  const showsExtras = [...porShow.keys()].filter(
-    (k) => !SHOWS.some((s) => s.value === k),
-  )
+  const showsExtras = [...porShow.keys()].filter((k) => !SHOWS.some((s) => s.value === k))
+  const ordemShows: string[] = [
+    ...SHOWS.map((s) => s.value).filter((v) => porShow.has(v)),
+    ...showsExtras,
+  ]
   const linhasResumo: [string, number][] = [
-    ...SHOWS.map(
-      (s) => [labelShow(s.value), porShow.get(s.value) ?? 0] as [string, number],
-    ),
+    ...SHOWS.map((s) => [labelShow(s.value), porShow.get(s.value) ?? 0] as [string, number]),
     ...showsExtras.map((k) => [labelShow(k), porShow.get(k) ?? 0] as [string, number]),
   ]
 
@@ -194,7 +237,7 @@ export async function GET(
 
   // ═══════════════════════ CSV ═══════════════════════
   if (formato === 'csv') {
-    const sep = ';' // padrão Excel pt-BR
+    const sep = ';'
     const head = COLUNAS.map(csvCell).join(sep)
     const body = linhas
       .map((l) =>
@@ -212,7 +255,6 @@ export async function GET(
       )
       .join('\r\n')
 
-    // 🔤 BOM UTF-8 — sem ele o Excel-BR estraga acentuação
     const csv = `\uFEFF${head}\r\n${body}${body ? '\r\n' : ''}`
 
     return new NextResponse(csv, {
@@ -225,13 +267,12 @@ export async function GET(
     })
   }
 
-  // ═══════════════════════ XLSX (exceljs) ═══════════════════════
+  // ═══════════════════════ XLSX ═══════════════════════
   if (formato === 'xlsx') {
     const wb = new ExcelJS.Workbook()
     wb.creator = BRANDING.name
     wb.created = new Date()
 
-    // ── aba Resumo ──
     const wsResumo = wb.addWorksheet('Resumo')
     wsResumo.columns = [
       { header: 'Show', key: 'show', width: 30 },
@@ -244,7 +285,6 @@ export async function GET(
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } }
     })
 
-    // ── aba Registros ──
     const wsReg = wb.addWorksheet('Registros')
     wsReg.columns = [
       { header: 'Doador', key: 'doador', width: 28 },
@@ -260,13 +300,11 @@ export async function GET(
 
     for (const l of linhas) {
       const row = wsReg.addRow(l)
-      // CPF e Faixa como TEXTO (preserva zero à esquerda e o "–")
       row.getCell('cpf').numFmt = '@'
       row.getCell('faixa').numFmt = '@'
       row.getCell('qtd').alignment = { horizontal: 'right' }
     }
 
-    // cabeçalhos institucionais nas duas abas
     for (const ws of [wsResumo, wsReg]) {
       const head = ws.getRow(1)
       head.font = { bold: true, color: { argb: 'FFFFFFFF' } }
@@ -279,7 +317,6 @@ export async function GET(
       ws.views = [{ state: 'frozen', ySplit: 1 }]
     }
 
-    // autofiltro na aba de registros
     if (linhas.length > 0) {
       wsReg.autoFilter = {
         from: { row: 1, column: 1 },
@@ -306,37 +343,42 @@ export async function GET(
   const pageH = doc.internal.pageSize.getHeight()
   const contentW = pageW - MARGEM * 2
 
-  // ── cabeçalho institucional ──
-  doc.setFillColor(...VERDE)
-  doc.rect(0, 0, pageW, 88, 'F')
-
   const logo = carregarLogo()
-  let textoX = MARGEM
-  if (logo) {
-    try {
-      doc.addImage(logo, 'PNG', MARGEM, 18, 52, 52)
-      textoX = MARGEM + 66
-    } catch {
-      /* segue sem logo */
+
+  function cabecalho(): number {
+    doc.setFillColor(...VERDE)
+    doc.rect(0, 0, pageW, 88, 'F')
+
+    let textoX = MARGEM
+    if (logo) {
+      try {
+        doc.addImage(logo, 'PNG', MARGEM, 18, 52, 52)
+        textoX = MARGEM + 66
+      } catch {
+        /* segue sem logo */
+      }
     }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.setTextColor(255, 255, 255)
+    doc.text(BRANDING.name, textoX, 42)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor(226, 232, 226)
+    doc.text('Conheça seu ídolo', textoX, 56)
+    doc.setFontSize(7.5)
+    doc.text(BRANDING.tagline, textoX, 68)
+
+    doc.setFillColor(...OURO)
+    doc.rect(0, 88, pageW, 3, 'F')
+
+    return 114
   }
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(18)
-  doc.setTextColor(255, 255, 255)
-  doc.text(BRANDING.name, textoX, 42)
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(226, 232, 226)
-  doc.text('Arrecadação Extra — Registro de Cupons', textoX, 56)
-  doc.setFontSize(7.5)
-  doc.text(BRANDING.tagline, textoX, 68)
-
-  doc.setFillColor(...OURO)
-  doc.rect(0, 88, pageW, 3, 'F')
-
-  let y = 114
+  // ─── página 1: capa + resumo ───
+  let y = cabecalho()
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(14)
@@ -357,7 +399,6 @@ export async function GET(
   )
   y += 20
 
-  // ── resumo por show ──
   autoTable(doc, {
     startY: y,
     head: [['Show', 'Cupons']],
@@ -371,45 +412,161 @@ export async function GET(
     margin: { left: MARGEM, right: MARGEM },
     tableWidth: 320,
   })
-  // @ts-expect-error lastAutoTable é injetado pelo plugin
-  y = doc.lastAutoTable.finalY + 22
 
-  // ── registros detalhados ──
-  autoTable(doc, {
-    startY: y,
-    head: [[...COLUNAS]],
-    body:
-      linhas.length > 0
-        ? linhas.map((l) => [
-            l.doador,
-            l.cpf,
-            l.local,
-            l.show,
-            l.alimento,
-            String(l.qtd),
-            l.faixa,
-            l.operador,
-            l.data,
-          ])
-        : [['— sem registros no período —', '', '', '', '', '', '', '', '']],
-    theme: 'grid',
-    headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    styles: { fontSize: 7.5, cellPadding: 3, overflow: 'linebreak' },
-    columnStyles: {
-      1: { cellWidth: 78 },
-      5: { halign: 'right', cellWidth: 40 },
-      6: { cellWidth: 58, halign: 'center' },
-      8: { cellWidth: 84 },
-    },
-    margin: { left: MARGEM, right: MARGEM, bottom: 44 },
-  })
+  // ─── um bloco (página) por show ───
+  const colunasPub = ['Doador', 'Local', 'Alimento', 'Cupons', 'Números', 'Data'] as const
+  const colunasDev = [
+    'Doador',
+    'CPF',
+    'Local',
+    'Alimento',
+    'Cupons',
+    'Números',
+    'Data',
+    'Hora',
+    'Operador',
+  ] as const
+  const cols: readonly string[] = isDev ? colunasDev : colunasPub
+
+  for (const showDia of ordemShows) {
+    const doShow = linhas
+      .filter((l) => l.showDia === showDia)
+      .sort((a, b) => a.ini - b.ini)
+    if (doShow.length === 0) continue
+
+    doc.addPage()
+    let by = cabecalho()
+
+    // título do bloco
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(15)
+    doc.setTextColor(...VERDE)
+    doc.text(labelShow(showDia), MARGEM, by)
+    by += 16
+
+    const totalShow = doShow.reduce((a, l) => a + l.qtd, 0)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(...CINZA)
+    doc.text(
+      `Total de cupons: ${totalShow}  ·  Linhas: ${doShow.length}  ·  Faixa: 1–${totalShow}`,
+      MARGEM,
+      by,
+    )
+    by += 16
+
+    // 🚨 verificação de continuidade da numeração
+    let esperado = 1
+    const falhas: string[] = []
+    for (const l of doShow) {
+      if (l.ini !== esperado) falhas.push(`${esperado}→${l.ini}`)
+      esperado = l.fim + 1
+    }
+    if (falhas.length > 0) {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(8.5)
+      doc.setTextColor(180, 40, 40)
+      doc.text(
+        `ATENÇÃO: numeração descontínua (${falhas.slice(0, 6).join(', ')}${falhas.length > 6 ? '…' : ''}) — rode a renumeração.`,
+        MARGEM,
+        by,
+      )
+      by += 16
+    }
+
+    // 🏆 card do maior doador do show
+    const somaPorDoador = new Map<
+      string,
+      { nome: string; cupons: number; local: string; ts: number }
+    >()
+    for (const l of doShow) {
+      const atual = somaPorDoador.get(l.chave)
+      if (atual) {
+        atual.cupons += l.qtd
+        if (l.ts < atual.ts) {
+          atual.ts = l.ts
+          atual.nome = l.doadorMasc
+          atual.local = l.local
+        }
+      } else {
+        somaPorDoador.set(l.chave, {
+          nome: l.doadorMasc,
+          cupons: l.qtd,
+          local: l.local,
+          ts: l.ts,
+        })
+      }
+    }
+    const campeao = [...somaPorDoador.values()].sort(
+      (a, b) => b.cupons - a.cupons || a.ts - b.ts,
+    )[0]
+
+    if (campeao) {
+      const cardH = 46
+      doc.setFillColor(252, 248, 232)
+      doc.setDrawColor(...OURO)
+      doc.setLineWidth(1.2)
+      doc.rect(MARGEM, by, contentW, cardH, 'FD')
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(...OURO)
+      doc.text(`MAIOR DOADOR  —  ${labelShow(showDia)}`, MARGEM + 12, by + 17)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.setTextColor(25, 25, 25)
+      doc.text(
+        `${campeao.nome}  ·  ${campeao.local}  ·  ${campeao.cupons} cupons`,
+        MARGEM + 12,
+        by + 34,
+      )
+
+      by += cardH + 16
+    }
+
+    autoTable(doc, {
+      startY: by,
+      head: [[...cols]],
+      body: doShow.map((l) =>
+        isDev
+          ? [
+              l.doadorMasc,
+              l.cpf,
+              l.local,
+              l.alimento,
+              String(l.qtd),
+              l.faixa,
+              l.dia,
+              l.hora,
+              l.operador,
+            ]
+          : [l.doadorMasc, l.local, l.alimento, String(l.qtd), l.faixa, l.dia],
+      ),
+      theme: 'grid',
+      headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      styles: { fontSize: 7.5, cellPadding: 3, overflow: 'linebreak' },
+      columnStyles: isDev
+        ? {
+            1: { cellWidth: 78 },
+            4: { halign: 'right', cellWidth: 40 },
+            5: { cellWidth: 58, halign: 'center' },
+            6: { cellWidth: 54 },
+            7: { cellWidth: 46 },
+          }
+        : {
+            3: { halign: 'right', cellWidth: 46 },
+            4: { cellWidth: 70, halign: 'center' },
+            5: { cellWidth: 62 },
+          },
+      margin: { left: MARGEM, right: MARGEM, bottom: 44 },
+    })
+  }
 
   // ── rodapé em todas as páginas ──
   const totalPaginas = doc.getNumberOfPages()
-  const geradoEm = new Date().toLocaleString('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-  })
-  const selo = revelarCpf ? 'CPF completo (dev)' : 'CPF mascarado'
+  const geradoEm = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+  const selo = revelarCpf ? 'CPF completo (dev)' : 'CPF oculto'
 
   for (let p = 1; p <= totalPaginas; p++) {
     doc.setPage(p)
