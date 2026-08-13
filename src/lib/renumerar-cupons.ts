@@ -58,6 +58,8 @@ export async function renumerarShow(
 
 /** Shows congelados (já divulgados) — nunca renumerar. */
 export const SHOWS_CONGELADOS: ReadonlySet<string> = new Set<string>([
-  // após o anúncio de hoje, adicione aqui:
-  // 'ana-castela-14', 'hugo-guilherme-13', 'daniel-15', 'mariana-fagundes-16',
+  'hugo-guilherme-13',
+  'ana-castela-14',
+  'daniel-15',
+  'mariana-fagundes-16',
 ])
