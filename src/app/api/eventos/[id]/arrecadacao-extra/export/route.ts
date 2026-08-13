@@ -17,7 +17,8 @@ export const dynamic = 'force-dynamic'
 const VERDE: [number, number, number] = [20, 83, 45]
 const OURO: [number, number, number] = [201, 162, 39]
 const CINZA: [number, number, number] = [110, 110, 110]
-const MARGEM = 40
+const VINHO: [number, number, number] = [155, 44, 44]
+const MARGEM = 34
 
 const HEX_VERDE = 'FF14532D'
 const HEX_OURO = 'FFC9A227'
@@ -33,6 +34,11 @@ const SHOWS = [
 function labelShow(v: string): string {
   const s = SHOWS.find((x) => x.value === v)
   return s ? `${s.data} — ${s.artista}` : v
+}
+
+function labelShowCurto(v: string): string {
+  const s = SHOWS.find((x) => x.value === v)
+  return s ? `${s.data} · ${s.artista}` : v
 }
 
 const fmtBR = (iso: string) => {
@@ -337,8 +343,47 @@ export async function GET(
     })
   }
 
-  // ═══════════════════════ PDF ═══════════════════════
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' })
+  // ═══════════════════════ 🏆 apuração de destaques ═══════════════════════
+  type Destaque = { nome: string; cupons: number; locais: string[]; ts: number }
+
+  /** soma por identidade (CPF > nome) dentro de um show */
+  function apurar(doShow: Linha[]): { lideres: Destaque[]; empate: boolean } {
+    const soma = new Map<string, Destaque>()
+    for (const l of doShow) {
+      const atual = soma.get(l.chave)
+      if (atual) {
+        atual.cupons += l.qtd
+        if (!atual.locais.includes(l.local)) atual.locais.push(l.local)
+        if (l.ts < atual.ts) {
+          atual.ts = l.ts
+          atual.nome = l.doadorMasc
+        }
+      } else {
+        soma.set(l.chave, {
+          nome: l.doadorMasc,
+          cupons: l.qtd,
+          locais: [l.local],
+          ts: l.ts,
+        })
+      }
+    }
+    const ranking = [...soma.values()].sort((a, b) => b.cupons - a.cupons || a.ts - b.ts)
+    if (ranking.length === 0) return { lideres: [], empate: false }
+    const max = ranking[0].cupons
+    const lideres = ranking.filter((d) => d.cupons === max)
+    return { lideres, empate: lideres.length > 1 }
+  }
+
+  const destaquesPorShow = new Map<string, { lideres: Destaque[]; empate: boolean }>()
+  for (const showDia of ordemShows) {
+    destaquesPorShow.set(
+      showDia,
+      apurar(linhas.filter((l) => l.showDia === showDia)),
+    )
+  }
+
+  // ═══════════════════════ PDF (retrato) ═══════════════════════
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
   const contentW = pageW - MARGEM * 2
@@ -347,57 +392,169 @@ export async function GET(
 
   function cabecalho(): number {
     doc.setFillColor(...VERDE)
-    doc.rect(0, 0, pageW, 88, 'F')
+    doc.rect(0, 0, pageW, 76, 'F')
 
     let textoX = MARGEM
     if (logo) {
       try {
-        doc.addImage(logo, 'PNG', MARGEM, 18, 52, 52)
-        textoX = MARGEM + 66
+        doc.addImage(logo, 'PNG', MARGEM, 14, 46, 46)
+        textoX = MARGEM + 58
       } catch {
         /* segue sem logo */
       }
     }
 
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(18)
+    doc.setFontSize(16)
     doc.setTextColor(255, 255, 255)
-    doc.text(BRANDING.name, textoX, 42)
+    doc.text(BRANDING.name, textoX, 36)
 
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
+    doc.setFontSize(8)
     doc.setTextColor(226, 232, 226)
-    doc.text('Conheça seu ídolo', textoX, 56)
-    doc.setFontSize(7.5)
-    doc.text(BRANDING.tagline, textoX, 68)
+    doc.text('Conheça seu ídolo', textoX, 49)
+    doc.setFontSize(7)
+    doc.text(BRANDING.tagline, textoX, 60)
 
     doc.setFillColor(...OURO)
-    doc.rect(0, 88, pageW, 3, 'F')
+    doc.rect(0, 76, pageW, 3, 'F')
 
-    return 114
+    return 100
   }
 
-  // ─── página 1: capa + resumo ───
+  /** desenha o card de destaques (usado na p.1 e por show) */
+  function cardDestaques(
+    yTop: number,
+    titulo: string,
+    itens: { rotulo: string; lideres: Destaque[]; empate: boolean }[],
+  ): number {
+    const padX = 12
+    const linhaH = 26
+    const headH = 26
+    const alturaItem = (it: (typeof itens)[number]) =>
+      it.empate ? 15 + it.lideres.length * 15 : linhaH
+    const cardH = headH + itens.reduce((a, it) => a + alturaItem(it), 0) + 10
+
+    doc.setFillColor(252, 249, 235)
+    doc.setDrawColor(...OURO)
+    doc.setLineWidth(1.2)
+    doc.roundedRect(MARGEM, yTop, contentW, cardH, 5, 5, 'FD')
+
+    // faixa de título
+    doc.setFillColor(...OURO)
+    doc.roundedRect(MARGEM, yTop, contentW, 20, 5, 5, 'F')
+    doc.setFillColor(...OURO)
+    doc.rect(MARGEM, yTop + 12, contentW, 8, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(255, 255, 255)
+    doc.text(titulo, MARGEM + padX, yTop + 14)
+
+    let cy = yTop + headH + 6
+
+    for (const it of itens) {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...VERDE)
+      doc.text(it.rotulo.toUpperCase(), MARGEM + padX, cy)
+
+      if (!it.empate) {
+        const d = it.lideres[0]
+        if (d) {
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(11)
+          doc.setTextColor(25, 25, 25)
+          doc.text(d.nome, MARGEM + padX + 96, cy + 1)
+
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(10)
+          doc.setTextColor(...OURO)
+          doc.text(`${d.cupons} cupons`, pageW - MARGEM - padX, cy + 1, {
+            align: 'right',
+          })
+
+          doc.setFont('helvetica', 'normal')
+          doc.setFontSize(6.8)
+          doc.setTextColor(...CINZA)
+          const locaisTxt =
+            d.locais.length > 1
+              ? `${d.locais.length} locais: ${d.locais.join(' · ')}`
+              : d.locais[0]
+          doc.text(
+            doc.splitTextToSize(locaisTxt, contentW - padX * 2 - 200)[0] ?? '',
+            MARGEM + padX + 96,
+            cy + 11,
+          )
+        } else {
+          doc.setFont('helvetica', 'italic')
+          doc.setFontSize(8)
+          doc.setTextColor(...CINZA)
+          doc.text('sem registros', MARGEM + padX + 96, cy)
+        }
+        cy += linhaH
+      } else {
+        // 🎲 empate → sorteio presencial
+        doc.setFillColor(...VINHO)
+        doc.roundedRect(MARGEM + padX + 96, cy - 8, 108, 11, 3, 3, 'F')
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(6.5)
+        doc.setTextColor(255, 255, 255)
+        doc.text('EMPATE — SORTEIO PRESENCIAL', MARGEM + padX + 150, cy - 0.5, {
+          align: 'center',
+        })
+
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9)
+        doc.setTextColor(...OURO)
+        doc.text(`${it.lideres[0].cupons} cupons`, pageW - MARGEM - padX, cy, {
+          align: 'right',
+        })
+
+        cy += 15
+        it.lideres.forEach((d, i) => {
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(9.5)
+          doc.setTextColor(25, 25, 25)
+          doc.text(`${i + 1}.  ${d.nome}`, MARGEM + padX + 96, cy)
+
+          doc.setFont('helvetica', 'normal')
+          doc.setFontSize(6.8)
+          doc.setTextColor(...CINZA)
+          doc.text(
+            doc.splitTextToSize(d.locais.join(' · '), 170)[0] ?? '',
+            pageW - MARGEM - padX,
+            cy,
+            { align: 'right' },
+          )
+          cy += 15
+        })
+      }
+    }
+
+    return yTop + cardH + 14
+  }
+
+  // ─── página 1: capa + resumo + destaques ───
   let y = cabecalho()
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
+  doc.setFontSize(13)
   doc.setTextColor(25, 25, 25)
   const nomeLinhas = doc.splitTextToSize(evento.nome, contentW)
   doc.text(nomeLinhas, MARGEM, y)
-  y += nomeLinhas.length * 17
+  y += nomeLinhas.length * 16
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
+  doc.setFontSize(8.5)
   doc.setTextColor(...CINZA)
   doc.text(`Período: ${periodoTxt}  ·  Status: ${evento.status}`, MARGEM, y)
-  y += 13
+  y += 12
   doc.text(
     `Total de cupons: ${totalCupons}  ·  Registros: ${registros.length}  ·  Linhas: ${linhas.length}`,
     MARGEM,
     y,
   )
-  y += 20
+  y += 18
 
   autoTable(doc, {
     startY: y,
@@ -407,11 +564,36 @@ export async function GET(
     theme: 'striped',
     headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
     footStyles: { fillColor: [245, 245, 245], textColor: VERDE, fontStyle: 'bold' },
-    styles: { fontSize: 9.5, cellPadding: 4 },
+    styles: { fontSize: 9, cellPadding: 4 },
     columnStyles: { 1: { halign: 'right', cellWidth: 70 } },
     margin: { left: MARGEM, right: MARGEM },
-    tableWidth: 320,
+    tableWidth: contentW,
   })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  y = ((doc as any).lastAutoTable?.finalY ?? y) + 20
+
+  const itensDestaque = ordemShows.map((showDia) => {
+    const d = destaquesPorShow.get(showDia) ?? { lideres: [], empate: false }
+    return { rotulo: labelShowCurto(showDia), lideres: d.lideres, empate: d.empate }
+  })
+
+  if (itensDestaque.length > 0) {
+    y = cardDestaques(y, '🏆  NOMES EM DESTAQUE  ·  MAIORES DOADORES POR SHOW', itensDestaque)
+
+    const temEmpate = itensDestaque.some((i) => i.empate)
+    if (temEmpate) {
+      doc.setFont('helvetica', 'italic')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...VINHO)
+      doc.text(
+        'Nos casos de empate, o ganhador será definido por sorteio presencial entre os nomes listados.',
+        MARGEM,
+        y,
+      )
+      y += 14
+    }
+  }
 
   // ─── um bloco (página) por show ───
   const colunasPub = ['Doador', 'Local', 'Alimento', 'Cupons', 'Números', 'Data'] as const
@@ -439,21 +621,21 @@ export async function GET(
 
     // título do bloco
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(15)
+    doc.setFontSize(14)
     doc.setTextColor(...VERDE)
     doc.text(labelShow(showDia), MARGEM, by)
-    by += 16
+    by += 15
 
     const totalShow = doShow.reduce((a, l) => a + l.qtd, 0)
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
+    doc.setFontSize(8.5)
     doc.setTextColor(...CINZA)
     doc.text(
       `Total de cupons: ${totalShow}  ·  Linhas: ${doShow.length}  ·  Faixa: 1–${totalShow}`,
       MARGEM,
       by,
     )
-    by += 16
+    by += 14
 
     // 🚨 verificação de continuidade da numeração
     let esperado = 1
@@ -464,65 +646,27 @@ export async function GET(
     }
     if (falhas.length > 0) {
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(8.5)
+      doc.setFontSize(8)
       doc.setTextColor(180, 40, 40)
       doc.text(
-        `ATENÇÃO: numeração descontínua (${falhas.slice(0, 6).join(', ')}${falhas.length > 6 ? '…' : ''}) — rode a renumeração.`,
+        doc.splitTextToSize(
+          `ATENÇÃO: numeração descontínua (${falhas.slice(0, 6).join(', ')}${falhas.length > 6 ? '…' : ''}) — rode a renumeração.`,
+          contentW,
+        ),
         MARGEM,
         by,
       )
       by += 16
     }
 
-    // 🏆 card do maior doador do show
-    const somaPorDoador = new Map<
-      string,
-      { nome: string; cupons: number; local: string; ts: number }
-    >()
-    for (const l of doShow) {
-      const atual = somaPorDoador.get(l.chave)
-      if (atual) {
-        atual.cupons += l.qtd
-        if (l.ts < atual.ts) {
-          atual.ts = l.ts
-          atual.nome = l.doadorMasc
-          atual.local = l.local
-        }
-      } else {
-        somaPorDoador.set(l.chave, {
-          nome: l.doadorMasc,
-          cupons: l.qtd,
-          local: l.local,
-          ts: l.ts,
-        })
-      }
-    }
-    const campeao = [...somaPorDoador.values()].sort(
-      (a, b) => b.cupons - a.cupons || a.ts - b.ts,
-    )[0]
-
-    if (campeao) {
-      const cardH = 46
-      doc.setFillColor(252, 248, 232)
-      doc.setDrawColor(...OURO)
-      doc.setLineWidth(1.2)
-      doc.rect(MARGEM, by, contentW, cardH, 'FD')
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(...OURO)
-      doc.text(`MAIOR DOADOR  —  ${labelShow(showDia)}`, MARGEM + 12, by + 17)
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(12)
-      doc.setTextColor(25, 25, 25)
-      doc.text(
-        `${campeao.nome}  ·  ${campeao.local}  ·  ${campeao.cupons} cupons`,
-        MARGEM + 12,
-        by + 34,
+    // 🏆 card do destaque deste show
+    const dShow = destaquesPorShow.get(showDia)
+    if (dShow && dShow.lideres.length > 0) {
+      by = cardDestaques(
+        by,
+        dShow.empate ? 'DESTAQUE DO SHOW  ·  EMPATE' : 'MAIOR DOADOR DO SHOW',
+        [{ rotulo: labelShowCurto(showDia), lideres: dShow.lideres, empate: dShow.empate }],
       )
-
-      by += cardH + 16
     }
 
     autoTable(doc, {
@@ -544,22 +688,37 @@ export async function GET(
           : [l.doadorMasc, l.local, l.alimento, String(l.qtd), l.faixa, l.dia],
       ),
       theme: 'grid',
-      headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      styles: { fontSize: 7.5, cellPadding: 3, overflow: 'linebreak' },
+      headStyles: {
+        fillColor: VERDE,
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: isDev ? 6.2 : 7.5,
+      },
+      styles: {
+        fontSize: isDev ? 5.8 : 7,
+        cellPadding: isDev ? 1.8 : 2.6,
+        overflow: 'linebreak',
+      },
       columnStyles: isDev
         ? {
-            1: { cellWidth: 78 },
-            4: { halign: 'right', cellWidth: 40 },
-            5: { cellWidth: 58, halign: 'center' },
-            6: { cellWidth: 54 },
-            7: { cellWidth: 46 },
+            0: { cellWidth: 88 },
+            1: { cellWidth: 62 },
+            2: { cellWidth: 70 },
+            3: { cellWidth: 62 },
+            4: { halign: 'right', cellWidth: 26 },
+            5: { cellWidth: 44, halign: 'center' },
+            6: { cellWidth: 38 },
+            7: { cellWidth: 34 },
           }
         : {
-            3: { halign: 'right', cellWidth: 46 },
-            4: { cellWidth: 70, halign: 'center' },
-            5: { cellWidth: 62 },
+            0: { cellWidth: 132 },
+            1: { cellWidth: 106 },
+            2: { cellWidth: 92 },
+            3: { halign: 'right', cellWidth: 34 },
+            4: { cellWidth: 56, halign: 'center' },
+            5: { cellWidth: 47 },
           },
-      margin: { left: MARGEM, right: MARGEM, bottom: 44 },
+      margin: { left: MARGEM, right: MARGEM, bottom: 42 },
     })
   }
 
@@ -572,17 +731,17 @@ export async function GET(
     doc.setPage(p)
     doc.setDrawColor(...OURO)
     doc.setLineWidth(1)
-    doc.line(MARGEM, pageH - 34, pageW - MARGEM, pageH - 34)
+    doc.line(MARGEM, pageH - 32, pageW - MARGEM, pageH - 32)
 
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.5)
+    doc.setFontSize(6.5)
     doc.setTextColor(140, 140, 140)
     doc.text(
       `${selo}  ·  Gerado em ${geradoEm} por ${nomeUsuario}  ·  ${BRANDING.name}`,
       MARGEM,
-      pageH - 20,
+      pageH - 19,
     )
-    doc.text(`${p}/${totalPaginas}`, pageW - MARGEM, pageH - 20, { align: 'right' })
+    doc.text(`${p}/${totalPaginas}`, pageW - MARGEM, pageH - 19, { align: 'right' })
   }
 
   const bytes = doc.output('arraybuffer')
