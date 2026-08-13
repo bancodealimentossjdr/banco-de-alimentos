@@ -422,19 +422,30 @@ export async function GET(
     return 100
   }
 
-  /** desenha o card de destaques (usado na p.1 e por show) */
+  /** 🏆 card único de destaques — grid: show / nome / local / cupons */
   function cardDestaques(
     yTop: number,
     titulo: string,
     itens: { rotulo: string; lideres: Destaque[]; empate: boolean }[],
   ): number {
     const padX = 12
-    const linhaH = 26
-    const headH = 26
-    const alturaItem = (it: (typeof itens)[number]) =>
-      it.empate ? 15 + it.lideres.length * 15 : linhaH
-    const cardH = headH + itens.reduce((a, it) => a + alturaItem(it), 0) + 10
+    const x0 = MARGEM + padX
+    const xNome = x0
+    const wNome = 200
+    const xLocal = x0 + wNome + 10
+    const wLocal = 190
+    const xCupons = pageW - MARGEM - padX
 
+    const HEAD = 22 // faixa do título
+    const FAIXA = 16 // faixa de cada show
+    const LINHA = 15 // linha de doador
+
+    const alturaBloco = (it: (typeof itens)[number]) =>
+      FAIXA + Math.max(it.lideres.length, 1) * LINHA + 4
+
+    const cardH = HEAD + 6 + itens.reduce((a, it) => a + alturaBloco(it), 0) + 6
+
+    // moldura
     doc.setFillColor(252, 249, 235)
     doc.setDrawColor(...OURO)
     doc.setLineWidth(1.2)
@@ -442,93 +453,83 @@ export async function GET(
 
     // faixa de título
     doc.setFillColor(...OURO)
-    doc.roundedRect(MARGEM, yTop, contentW, 20, 5, 5, 'F')
-    doc.setFillColor(...OURO)
-    doc.rect(MARGEM, yTop + 12, contentW, 8, 'F')
+    doc.roundedRect(MARGEM, yTop, contentW, HEAD, 5, 5, 'F')
+    doc.rect(MARGEM, yTop + HEAD - 8, contentW, 8, 'F')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9)
     doc.setTextColor(255, 255, 255)
-    doc.text(titulo, MARGEM + padX, yTop + 14)
+    doc.text(titulo, x0, yTop + 14.5)
 
-    let cy = yTop + headH + 6
+    let cy = yTop + HEAD + 6
 
     for (const it of itens) {
+      // ── faixa do show ──
+      doc.setFillColor(238, 243, 238)
+      doc.rect(MARGEM + 1, cy, contentW - 2, FAIXA, 'F')
+
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7.5)
+      doc.setFontSize(8)
       doc.setTextColor(...VERDE)
-      doc.text(it.rotulo.toUpperCase(), MARGEM + padX, cy)
+      doc.text(it.rotulo.toUpperCase(), x0, cy + 11)
 
-      if (!it.empate) {
-        const d = it.lideres[0]
-        if (d) {
-          doc.setFont('helvetica', 'bold')
-          doc.setFontSize(11)
-          doc.setTextColor(25, 25, 25)
-          doc.text(d.nome, MARGEM + padX + 96, cy + 1)
-
-          doc.setFont('helvetica', 'bold')
-          doc.setFontSize(10)
-          doc.setTextColor(...OURO)
-          doc.text(`${d.cupons} cupons`, pageW - MARGEM - padX, cy + 1, {
-            align: 'right',
-          })
-
-          doc.setFont('helvetica', 'normal')
-          doc.setFontSize(6.8)
-          doc.setTextColor(...CINZA)
-          const locaisTxt =
-            d.locais.length > 1
-              ? `${d.locais.length} locais: ${d.locais.join(' · ')}`
-              : d.locais[0]
-          doc.text(
-            doc.splitTextToSize(locaisTxt, contentW - padX * 2 - 200)[0] ?? '',
-            MARGEM + padX + 96,
-            cy + 11,
-          )
-        } else {
-          doc.setFont('helvetica', 'italic')
-          doc.setFontSize(8)
-          doc.setTextColor(...CINZA)
-          doc.text('sem registros', MARGEM + padX + 96, cy)
-        }
-        cy += linhaH
-      } else {
-        // 🎲 empate → sorteio presencial
+      if (it.empate) {
+        const txt = 'EMPATE — SORTEIO PRESENCIAL'
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(6.4)
+        const wBadge = doc.getTextWidth(txt) + 12
         doc.setFillColor(...VINHO)
-        doc.roundedRect(MARGEM + padX + 96, cy - 8, 108, 11, 3, 3, 'F')
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(6.5)
+        doc.roundedRect(xCupons - wBadge, cy + 3, wBadge, 10.5, 3, 3, 'F')
         doc.setTextColor(255, 255, 255)
-        doc.text('EMPATE — SORTEIO PRESENCIAL', MARGEM + padX + 150, cy - 0.5, {
-          align: 'center',
-        })
-
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(9)
-        doc.setTextColor(...OURO)
-        doc.text(`${it.lideres[0].cupons} cupons`, pageW - MARGEM - padX, cy, {
-          align: 'right',
-        })
-
-        cy += 15
-        it.lideres.forEach((d, i) => {
-          doc.setFont('helvetica', 'bold')
-          doc.setFontSize(9.5)
-          doc.setTextColor(25, 25, 25)
-          doc.text(`${i + 1}.  ${d.nome}`, MARGEM + padX + 96, cy)
-
-          doc.setFont('helvetica', 'normal')
-          doc.setFontSize(6.8)
-          doc.setTextColor(...CINZA)
-          doc.text(
-            doc.splitTextToSize(d.locais.join(' · '), 170)[0] ?? '',
-            pageW - MARGEM - padX,
-            cy,
-            { align: 'right' },
-          )
-          cy += 15
-        })
+        doc.text(txt, xCupons - wBadge / 2, cy + 10.3, { align: 'center' })
       }
+
+      cy += FAIXA + 3
+
+      if (it.lideres.length === 0) {
+        doc.setFont('helvetica', 'italic')
+        doc.setFontSize(8)
+        doc.setTextColor(...CINZA)
+        doc.text('sem registros', xNome, cy + 9)
+        cy += LINHA + 4
+        continue
+      }
+
+      it.lideres.forEach((d, i) => {
+        const baseY = cy + 10
+
+        // nome (com índice quando houver sorteio)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9.5)
+        doc.setTextColor(25, 25, 25)
+        const nomeTxt = it.empate ? `${i + 1}.  ${d.nome}` : d.nome
+        doc.text(
+          doc.splitTextToSize(nomeTxt, wNome)[0] ?? nomeTxt,
+          xNome,
+          baseY,
+        )
+
+        // local
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(7.5)
+        doc.setTextColor(...CINZA)
+        const locaisTxt =
+          d.locais.length > 1 ? `${d.locais.join(' · ')}` : (d.locais[0] ?? '—')
+        doc.text(
+          doc.splitTextToSize(locaisTxt, wLocal)[0] ?? locaisTxt,
+          xLocal,
+          baseY,
+        )
+
+        // cupons
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9.5)
+        doc.setTextColor(...OURO)
+        doc.text(`${d.cupons} cupons`, xCupons, baseY, { align: 'right' })
+
+        cy += LINHA
+      })
+
+      cy += 4
     }
 
     return yTop + cardH + 14
@@ -579,7 +580,7 @@ export async function GET(
   })
 
   if (itensDestaque.length > 0) {
-    y = cardDestaques(y, '🏆  NOMES EM DESTAQUE  ·  MAIORES DOADORES POR SHOW', itensDestaque)
+    y = cardDestaques(y, 'NOMES EM DESTAQUE  ·  MAIORES DOADORES POR SHOW', itensDestaque)
 
     const temEmpate = itensDestaque.some((i) => i.empate)
     if (temEmpate) {
@@ -657,16 +658,6 @@ export async function GET(
         by,
       )
       by += 16
-    }
-
-    // 🏆 card do destaque deste show
-    const dShow = destaquesPorShow.get(showDia)
-    if (dShow && dShow.lideres.length > 0) {
-      by = cardDestaques(
-        by,
-        dShow.empate ? 'DESTAQUE DO SHOW  ·  EMPATE' : 'MAIOR DOADOR DO SHOW',
-        [{ rotulo: labelShowCurto(showDia), lideres: dShow.lideres, empate: dShow.empate }],
-      )
     }
 
     autoTable(doc, {
