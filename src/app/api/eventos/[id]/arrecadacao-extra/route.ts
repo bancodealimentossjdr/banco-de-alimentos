@@ -1,8 +1,7 @@
 // src/app/api/eventos/[id]/arrecadacao-extra/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireAuth } from '@/lib/auth-helpers'
-import { podeRegistrarNoEvento } from '@/lib/permissions'
+import { autorizarEvento } from '@/lib/eventos/vinculo'
 import { cpfPorRole } from '@/lib/mask'
 
 export const dynamic = 'force-dynamic'
@@ -13,48 +12,10 @@ type ItemValido = {
   quantidade: number
 }
 
-async function autorizar(eventoId: string) {
-  const result = await requireAuth()
-  if (result instanceof NextResponse) {
-    return { ok: false as const, status: 401, error: 'Não autenticado' }
-  }
-  const userId = result.user.id
-  const role = result.user.role
-
-  const evento = await prisma.evento.findUnique({
-    where: { id: eventoId },
-    select: { id: true, status: true },
-  })
-  if (!evento) return { ok: false as const, status: 404, error: 'Evento não localizado' }
-  if (evento.status !== 'ATIVO') {
-    return { ok: false as const, status: 403, error: 'Evento não está ativo' }
-  }
-
-  let temVinculoAtivo = false
-  if (role === 'visualizador') {
-    const vinculo = await prisma.eventoOperador.findUnique({
-      where: { eventoId_userId: { eventoId, userId } },
-      select: { ativo: true },
-    })
-    temVinculoAtivo = vinculo?.ativo === true
-  }
-
-  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
-    return { ok: false as const, status: 403, error: 'Permissão negada' }
-  }
-
-  return {
-    ok: true as const,
-    userId,
-    role,
-    podeEditar: role === 'dev',
-    // 🆕 ONDA 21.6 — export liberado p/ dev e admin
-    podeExportar: role === 'dev' || role === 'admin',
-    // 🎭 ONDA 21.6 — CPF cru SOMENTE para dev.
-    //    Decidido aqui, no servidor: admin/operador nunca recebem o dado bruto.
-    revelarCpf: role === 'dev',
-  }
-}
+// 🧹 ONDA 22 (22-d) — a função autorizar() local foi removida.
+//    A lógica virou src/lib/eventos/vinculo.ts → autorizarEvento().
+//    Bônus: a Response real do requireAuth agora é propagada
+//    (antes qualquer falha era achatada em 401 genérico).
 
 // ==========================================
 // GET — listas + registros + shows reais
@@ -64,10 +25,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: eventoId } = await params
-  const auth = await autorizar(eventoId)
-  if (!auth.ok) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status })
-  }
+
+  const ctx = await autorizarEvento(eventoId, { exigirAtivo: true })
+  if (ctx instanceof NextResponse) return ctx
 
   const eventoAlimentos = await prisma.eventoAlimento.findMany({
     where: { eventoId },
@@ -113,7 +73,7 @@ export async function GET(
     id: r.id,
     doadorNome: r.doadorNome,
     // 🔒 máscara no servidor
-    doadorCpf: cpfPorRole(r.doadorCpf, auth.revelarCpf),
+    doadorCpf: cpfPorRole(r.doadorCpf, ctx.revelarCpf),
     localId: r.local?.id ?? null, // ✅ id, não nome — edição confiável
     localNome: r.local?.nome ?? null,
     itens: r.itens.map((it) => ({
@@ -141,9 +101,9 @@ export async function GET(
     registros,
     totaisPorShow,
     showsDistintos,
-    podeEditar: auth.podeEditar,
-    podeExportar: auth.podeExportar, // 🆕
-    cpfMascarado: !auth.revelarCpf, // 🆕 avisa a UI
+    podeEditar: ctx.podeEditar,
+    podeExportar: ctx.podeExportar,
+    cpfMascarado: !ctx.revelarCpf, // avisa a UI
   })
 }
 
@@ -155,10 +115,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: eventoId } = await params
-  const auth = await autorizar(eventoId)
-  if (!auth.ok) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status })
-  }
+
+  const ctx = await autorizarEvento(eventoId, { exigirAtivo: true })
+  if (ctx instanceof NextResponse) return ctx
 
   const body = await req.json().catch(() => null)
   if (!body) {
@@ -268,7 +227,7 @@ export async function POST(
           doadorNome: doadorNomeTrim,
           doadorCpf: doadorCpfNorm,
           localId: localIdValid,
-          operadorId: auth.userId,
+          operadorId: ctx.userId,
           itens: { create: itensComFaixa },
         },
         select: {

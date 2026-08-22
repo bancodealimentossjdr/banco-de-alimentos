@@ -1,25 +1,24 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireAuth } from '@/lib/auth-helpers'
-import { podeRegistrarNoEvento } from '@/lib/permissions'
+import { autorizarEvento } from '@/lib/eventos/vinculo'
 
 /**
  * 🆕 ONDA 17.4 — Registro EM LOTE de recebimentos num local do evento.
  * 🔄 17.6-h (Decisão #18) — Gate de registro por evento.
  * 🆕 CPF — doação normal grava CPF do doador em cada recebimento.
  *    Aceita `cpf` ou `doadorCpf` no body (compat).
+ * 🧹 ONDA 22 (22-d) — gate delegado a autorizarEvento().
  */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  // 1️⃣ Autenticação
-  const result = await requireAuth()
-  if (result instanceof NextResponse) return result
-  const operadorId = result.user.id
-  const role = result.user.role
-
   const { id: eventoId } = await params
+
+  // 1️⃣ auth + evento ATIVO + vínculo, num só lugar
+  const ctx = await autorizarEvento(eventoId, { exigirAtivo: true })
+  if (ctx instanceof NextResponse) return ctx
+  const operadorId = ctx.userId
 
   // 2️⃣ Parse do body
   let body: unknown
@@ -45,7 +44,8 @@ export async function POST(
   }
 
   // 🆕 CPF — aceita `cpf` (novo front) ou `doadorCpf` (legado). Só dígitos, 11 exatos.
-  const cpfBruto = typeof cpf === 'string' ? cpf : typeof doadorCpf === 'string' ? doadorCpf : ''
+  const cpfBruto =
+    typeof cpf === 'string' ? cpf : typeof doadorCpf === 'string' ? doadorCpf : ''
   const cpfDigitos = cpfBruto.replace(/\D/g, '')
 
   if (cpfDigitos.length !== 11) {
@@ -65,9 +65,7 @@ export async function POST(
     }))
     .filter(
       (i) =>
-        i.alimentoId !== '' &&
-        Number.isFinite(i.quantidade) &&
-        i.quantidade > 0,
+        i.alimentoId !== '' && Number.isFinite(i.quantidade) && i.quantidade > 0,
     )
 
   if (itensLimpos.length === 0) {
@@ -77,41 +75,7 @@ export async function POST(
     )
   }
 
-  // 3️⃣ Evento existe e está ATIVO
-  const evento = await prisma.evento.findUnique({
-    where: { id: eventoId },
-    select: { id: true, status: true },
-  })
-
-  if (!evento) {
-    return NextResponse.json({ error: 'Evento não encontrado' }, { status: 404 })
-  }
-
-  if (evento.status !== 'ATIVO') {
-    return NextResponse.json(
-      { error: 'Só é possível registrar recebimentos em eventos ATIVOS' },
-      { status: 409 },
-    )
-  }
-
-  // 3️⃣.5 Gate de registro por evento
-  let temVinculoAtivo = false
-  if (role === 'visualizador') {
-    const vinculo = await prisma.eventoOperador.findUnique({
-      where: { eventoId_userId: { eventoId, userId: operadorId } },
-      select: { ativo: true },
-    })
-    temVinculoAtivo = vinculo?.ativo === true
-  }
-
-  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
-    return NextResponse.json(
-      { error: 'Você não tem permissão para registrar doações neste evento' },
-      { status: 403 },
-    )
-  }
-
-  // 4️⃣ Local pertence ao evento
+  // 3️⃣ Local pertence ao evento
   const local = await prisma.localColeta.findFirst({
     where: { id: localId, eventoId },
     select: { id: true },
@@ -124,7 +88,7 @@ export async function POST(
     )
   }
 
-  // 5️⃣ Alimentos pertencem ao evento + snapshot da unidade
+  // 4️⃣ Alimentos pertencem ao evento + snapshot da unidade
   const alimentoIds = itensLimpos.map((i) => i.alimentoId)
 
   const alimentos = await prisma.eventoAlimento.findMany({
@@ -132,9 +96,7 @@ export async function POST(
     select: { id: true, product: { select: { unit: true } } },
   })
 
-  const unidadePorAlimento = new Map(
-    alimentos.map((a) => [a.id, a.product.unit]),
-  )
+  const unidadePorAlimento = new Map(alimentos.map((a) => [a.id, a.product.unit]))
 
   const invalido = itensLimpos.find((i) => !unidadePorAlimento.has(i.alimentoId))
   if (invalido) {
@@ -144,7 +106,7 @@ export async function POST(
     )
   }
 
-  // 6️⃣ Persiste tudo numa transação (atomicidade)
+  // 5️⃣ Persiste tudo numa transação (atomicidade)
   const criados = await prisma.$transaction(
     itensLimpos.map((i) =>
       prisma.recebimento.create({
@@ -171,52 +133,26 @@ export async function POST(
 /**
  * 🆕 GET — lista paginada/filtrável de recebimentos do evento (gestão fina).
  * Filtros: localId, alimentoId, cpf (busca por dígitos). Paginação: page/perPage.
- * Mesmo gate do POST (evento ATIVO + role/vínculo).
+ *
+ * ⚠️ Mantido `exigirAtivo: true` para não alterar comportamento nesta onda.
+ *    Ver nota de "leitura de evento encerrado" no documento do projeto.
  */
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const result = await requireAuth()
-  if (result instanceof NextResponse) return result
-  const userId = result.user.id
-  const role = result.user.role
-
   const { id: eventoId } = await params
 
-  const evento = await prisma.evento.findUnique({
-    where: { id: eventoId },
-    select: { id: true, status: true },
-  })
-  if (!evento) {
-    return NextResponse.json({ error: 'Evento não encontrado' }, { status: 404 })
-  }
-  if (evento.status !== 'ATIVO') {
-    return NextResponse.json(
-      { error: 'Só é possível gerir recebimentos em eventos ATIVOS' },
-      { status: 409 },
-    )
-  }
-
-  let temVinculoAtivo = false
-  if (role === 'visualizador') {
-    const vinculo = await prisma.eventoOperador.findUnique({
-      where: { eventoId_userId: { eventoId, userId } },
-      select: { ativo: true },
-    })
-    temVinculoAtivo = vinculo?.ativo === true
-  }
-  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
-    return NextResponse.json(
-      { error: 'Você não tem permissão para gerir recebimentos neste evento' },
-      { status: 403 },
-    )
-  }
+  const ctx = await autorizarEvento(eventoId, { exigirAtivo: true })
+  if (ctx instanceof NextResponse) return ctx
 
   // Query params
   const url = new URL(req.url)
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
-  const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get('perPage')) || 50))
+  const perPage = Math.min(
+    100,
+    Math.max(1, Number(url.searchParams.get('perPage')) || 50),
+  )
   const localId = url.searchParams.get('localId') || undefined
   const alimentoId = url.searchParams.get('alimentoId') || undefined
   const cpfRaw = url.searchParams.get('cpf')?.replace(/\D/g, '') || undefined

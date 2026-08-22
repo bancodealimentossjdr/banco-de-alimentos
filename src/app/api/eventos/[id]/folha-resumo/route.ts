@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireAuth } from '@/lib/auth-helpers'
-import { podeRegistrarNoEvento } from '@/lib/permissions'
+import { requireDev } from '@/lib/auth-helpers'
+import { autorizarEvento } from '@/lib/eventos/vinculo'
 
 const LIMITE_RENDA = 810.55
 const LIMITE_LISTA = 20
@@ -42,13 +42,12 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  // 1️⃣ Autenticação
-  const result = await requireAuth()
-  if (result instanceof NextResponse) return result
-  const registradoPor = result.user.id
-  const role = result.user.role
-
   const { id: eventoId } = await params
+
+  // 1️⃣ 🧹 ONDA 22 (22-d) — auth + evento ATIVO + vínculo num só lugar
+  const ctx = await autorizarEvento(eventoId, { exigirAtivo: true })
+  if (ctx instanceof NextResponse) return ctx
+  const registradoPor = ctx.userId
 
   // 2️⃣ Parse do body
   let body: unknown
@@ -87,19 +86,13 @@ export async function POST(
 
   const renda = Number(rendaPerCapita)
   if (!Number.isFinite(renda) || renda < 0) {
-    return NextResponse.json(
-      { error: 'Renda per capita inválida' },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: 'Renda per capita inválida' }, { status: 400 })
   }
 
-  // 🆕 Validação do show
+  // Validação do show
   const showValido = typeof showDia === 'string' ? showDia.trim() : ''
   if (!showValido || !SHOW_VALUES.has(showValido)) {
-    return NextResponse.json(
-      { error: 'Selecione um show válido' },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: 'Selecione um show válido' }, { status: 400 })
   }
 
   // 3️⃣.5 🚫 TRAVA DE RENDA
@@ -116,41 +109,7 @@ export async function POST(
     )
   }
 
-  // 4️⃣ Evento existe e está ATIVO
-  const evento = await prisma.evento.findUnique({
-    where: { id: eventoId },
-    select: { id: true, status: true },
-  })
-
-  if (!evento) {
-    return NextResponse.json({ error: 'Evento não encontrado' }, { status: 404 })
-  }
-
-  if (evento.status !== 'ATIVO') {
-    return NextResponse.json(
-      { error: 'Só é possível registrar ingressos em eventos ATIVOS' },
-      { status: 409 },
-    )
-  }
-
-  // 5️⃣ Gate de registro por evento
-  let temVinculoAtivo = false
-  if (role === 'visualizador') {
-    const vinculo = await prisma.eventoOperador.findUnique({
-      where: { eventoId_userId: { eventoId, userId: registradoPor } },
-      select: { ativo: true },
-    })
-    temVinculoAtivo = vinculo?.ativo === true
-  }
-
-  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
-    return NextResponse.json(
-      { error: 'Você não tem permissão para registrar ingressos neste evento' },
-      { status: 403 },
-    )
-  }
-
-  // 6️⃣ Persiste com limite ATÔMICO por show
+  // 4️⃣ Persiste com limite ATÔMICO por show
   //    Sentinela usada para diferenciar "estourou limite" de outros erros.
   const LIMITE_ESTOURADO = 'LIMITE_ESTOURADO'
 
@@ -164,12 +123,12 @@ export async function POST(
           cpf: cpfLimpo,
           rendaPerCapita: new Prisma.Decimal(renda),
           registradoPor,
-          showDia: showValido, // 🆕
+          showDia: showValido,
         },
         select: { id: true, codigoFamiliar: true, createdAt: true },
       })
 
-      // controle de limite: só se houver linha de limite configurada com limite > 0
+      // controle de limite: só se houver linha configurada com limite > 0
       const limiteRow = await tx.limiteShow.findUnique({
         where: { eventoId_showDia: { eventoId, showDia: showValido } },
         select: { limite: true },
@@ -205,10 +164,7 @@ export async function POST(
       )
     }
     // código familiar duplicado
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === 'P2002'
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return NextResponse.json(
         { error: 'Este código familiar já retirou o ingresso social neste evento' },
         { status: 409 },
@@ -221,39 +177,25 @@ export async function POST(
 /**
  * GET → lista ingressos + line-up fixo + status de limites.
  *
- * 🎭 ONDA 21.5 — máscara agora depende do ROLE (decidido no SERVIDOR):
+ * 🎭 ONDA 21.5 — máscara depende do ROLE (decidido no SERVIDOR):
  *   role 'dev' → cpf e codigoFamiliar CRUS + lista completa
  *   demais     → mascarados + take de LIMITE_LISTA
+ *
+ * 🧹 ONDA 22 (22-d) — `exigirAtivo: false`: consultar a folha de um evento
+ *    ENCERRADO é leitura legítima (prestação de contas). O comportamento
+ *    original já era este — o helper preserva.
  */
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const result = await requireAuth()
-  if (result instanceof NextResponse) return result
-  const role = result.user.role
-  const userId = result.user.id
-
   const { id: eventoId } = await params
 
-  let temVinculoAtivo = false
-  if (role === 'visualizador') {
-    const vinculo = await prisma.eventoOperador.findUnique({
-      where: { eventoId_userId: { eventoId, userId } },
-      select: { ativo: true },
-    })
-    temVinculoAtivo = vinculo?.ativo === true
-  }
-
-  if (!podeRegistrarNoEvento(role, temVinculoAtivo)) {
-    return NextResponse.json(
-      { error: 'Você não tem permissão para ver a folha resumo deste evento' },
-      { status: 403 },
-    )
-  }
+  const ctx = await autorizarEvento(eventoId, { exigirAtivo: false })
+  if (ctx instanceof NextResponse) return ctx
 
   // 🔓 DEV vê tudo, cru. Ninguém mais.
-  const isDev = role === 'dev'
+  const isDev = ctx.isDev
 
   // ?all=1 só tem efeito para dev (backend não confia no frontend)
   const url = new URL(req.url)
@@ -282,7 +224,7 @@ export async function GET(
     createdAt: r.createdAt,
   }))
 
-  // 🆕 contagem real (a lista pode estar truncada)
+  // contagem real (a lista pode estar truncada)
   const totalGeral = await prisma.folhaResumoIngresso.count({ where: { eventoId } })
 
   const limites = await prisma.limiteShow.findMany({
@@ -312,25 +254,19 @@ export async function GET(
   })
 }
 
-
 /**
  * DELETE → remove um ingresso da folha resumo. SÓ dev.
  * Também decrementa o contador de limite do show (se houver).
+ *
+ * 🧹 ONDA 22 — gate via requireDev() (era check manual de role).
+ *    Não usa autorizarEvento: dev pode corrigir folha de evento encerrado.
  */
 export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const result = await requireAuth()
+  const result = await requireDev()
   if (result instanceof NextResponse) return result
-  const role = result.user.role
-
-  if (role !== 'dev') {
-    return NextResponse.json(
-      { error: 'Apenas o desenvolvedor pode excluir registros da folha resumo' },
-      { status: 403 },
-    )
-  }
 
   const { id: eventoId } = await params
 
@@ -353,10 +289,12 @@ export async function DELETE(
         where: { id: registroId, eventoId },
         select: { id: true, showDia: true },
       })
-      if (!reg) throw new Prisma.PrismaClientKnownRequestError('not found', {
-        code: 'P2025',
-        clientVersion: 'x',
-      })
+      if (!reg) {
+        throw new Prisma.PrismaClientKnownRequestError('not found', {
+          code: 'P2025',
+          clientVersion: 'x',
+        })
+      }
 
       await tx.folhaResumoIngresso.delete({ where: { id: reg.id } })
 
@@ -377,10 +315,7 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true })
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === 'P2025'
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
       return NextResponse.json({ error: 'Registro não encontrado' }, { status: 404 })
     }
     throw err
