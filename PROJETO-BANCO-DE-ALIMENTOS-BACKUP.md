@@ -1,522 +1,395 @@
 # 🍎 Annonae — Sistema de Gestão de Banco de Alimentos
 
-> **📅 Última atualização:** 02/06/2026
-> **🎯 Propósito:** Documento de continuidade oficial. Backup completo de contexto para retomar o desenvolvimento em qualquer nova conversa (qualquer plataforma de LLM).
-> **👤 Desenvolvedor:** Vitor
-> **🌐 URL de produção:** https://banco-de-alimentos-green.vercel.app/
-> **📍 Localização:** São João del-Rei / MG, Brasil
+> **📅 Última atualização:** 22/08/2026
+> **🎯 Propósito:** Documento de continuidade oficial. Backup de contexto para retomar o desenvolvimento em qualquer nova conversa (qualquer LLM).
+> **👤 Desenvolvedor:** Vitor · São João del-Rei / MG
+> **🌐 Produção:** https://annonae.com.br
 
 ---
 
-## 🚀 Como usar este documento em uma nova conversa
+## 🚀 Como usar
 
-Cole este arquivo inteiro no primeiro prompt junto com:
+Cole este arquivo no primeiro prompt junto com:
 
-> "Estou retomando o desenvolvimento do sistema **Annonae** (Banco de Alimentos). Segue o backup oficial do contexto. Por favor, leia tudo e me confirme onde paramos antes de continuarmos."
+> "Estou retomando o desenvolvimento do sistema **Annonae** (Banco de Alimentos). Segue o backup oficial do contexto. Leia tudo e me confirme onde paramos antes de continuarmos."
 
 ---
 
-## 📖 1. Visão Geral do Projeto
+## 📖 1. Visão Geral
 
-- **Nome comercial:** **Annonae** ✅ (referência à *Annona*, instituição romana de distribuição de grãos)
-- **Nome interno técnico:** Sistema de Gestão do Banco de Alimentos de São João del-Rei (SJDR)
+- **Nome comercial:** **Annonae** (referência à *Annona*, instituição romana de distribuição de grãos)
 - **Tipo:** Aplicação web (PWA) para gestão operacional de uma ONG
-- **Objetivo:** Controlar doações recebidas, distribuições a beneficiários, colheita solidária, estoque e cadastros relacionados.
-- **Status:** App em produção, em uso real pelo Banco de Alimentos de SJDR.
-- **Fase atual:** Expansão institucional (reuniões com Mesa Brasil, CGESAN, prefeituras já em andamento).
+- **Escopo:** doações, distribuições a beneficiários, colheita solidária, estoque, eventos e cadastros
+- **Status:** em produção, uso real diário pelo Banco de Alimentos de SJDR
+- **Fase atual:** 🔥 **Onda 22 — Faxina Técnica (EM ANDAMENTO)**
+- **Fase institucional:** expansão — reuniões com **Mesa Brasil, CGESAN e prefeituras**
 
-### 🛠️ Stack Tecnológica
+### 🛠️ Stack
 
-- **Framework:** Next.js 16 (App Router)
-- **Linguagem:** TypeScript
-- **Banco de dados:** PostgreSQL (Supabase) — dev = prod
-- **ORM:** Prisma v6.19.3
-- **Autenticação:** NextAuth v5 (Auth.js) com Credentials + JWT
-- **Hospedagem:** Vercel (plano Free — limite de 10s/função serverless)
-- **Estilização:** Tailwind CSS
-- **Hash de senha:** bcryptjs
-- **Toasts:** react-hot-toast
-- **PWA:** ✅ `manifest.json` já configurado (app instalável na tela inicial)
-- **Exportação:** exceljs + jsPDF + jspdf-autotable (client-side)
+| Camada | Tecnologia |
+|---|---|
+| Framework | Next.js 16 (App Router) · TypeScript |
+| Banco | PostgreSQL (Supabase) — **dev = prod** |
+| ORM | Prisma v6.19.3 |
+| Auth | NextAuth v5 — Credentials + Google + JWT |
+| Host | Vercel Free (limite 10s/função) |
+| UI | Tailwind CSS · react-hot-toast |
+| Gráficos | Recharts (**lazy-loaded**) |
+| Export | exceljs · jsPDF · jspdf-autotable |
+| PWA | `manifest.json` + `public/sw.js` + workbox |
+| Outros | bcryptjs · canvas (assinatura PNG base64) |
 
 ---
 
-## 👥 2. Sistema de Permissões (RBAC)
-
-### Roles definidas
+## 👥 2. Permissões (RBAC)
 
 | Role | Descrição |
-|------|-----------|
-| 👑 **admin** | Acesso total à operação; gerencia cadastros estruturais e usuários |
-| 🧑‍💼 **operador** | Dia-a-dia (doações, distribuições, colheitas); trava temporal no mesmo dia |
-| 👀 **visualizador** | Somente leitura — vê dados mascarados (LGPD-friendly) |
-
-> 🗑️ **Removida do escopo:** a role `desenvolvedor` e os painéis `/dev/*` (antiga Onda 14.8) foram retirados do roadmap. Funcionalidade técnica equivalente poderá ser incorporada em onda futura, se necessário.
-
-### 📋 Matriz de Permissões
-
-| Funcionalidade | 👑 Admin | 🧑‍💼 Operador | 👀 Visualizador |
-|----------------|:-------:|:-----------:|:--------------:|
-| Ver movimentações | ✅ | ✅ | ✅ (mascarado) |
-| Criar/Editar/Excluir movimentações | ✅ | ✅ (só no mesmo dia) | ❌ |
-| Ver cadastros de produtos/estoque | ✅ | ✅ | ✅ (mascarado) |
-| Ver páginas de Produtor/Funcionário/Instituição | ✅ | ✅ | ❌ (redirect → Dashboard) |
-| Criar/Editar/Excluir cadastros | ✅ | ❌ | ❌ |
-| Gerenciar usuários | ✅ | ❌ | ❌ |
-| Ver Audit Log | ✅ (próprio escopo) | ❌ | ❌ |
-| Exportar relatórios (PDF/Excel/CSV) | ✅ (opção censura) | ✅ | ✅ (mascarado) |
-| Acessar aba Tutorial | ✅ | ✅ | ✅ |
-
-### 🔐 Princípios aplicados
-
-1. **Backend nunca confia no frontend** — toda API valida via `requireView`/`requireEdit`.
-2. **Dados sensíveis são mascarados no servidor** — visualizador recebe JSON já mascarado.
-3. **Botões de ação são ocultos** no frontend quando o role não tem permissão (UX).
-4. **Operador tem trava temporal** — só edita/exclui movimentações do mesmo dia.
-5. **Trava de duplo clique** — botões de submit desabilitam durante o envio.
-6. **Rascunho local** — formulários críticos preservam dados em caso de queda.
-7. **Visualizador é redirecionado** para Dashboard ao tentar acessar páginas sensíveis.
-8. **Criptografia em camadas** — dados pessoais protegidos.
-9. **Fail-secure** — na ausência de role válido, trata como visualizador e mascara.
-
----
-
-## 📦 3. Modelo de Estoque (regra atual, SOB AUDITORIA na Onda 16.1)
-
-### Operação real (Cenário A)
-
-- 🏪 **Doações** chegam ao banco em estado **bruto** (pode ter coisa estragada)
-- 🌾 **Colheita Solidária** é cadastrada em aba separada, considerada **100% aproveitada** — controle à parte, entra na fórmula de estoque
-- 🧊 **Câmara Fria** = soma de `DailyApproval.approvedQty` (operador lança o que sobrou após triagem, ela é o nosso estoque)
-- 📤 **Distribuições** saem da câmara fria pros beneficiários
-
-### Fórmulas atuais (Onda 10 — sob auditoria na 16.1)
-
-Aproveitado = câmaraFria + distribuído (das DOAÇÕES que passaram na triagem) Em Estoque = câmaraFria (físico guardado AGORA)
-
-
-### ⚠️ Suspeita ativa (Onda 16.1 — PRÓXIMA)
-
-Vitor suspeita que o estoque atual **não está descontando saídas** dinamicamente. A Onda 16.1 fará auditoria do código atual e correção pra modelo **dinâmico**:
-
-Em Estoque (novo) = Σ(DailyApproval.approvedQty) − Σ(DistributionItem.qty)
-
-
-### Exemplo numérico (modelo atual)
-
-| Métrica | Valor |
 |---|---|
-| 🏪 Doações | 3.489,6 kg |
-| 🌾 Colheita | 0 kg |
-| 🧊 Câmara Fria | 589,8 kg |
-| 📤 Distribuído | 928,9 kg |
-| ✅ Aproveitado | 589,8 + 928,9 = **1.518,7 kg** |
-| 📦 Em Estoque | **589,8 kg** |
+| 🛠️ **dev** | Máxima, exclusiva do Vitor. Vê tudo sem máscara (CPF, origem, PDF completo) |
+| 👑 **admin** | Operação total + cadastros estruturais + usuários |
+| 🧑‍💼 **operador** | Dia-a-dia; trava temporal (só mesmo dia) |
+| 👀 **visualizador** | Somente leitura, dados mascarados (LGPD) |
+
+### Matriz resumida
+
+| Funcionalidade | dev | admin | operador | visualizador |
+|---|:-:|:-:|:-:|:-:|
+| Ver movimentações | ✅ cru | ✅ | ✅ | ✅ mascarado |
+| Criar/editar/excluir movimentações | ✅ | ✅ | ✅ mesmo dia | ❌ |
+| Finalizar distribuição (comprovante) | ✅ | ✅ | ✅ | ❌ |
+| Ver Em Estoque / Estoque de Eventos | ✅ | ✅ | ✅ | ❌ |
+| Ver `origem` da distribuição | ✅ | ⚠️ | ⚠️ | ❌ |
+| Cadastros (criar/editar/excluir) | ✅ | ✅ | ❌ | ❌ |
+| Gerenciar usuários / trocar role | ✅ | ✅ | ❌ | ❌ |
+| Audit Log | ✅ | ✅ | ❌ | ❌ |
+| Reverter retirada de ingresso | ✅ | ❌ | ❌ | ❌ |
+| Deletar folha-resumo | ✅ | ❌ | ❌ | ❌ |
+| PDF Arrecadação Extra (c/ CPF) | ✅ | ❌ | ❌ | ❌ |
+| Excel Arrecadação Extra (s/ CPF) | ✅ | ✅ | ✅ | ❌ |
+| **Export XLSX de ingressos** | ✅ CPF cru | ✅ CPF mascarado | ❌ | ❌ |
+| Painel de registros em tempo real | ✅ | ❌ | ❌ | ❌ |
+| Confirmação de recebimento por local | ✅ | ❌ | ❌ | ❌ |
+
+> ⚠️ **`origem`:** campo sensível; alvo é leitura crua só para dev. Admin/operador veem o efeito no estoque, não a granularidade.
+
+### 🔐 Princípios
+
+1. **Backend nunca confia no frontend** — toda API valida via helper (`requireView`/`requireEdit`/`requireRole`/`requireAdminOrDev`/`requireDev`)
+2. Dados sensíveis **mascarados no servidor** (visualizador recebe JSON já mascarado)
+3. Botões ocultos no frontend quando o role não permite
+4. Operador tem **trava temporal**
+5. Trava de duplo clique · rascunho local
+6. Visualizador **redirecionado** de páginas sensíveis
+7. **Fail-secure** — sem role válido, trata como visualizador
+8. **CPF sempre normalizado para dígitos** no save e na busca
+9. 🆕 **Gate de auth só via `auth-helpers`** — proibido `auth()` cru em rota de API
 
 ---
 
-## 🗺️ 4. Roadmap — Histórico de Ondas Concluídas
+## 📦 3. Modelo de Estoque
 
-### ✅ Fase 1 — Fundação (Ondas 1–11)
+**Operação real (Cenário A) — vigente**
+- Doações chegam **brutas** (pode ter item estragado)
+- Colheita Solidária = 100% aproveitada (só `status="realizada"`)
+- Câmara Fria = Σ `DailyApproval.approvedQty`
+- Distribuições saem da câmara fria
 
-| # | Onda | Status |
-|---|------|--------|
-| 1–3 | Setup, CRUDs, sistema de permissões base | ✅ |
-| 3A | Calculadora de peso líquido (campo `boxes` em DonationItem) | ✅ |
-| 4.0 | Role visualizador adicionada | ✅ |
-| 4.1 | Página de Usuários (CRUD + soft delete) | ✅ |
-| 4.2 | RBAC nas APIs (`requireView`/`requireEdit`) | ✅ |
-| 4.3 | Proteção de UI por role + Mascaramento LGPD no servidor (inicial) | ✅ |
-| 5 | Hotfix: restauração de handlers POST + rotação de credenciais Supabase | ✅ |
-| 6 | Desconto automático de caixas (`<CalculadoraPeso />` reutilizável) | ✅ |
-| 7 | Múltiplos funcionários (até 3) em doações, distribuições e colheitas | ✅ |
-| 8 | Trava de duplo clique em formulários (`useFormSubmit`) | ✅ |
-| 9 | Rascunho local com auto-save (`useDraft` + `DraftBanner` + `DraftSavedIndicator`) | ✅ |
-| 10 | Correção do cálculo de Estoque (modelo mental travado) | ✅ |
-| 11 | Performance Geral (queries Prisma, Promise.all, cache estratégico) | ✅ |
+**Fórmulas**
+Estoque Geral = Marco + Σ(DailyApproval.approvedQty) − Σ(DistributionItem.qty onde origem = DOACAO_COLHEITA) Estoque Eventos = Σ(Recebido − Refugo) − Σ(Distribuído onde origem = EVENTO) Aproveitamento = Σ(Recebido − refugoKg) / Σ Recebido × 100
 
-### ✅ Fase 2 — Indicadores (Onda 12)
 
-**Onda 12 — Aba Indicadores** ✅
-- Dashboard com filtros (período, produto, doador, beneficiário)
-- Gráficos (barras, linhas, pizza) com `recharts`
-- Totais, médias, top 10
-- APIs: `/api/indicadores/macro`, `/tendencias`, `/rankings`, `/produtos`
-- 5 componentes de visualização
-- Respeita RBAC (visualizador vê mascarado)
-
-### ✅ Fase 3 — LGPD Completa (Onda 13)
-
-**Onda 13 — LGPD Completa** ✅
-Blindagem total de dados pessoais com mascaramento, auditoria e consentimento formal.
-
-- **13.1** — Lib de Máscaras (`src/lib/mask.ts`): `maskCPF`, `maskRG`, `maskEmail`, `maskPhone`, `maskCEP`, `maskAddress`, `maskContactName`
-- **13.2** — Permissões de Visualização (`permissions.ts`, `mask-by-role.ts`): `canViewSensitiveData`, `applyDataMask`, `shouldMaskPersonalData` (fail-secure), helpers por entidade
-- **13.3** — Máscaras aplicadas em TODAS as APIs (beneficiarios, doadores, funcionarios, produtores, usuarios, doacoes, distribuicoes, colheita-solidaria) + **bug crítico corrigido:** `GET /api/doacoes` estava público
-- **13.4** — Audit Log (modelo `AuditLog` + middleware automático + tela `/audit-log`)
-- **13.5** — Termo de Consentimento + Política de Privacidade + Termos de Uso + campo `consentimentoLGPD`
-
-### ✅ Fase 4 — Exportação (Onda 15) 🎉 CONCLUÍDA EM 01–02/06/2026
-
-> ⏪ Era originalmente a Onda 18. Antecipada por necessidade institucional urgente.
-
-**Onda 15 — Exportação PDF/Excel/CSV** ✅ **COMPLETA**
-
-- **15.1 — Exportação Excel dos Indicadores** ✅
-  - Arquivo `.xlsx` multi-aba (Resumo, Tendências, Rankings, Produtos)
-  - Lib: `exceljs` (client-side)
-  - Respeita máscara LGPD
-
-- **15.2 — Exportação PDF dos Indicadores** ✅
-  - Relatório institucional com header Annonae, período, data de emissão
-  - Tabelas (não gráficos) — mais profissional e estável
-  - Rodapé "Emitido por [usuário] em [data]"
-  - Lib: `jsPDF` + `jspdf-autotable`
-
-- **15.2.5 — Filtros de Indicadores (refinamento)** ✅ 🆕
-  - Período padrão de 30 dias
-  - Presets rápidos de período
-  - Exibição de datas no formato **DD-MM-YYYY**
-  - ✅ **Resolveu de fato o antigo BUG-001** (filtro de data)
-
-- **15.3 — Exportação CSV de Listagens** ✅
-  - CSV para Doações, Distribuições, Colheita Solidária
-  - Respeita máscara LGPD
-  - Nome padronizado: `annonae-[modulo]-YYYY-MM-DD.csv`
-
-**🏗️ Arquitetura final (divergiu do plano original — pasta dedicada):**
-- `src/lib/export/indicadores-data.ts` — coleta unificada de dados + censura por role
-- `src/lib/export/indicadores-pdf.ts`
-- `src/lib/export/indicadores-excel.ts`
-- `src/app/api/indicadores/export/route.ts` — endpoint de export
-- `src/components/BotoesExportacao.tsx` — botões com opção de censura para admin
-- `src/components/FiltrosIndicadores.tsx` — filtros refinados
-
-**Itens movidos para Onda futura (Relatórios Avançados):**
-- ❌ Relatório mensal automatizado
-- ❌ Agendamento de relatórios por email
+- ✅ Fonte única de verdade: `src/lib/stock/calculate-stock.ts`
+- ✅ Estoque geral só retorna valor se houver marco (`hasMarker`); senão `null`
 
 ---
 
-### ✅ Fase 5 — Estoque Dinâmico (Ondas 16.1 + 16.2) — CONCLUÍDA 03/06/2026
+## 🗺️ 4. Ondas Concluídas *(histórico enxuto)*
 
-**Onda 16.1 — Estoque Dinâmico (Auditoria + Correção)** ✅
-- Auditoria do cálculo antigo de estoque
-- Migração para modelo dinâmico
-- Script de diagnóstico: scripts/diagnostico-aproveitamento.ts
-- Confirmado: cobertura DailyApproval parcial (33,3%) — dias sem registro tratados como descarte total (decisão 04/06)
-
-**Onda 16.2 — Marcos de Estoque (StockMarker)** ✅
-- Modelo StockMarker (ZERO + ADJUSTMENT) + enum StockMarkerType
-- Lib src/lib/stock/calculate-stock.ts (fonte única de cálculo)
-- APIs: /api/stock-markers + /api/stock-markers/[id]
-- Refatoração de /api/estoque/resumo/route.ts
-- Cutoff de fim-de-dia (movimentação do dia do marco = embutida)
-- 2 migrations aplicadas (add_stock_markers + onda_16_2_stock_markers)
-- Defesa: snapshot vazio se prisma.stockMarker indisponível (cache velho)
-
-> ⚠️ **Aprendizado da Onda 10 reforçado:** alinhar modelo mental ANTES de codar. Auditar antes de corrigir.
+| Onda | Entrega | Data |
+|---|---|---|
+| **1–16.7** | Base: CRUD de cadastros (produtos, doadores, beneficiários, funcionários, produtores), doações, distribuições, colheita solidária, estoque com marcos, comprovante com assinatura digital, PWA, RBAC, exportações | — |
+| **17** | Módulo genérico de **Eventos** — schema, CRUD admin, ativar/encerrar, RBAC por registro, refugo (Opção B), tela mobile-first, gate do `/campo`. *(17.8-e swipe descartado)* | 12/07/26 |
+| **17-C** | Card **Estoque de Eventos** na `/estoque` + leitura de `origem` no cálculo | — |
+| **18** | **Balcão Ingresso→Alimento** em escala (16 tablets): `ShowContador` atômico, teto de 3/CPF global, anti-race (`updateMany where retirado:false`), reversão DEV-only, busca por CPF, Folha Resumo (renda ≤ 810,55 → 422; anti-duplicata → 409), export XLSX. **3 testes de fogo aprovados** | 21/07/26 |
+| **19** | Role **dev** consolidada — superior a todas, gate `requireAdminOrDev()` nas rotas de operadores | 22/07/26 |
+| **Arrecadação Extra** | Recompensa por doação (nome + CPF + local + números por kg). Excel s/ CPF · PDF c/ CPF (dev). Sorteio presencial, fora do app | — |
+| **Expo Del Rei** | Correção em campo: numeração contígua de cupons por show, CPF normalizado, painel tempo real (dev), confirmação por local, cadastro simplificado, integração com MinhaSJ. 🏆 **Maior teste de fogo — evento rodou perfeitamente** | 22/07/26 |
+| **20** | **Performance:** Recharts via `next/dynamic({ssr:false})`, `graficos-utils.ts` puro, `revalidate` 15/30 no lugar de `force-dynamic`. 💡 *Lição: medir bundle antes de otimizar SQL* | 05/08/26 |
+| **Filtros Colheita** | Filtros na colheita no padrão das Distribuições | — |
+| **21** | **Branding Annonae** completo: logo (header/sidebar/login), favicon + ícones PWA, metadados/OG, logo e cabeçalho nos PDFs, cabeçalho/rodapé no Excel, layout e paleta, textos legados substituídos | 21/08/26 |
+| **21.1** | Refino do PDF de Arrecadação Extra: retrato A4, card único de destaques em grid, maiores doadores por show, tratamento de empate → sorteio presencial, máscara de sobrenome (LGPD), identidade por CPF>nome | 22/08/26 |
 
 ---
 
-## 🔜 6. Roadmap — Próximas Ondas
+## 🔥 5. ONDA ATUAL — Onda 22: Faxina Técnica
 
-### 🗑️ Onda 16.3 — Filtros Dinâmicos Multi-Select [ABSORVIDA pela Onda 16.5]
-> ⚠️ DESCONTINUADA como onda independente (04/06/2026).
-> Todo o escopo (filtros multi-select de Doador, Instituição, Produtor e
-> Funcionário) foi incorporado à Onda 16.5. Manter este registro apenas
-> como histórico — NÃO executar separadamente.
+**Objetivo:** quitar dívida técnica e padronizar o núcleo. Pré-requisito do multi-tenancy (§7).
 
-### 🌊 Onda 16.4 — Cards de Resumo All-Time
-🎴 Card de resumo all-time em KG total em cada aba de cadastro:
+| # | Item | Status |
+|---|---|:-:|
+| 22-a | **Padronizar auth** nas rotas de ingressos | ✅ |
+| 22-b | Limpar `auth.ts` (JWT DEBUG + return duplicado) | ✅ *já estava limpo — item era falso positivo do backup* |
+| 22-f | `export/route.ts` da Arrecadação Extra via helper | ✅ |
+| 22-g | Bug `_count` em `/api/funcionarios` | ✅ |
+| 22-h | Rascunho fantasma (`useDraft.ts`) | ⏳ **próximo** |
+| 22-c | Limpar raiz (`dev.db`, `fix-*.js`) | ⏳ |
+| 22-d | Extrair `checarVinculoEvento()` | ⏳ |
+| ~~22-e~~ | ~~Snapshot explícito de evento~~ | ❌ **removido — é feature, foi para o backlog** |
 
-| Aba | Métrica exibida |
-|---|---|
-| Doadores | "Quanto cada doador doou" |
-| Beneficiários | "Quanto cada instituição recebeu" |
-| Produtores | "Quanto cada produtor doou" |
-| Funcionários | "Quanto cada funcionário arrecadou" |
+### ✅ 22-a / 22-f — Padronização de auth *(commit: `fix(security): fecha /api/ingressos/export para visualizador e unifica gates em auth-helpers`)*
 
-### 🌊 Onda 16.5 — Indicadores de Aproveitamento 🆕
-> 🔗 Continuidade direta das Ondas 16.1 + 16.2 (Estoque Dinâmico/Marcos)
-> 🧩 ABSORVE a antiga Onda 16.3 (Filtros Multi-Select)
-> 📌 Documento-base ativo: CHECKPOINT-ONDA-16.5-APROVEITAMENTO.md
+**🚨 Achado de segurança (LGPD):** `/api/ingressos/export` exigia apenas *estar logado*. Qualquer **visualizador** — o role criado justamente para não ver dado sensível — baixava XLSX com **CPF, nome, data de nascimento, cidade e bairro** de ~18.000 reservas.
 
-**Objetivo:** Exibir indicadores de aproveitamento e destinação em GRÁFICOS
-na aba Indicadores existente (NÃO na aba /estoque), com filtros multi-select.
+| Arquivo | Antes | Depois |
+|---|---|---|
+| `api/ingressos/export/route.ts` | `auth()` cru, **sem gate de role** | `requireAdminOrDev()` · **CPF cru só dev, mascarado p/ admin** · aba "Sobre" (proveniência) · cabeçalho Annonae · `numFmt '@'` em CPF/protocolo |
+| `api/ingressos/buscar/route.ts` | `auth()` cru + check manual duplicado em POST **e** GET | `requireRole(['dev','admin','operador'])` · `any` eliminado · lógica de dedup **intocada** |
+| `api/eventos/[id]/arrecadacao-extra/export/route.ts` | `requireAuth()` + check manual de role | `requireAdminOrDev()` |
 
-**Fórmulas oficiais:**
-- Taxa de Aproveitamento (%) = (Aproveitamento + Colheita) / (Doação bruta + Colheita) × 100
-- Taxa de Destinação (%) = Distribuído / (Aproveitamento + Colheita) × 100
-- Perda (derivada) = Doação bruta − Aproveitamento
+**Novos helpers em `src/lib/auth-helpers.ts`:**
+- `requireRole(roles: readonly UserRole[])` — gate genérico, substitui checks manuais espalhados
+- `requireDev()` — ações irreversíveis / dados crus
 
-**Escopo — gráficos (recharts) na aba Indicadores:**
-- 📊 Taxa de Aproveitamento (%) — TOGGLE de tipo (pizza/gauge/barra) no app
-- 📊 Taxa de Destinação (%) — TOGGLE de tipo (pizza/gauge/barra) no app
-- 📈 Tendência temporal de aproveitamento (kg no período filtrado)
-- 📊 Composição: Entrada vs. Aproveitado vs. Perda
-- 🔢 Cards de apoio: total doado geral + total estoque dinâmico
+### ✅ 22-g — `_count` em `/api/funcionarios` *(commit: `fix(funcionarios): consolida _count em totalUsos e remove auth() redundante`)*
 
-**Filtros (absorvidos da antiga 16.3) — multi-select na aba Indicadores:**
-- 📅 Período (reusa FiltrosIndicadores.tsx: 30d default + 7/15d + 6m + 1a)
-- 👤 Doador
-- 🏢 Instituição beneficiária
-- 🌾 Produtor
-- 👷 Funcionário
+**Causa:** `_count` devolvia **9 chaves separadas** (`donationsAsEmployee1..3`, `distributions…`, `harvests…`) e nenhum total → consumidor lia campo inexistente. Além disso a rota chamava **`auth()` de novo** após o `requireView`, gerando 2ª query por request.
 
-**Exportação:**
-- 📄 PDF / Excel em TABELA (padrão Onda 15) — gráficos só na tela
-- ♻️ Reusa pipeline src/lib/export/ (herda máscara LGPD)
-
-**Decisões confirmadas (04/06/2026):**
-- ✅ Gráficos na aba Indicadores; /estoque permanece operacional
-- ✅ Toggle de tipo de gráfico no app; export sempre em tabela
-- ✅ Cálculo AGREGADO em kg (DailyApproval não possui productId)
-- ✅ Dias sem aproveitamento tratados como descarte total
-
-**A criar:**
-- src/lib/stock/calculate-utilization.ts
-- /api/indicadores/aproveitamento (período + 4 filtros)
-- Componentes de gráfico com toggle (recharts)
-- Extensão de FiltrosIndicadores.tsx (4 filtros multi-select)
-
-### 🌊 Onda 17 — Expo Del-Rei (CRUD novo + Sub-aba Indicadores + Offline-first)
-
-**Objetivo:** CRUD operacional para o evento Expo Del-Rei (~15.000 registros estimados em 8 locais simultâneos, vários dias). Funciona **offline** (crucial).
-
-- **17.1** — Modelos Prisma: `ExpoLocation`, `ExpoFoodItem`, `ExpoRecord`, `ExpoRecordItem`
-- **17.2** — CRUDs Administrativos (Locais + Alimentos; Leite usa **Litros**, demais **KG**)
-- **17.3** — Tela Operacional Mobile-first (botões grandes `+`/`−`, salvamento rápido em lote)
-- **17.4** — Funcionamento Offline avançado (service worker + IndexedDB + sync automático)
-- **17.5** — Indicadores Expo Del-Rei (dropdown Geral/Expo, rankings, refugo TBD)
-
-### 🌊 Onda 18 — Aba Tutorial 🆕
-
-**Objetivo:** Aba de ajuda interna, acessível a **todos os roles logados**, ensinando uso do app e instalação como PWA.
-
-**Escopo:**
-- 🔐 Acesso: **apenas usuários logados**, **todas as roles** veem a mesma aba
-- 📱 **Como instalar o app na tela inicial:**
-  - Passo a passo Android (Chrome → "Adicionar à tela inicial")
-  - Passo a passo iOS (Safari → Compartilhar → "Adicionar à Tela de Início")
-  - ✅ App já é PWA com `manifest.json` configurado
-- 📝 **Passo a passo dos registros do operador:**
-  - Como registrar uma Doação
-  - Como registrar uma Distribuição
-  - Como registrar uma Colheita Solidária
-  - (a confirmar: Aprovação Diária / Câmara Fria)
-- 📋 Formato de conteúdo (texto vs. texto+prints) a definir com Vitor na execução
-
-### 🌊 Onda 19 — Cache e Otimização de Indicadores
-- ⚡ Cache de 5min nos endpoints de indicadores
-- 🔍 Revalidação inteligente quando dados mudam
+**Correção:** função `derivarUsos()` consolida no servidor → `totalUsos` + `usos.{doacoes,distribuicoes,colheitas}`. `_count` mantido no payload para retrocompatibilidade. `auth()` redundante removido (usa `authResult.user.role`). Bônus: validação de `name` obrigatório no POST.
 
 ---
 
-## 🔮 7. Roadmap — Ondas Futuras
+## 🔜 6. Próximas Ondas
 
-### 🌊 Onda 20 — Branding Annonae
-- 🏷️ Identidade visual (logo, paleta, tipografia)
-- 🎨 Tela "Sobre o Sistema" com história da Annonae
-- 🖼️ Favicon + Open Graph (preview no WhatsApp/LinkedIn)
-- 📄 Landing institucional pública (opcional)
+### 🥇 Onda 23 — Performance: fechar o cerco
+- `ExportarEventoPdf` → lazy load (provável jsPDF + html2canvas no bundle)
+- Auditar `force-dynamic` em `/campo`, `/arrecadacao-extra`, `/folha-resumo`
+- Unificar os **2 loops** sobre `recebimentos` em `eventos/[id]/page.tsx`
+- Índices: `Recebimento(eventoId, createdAt)` · `Evento(dataInicio)`
+- `npm run build` → registrar chunks como baseline
+- Payload `fatos[]` → considerar agregação server-side por dia
+- 🆕 **Avaliar o custo do callback `jwt`**: `auth.ts` relê `User` no banco **a cada request**. Correto para segurança (revoga role na hora), mas é custo fixo por chamada — relevante com 16 tablets e limite de 10s da Vercel Free. Decisão de arquitetura, não faxina
+- 🆕 Avaliar migração `npm 11 → 12` (adiada de propósito para não misturar variáveis)
+- 🆕 Migrar `package.json#prisma` → `prisma.config.ts` (deprecado no Prisma 7)
 
-### 🌊 Onda 21 — Multi-Tenant (Replicação Institucional)
-- 🏢 Modelo `Organization` no Prisma
-- 🔗 Vincular `User`, `Donation`, `Distribution`, etc. a `organizationId`
-- 🎯 Middleware de scoping por organização
-- ⚙️ Tela de configuração por org
-- 🔐 Super-admin (Vitor) vê tudo; admin de org só vê a sua
+### 🥈 Onda 24 — Observabilidade & AuditLog
+- **Sentry** — hoje estamos cegos em produção
+- Ativar o model `AuditLog` (visualização dev-only)
+- ⚠️ Criar já pensando em `organizacaoId`
 
-### 🌊 Onda 22 — Relatórios Avançados + Automação
-> Recebe os itens removidos do MVP da Onda 15.
-- 📈 Relatório mensal automatizado (PDF)
-- 📅 Agendamento de relatórios por email
-- 📧 SMTP configurável por organização
+### 🥉 Onda 25 — Relatórios Institucionais
+- Relatório mensal consolidado (PDF/CSV) — **usa a identidade da Onda 21, já pronta**
+- Agregados por período, doador, beneficiário; formato aceito por órgãos públicos
 
-### 🌊 Onda 23 — Notificações + Workflow
-- 🔔 Email/WhatsApp para doadores agendados
-- ⚠️ Alerta de estoque mínimo
-- 📅 Agenda integrada (próximas coletas/distribuições)
+### 🏅 Onda 26 — Backup & Segurança
+- Backup do Supabase **documentado e testado**
+- Audit formal das permissões por role
+- ⚠️ Pré-requisito obrigatório do multi-tenancy
 
-### 🌊 Onda 24 — Aba Impróprios (Descarte)
-- Cálculo: total recebido − total distribuído + colheita do dia
-- Registro diário (automático ou manual)
-- Campo "motivo" (vencido, estragado, etc.)
+### 🎖️ Onda 27 — Preparações estruturais
+- `DistributionItem.origem`: String → **enum** + backfill + `@@index`
+- Estoque Geral → **modelo de pool** (igual Eventos)
+- Revisar cada model: global ou por organização?
 
----
-
-## 📄 8. Arquivos-Chave do Projeto
-
-src/ ├── app/ │ ├── api/ │ │ ├── auth/[...nextauth]/ │ │ ├── doacoes/ ← ✅ máscara + auth + export CSV │ │ ├── distribuicoes/ ← ✅ máscara + export CSV │ │ ├── colheita-solidaria/ ← ✅ máscara + export CSV │ │ ├── estoque/ │ │ │ ├── resumo/ ← 🚨 fórmula atual — SOB AUDITORIA (Onda 16.1) │ │ │ └── aproveitamentos/ ← preview + POST DailyApproval │ │ ├── indicadores/ │ │ │ ├── macro / tendencias / rankings / produtos │ │ │ └── export/ ← ✅ Onda 15 (endpoint de export) │ │ ├── produtos/ │ │ ├── doadores/ ← ✅ Onda 13.3 │ │ ├── beneficiarios/ ← ✅ Onda 13.3 │ │ ├── funcionarios/ ← ⚠️ BUG: _count incompleto (pendente) │ │ ├── produtores/ ← ✅ Onda 13.3 │ │ ├── usuarios/ ← só admin │ │ └── audit-log/ ← ✅ Onda 13.4 │ ├── audit-log/ ← ✅ tela de consulta │ ├── politica-de-privacidade/ ← ✅ Onda 13.5 │ ├── termos-de-uso/ ← ✅ Onda 13.5 │ ├── estoque/ ← 🚨 SOB AUDITORIA (Onda 16.1) │ ├── indicadores/ ← gráficos (Onda 12) + exports (Onda 15) │ ├── tutorial/ ← 🆕 Onda 18 (a criar) │ └── login/ ├── lib/ │ ├── auth.ts / auth.config.ts / auth-helpers.ts │ ├── permissions.ts │ ├── mask.ts ← (Onda 13.1) │ ├── mask-by-role.ts ← (Onda 13.2 + fail-secure) │ ├── audit.ts ← (Onda 13.4) │ ├── export/ ← ✅ Onda 15 (pasta dedicada) │ │ ├── indicadores-data.ts ← coleta + censura por role │ │ ├── indicadores-pdf.ts │ │ └── indicadores-excel.ts │ └── prisma.ts ├── hooks/ │ ├── usePermissions.ts │ ├── useFormSubmit.ts ← (Onda 8) │ └── useDraft.ts ← (Onda 9) ├── components/ │ ├── AccessDeniedToast.tsx │ ├── CalculadoraPeso.tsx ← (Onda 6) │ ├── DraftBanner.tsx / DraftSavedIndicator.tsx ← (Onda 9) │ ├── ConsentimentoLGPD.tsx ← (Onda 13.5) │ ├── BotoesExportacao.tsx ← ✅ Onda 15 │ ├── FiltrosIndicadores.tsx ← ✅ Onda 15.2.5 │ └── [componentes de indicadores] ├── types/next-auth.d.ts ├── manifest.json ← ✅ PWA já configurado └── proxy.ts ← antigo middleware.ts (Next.js 16)
-
-
-### Schema Prisma — Modelos principais
-
-- **User** — id, email, password (hash), name, role, active
-- **Product** — produtos cadastrados
-- **Donor** — doadores (PF/PJ)
-- **Beneficiary** — beneficiários (com `consentimentoLGPD: DateTime?` desde Onda 13.5)
-- **Employee** — funcionários (3 relações 1:N por tipo de movimentação)
-- **Producer** — produtores rurais (colheita solidária)
-- **Donation** — header + `employeeId1/2/3`
-- **DonationItem** — itens (com campo `boxes`)
-- **Distribution** — header + `employeeId1/2/3`
-- **DistributionItem** — itens (com campo `boxes`)
-- **Harvest** — header + `producerId` + `employeeId1/2/3`
-- **HarvestItem** — itens (com campo `boxes`)
-- **DailyApproval** — registro diário do que sobrou em câmara fria
-- **AuditLog** — ✅ Onda 13.4
-- **ExpoLocation / ExpoFoodItem / ExpoRecord / ExpoRecordItem** — ⏳ a criar (Onda 17)
+### 🏛️ Onda 28 — MULTI-TENANCY (última onda) — ver §7
 
 ---
 
-## 🎯 9. Decisões Importantes Tomadas
+## 🏛️ 7. Multi-Tenancy (arquitetura DECIDIDA)
 
-- ✅ **2 roles operacionais + 1 leitura:** admin, operador, visualizador
-- 🗑️ **Role `desenvolvedor` + painéis `/dev/*` REMOVIDOS do roadmap** (02/06/2026)
-- ✅ **Operador** tem trava temporal (mesmo dia)
-- ✅ **Cadastros** são só-admin
-- ✅ **Soft delete** de usuários (`active: false`)
-- ✅ **Mascaramento no servidor** — visualizador nunca vê dados crus
-- ✅ **Fail-secure** — sem role válido = mascarar
-- ✅ **Banco único** dev = prod (Supabase)
-- ✅ **Defesa em profundidade** — proxy + API auth + máscara + redirect
-- ✅ **Next.js 16** — `middleware.ts` → `proxy.ts`
-- ✅ **Múltiplos funcionários** via 3 FKs separadas (Onda 7)
-- ✅ **Apenas 1º funcionário obrigatório** nas movimentações
-- ✅ **Modelo de Estoque (Onda 10):** 🚨 SOB REVISÃO na Onda 16.1
-- ✅ **Nome comercial Annonae** decidido
-- ✅ **LGPD completa (Onda 13)**
-- ✅ **Exportação client-side (Onda 15)** — Vercel Free + zero timeout
-- ✅ **PDF com tabelas, não gráficos** (Onda 15)
-- ✅ **Export organizado em pasta `src/lib/export/`** (divergiu do plano, mais escalável)
-- ✅ **Filtros de indicadores: 30 dias padrão + presets + DD-MM-YYYY** (Onda 15.2.5)
-- ✅ **Aba Tutorial (Onda 18):** logada, todas as roles, ensina PWA + registros
-- ✅ **PWA já ativo** com `manifest.json`
+### ✅ Decisão: banco compartilhado + coluna `organizacaoId`
+**Rejeitado:** instância por cliente.
 
----
+| Critério | `organizacaoId` ✅ | Instância/cliente ❌ |
+|---|---|---|
+| Custo Supabase | 1 projeto | 1 por cliente |
+| Migrations | 1 comando | N deploys manuais |
+| Deploy Vercel | 1 app | N apps |
+| Métricas da rede | `GROUP BY` | Inviável sem ETL |
+| Isolamento | Código + RLS | Total por natureza |
+| Sustentável p/ 1 dev | ✅ | ❌ |
 
-## 🛠️ 10. Aprendizados Operacionais
+**Decisivo:** dev único. N bancos = N migrations manuais = trava na terceira prefeitura.
+**Bônus:** painel consolidado da rede ("quantos kg MG arrecadou?") vira um `GROUP BY`.
 
-### Infra/Git (Onda 5)
-- Um único `.env.local` na raiz
-- `prisma db pull` reescreve o schema (perde comentários) — usar com cuidado
-- `git pull --rebase origin main`; **NUNCA** `git push --force`
-- Rotação de credenciais: Supabase → local + Vercel simultaneamente
+### 🛡️ Três camadas
 
-### Schema + Cache TS (Onda 7)
-- Após mudar `schema.prisma`: `npx prisma generate`
-- Reiniciar TS Server: `Ctrl+Shift+P → TypeScript: Restart TS Server`
-- Cache visual do VS Code pode enganar — restart é parte do fluxo
-- Atenção a campos antigos em `_count` — quebram o Prisma silenciosamente
+**1 — Schema**
+```prisma
+model Organizacao {
+  id        String   @id @default(cuid())
+  nome      String
+  slug      String   @unique   // annonae-sjdr, mesa-brasil-bh
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  users     User[]
+  eventos   Evento[]
+}
 
-### Cálculo de Estoque (Onda 10)
-- Alinhamento de modelo mental ANTES de codar é crítico
-- Next.js cacheia rotas API em dev — restart obrigatório após editar `route.ts`
-- Colheita Solidária é controle paralelo (Cenário A) — entra na fórmula
+model Evento {
+  id            String      @id @default(cuid())
+  organizacaoId String
+  organizacao   Organizacao @relation(fields: [organizacaoId], references: [id])
+  @@index([organizacaoId, dataInicio])
+}
 
-### LGPD (Onda 13)
-- 🛡️ Fail-secure é regra: sem role válido → mascarar
-- 🔍 Auditoria antes de aplicar: mapear estado atual de cada API antes de mexer
-- ⚠️ `mask.ts` é singular (não `masks.ts`)
-- 🚨 APIs sem `requireView` são bomba-relógio
-- 📜 AuditLog não deve ter `cascade delete`
+2 — Prisma Client Extension (filtro automático — ponto mais crítico)
 
-### Exportação (Onda 15)
-- ✅ Client-side evita timeout do Vercel Free (limite 10s)
-- ✅ JSON já chega mascarado da API → export herda máscara LGPD automaticamente
-- ✅ Admin pode escolher exportar com/sem censura
-- ✅ Tabelas em PDF > gráficos (independe de renderização SVG)
-- ✅ Organizar exports em pasta dedicada (`lib/export/`) escala melhor
+// src/lib/prisma-tenant.ts
+export function prismaForOrg(organizacaoId: string) {
+  return prisma.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ args, query, model }) {
+          if (!MODELOS_TENANT.has(model)) return query(args)
+          args.where = { ...args.where, organizacaoId }
+          return query(args)
+        },
+      },
+    },
+  })
+}
 
----
+→ Esquecer o filtro se torna impossível. Fail-secure por padrão.
 
-## 🔒 11. Segurança e Proteção de Dados
+3 — RLS no Supabase — rede de segurança contra bug de aplicação.
 
-### Status atual
-- ✅ Visualizador NÃO acessa dados pessoais sensíveis
-- ✅ Páginas sensíveis redirecionam visualizador → Dashboard
-- ✅ Dados pessoais com criptografia em camadas
-- ✅ APIs validam role no backend
-- ✅ Dados mascarados no servidor antes de chegar ao cliente
-- ✅ Fail-secure aplicado
-- ✅ Audit Log completo (POST/PUT/DELETE)
-- ✅ Política de Privacidade e Termos de Uso publicados
-- ✅ Consentimento LGPD no cadastro de beneficiários
-- ✅ Exportações respeitam máscara LGPD
+🔑 Tenant: organizacaoId no JWT do NextAuth, nunca do frontend.
 
-### Próximas camadas
-- 🔜 NDA para reuniões institucionais
-- 🔜 Compliance LGPD formal documentado
+⚠️ Riscos: organizacaoId NOT NULL em ~20 models exige backfill (tudo → "Annonae SJDR"). Irreversível na prática. Exige backup verificado, onda dedicada, janela de baixo uso — nunca durante evento ativo.
 
----
+🔮 8. Backlog
+Cards de Resumo All-Time (16.4) · Estoque diferido (16.6b)
+Indicadores de evento (17.5, parcialmente absorvido pela aba Gráficos)
+Integração plena evento ↔ estoque (17.7)
+Snapshot explícito de evento (ex-22-e — é feature, exige desenho)
+Aba Tutorial (onboarding) · Notificações + Workflow · Aba Impróprios (Descarte)
+Auditoria de Estoque · Estoque negativo / canCalibrateStock / pool
 
-## 📌 12. Onde Estamos AGORA
+📄 9. Arquivos-Chave
+Eventos
+src/app/eventos/page.tsx                      → lista (revalidate = 30)
+src/app/eventos/EventosListClient.tsx         → filtros + busca + excluir
+src/app/eventos/[id]/page.tsx                 → detalhe (revalidate = 15)
+src/app/eventos/[id]/EventoDetalheClient.tsx  → abas + dynamic import
+src/app/eventos/[id]/GraficosEvento.tsx       → Recharts (lazy)
+src/app/eventos/[id]/graficos-utils.ts        → funções puras (SEM Recharts)
+src/app/eventos/[id]/ExportarEventoPdf.tsx    → ⏳ lazy load (Onda 23)
 
-### 🎯 Cursor de Produção
+Balcão / Ingressos
+src/app/eventos/[id]/campo/CampoClient.tsx · CardIngressos.tsx
+src/app/api/ingressos/buscar/route.ts    → busca global por CPF (requireRole)
+src/app/api/ingressos/retirar/route.ts   → teto atômico
+src/app/api/ingressos/reverter/route.ts  → dev-only
+src/app/api/ingressos/export/route.ts    → XLSX (requireAdminOrDev)
+src/app/api/eventos/[id]/folha-resumo/route.ts
+src/app/api/eventos/[id]/arrecadacao-extra/export/route.ts → PDF/XLSX/CSV
 
-**Última conclusão:** ✅ **Onda 16.2 — Marcos de Estoque (StockMarker)** (em produção)
-**Fase atual:** 🌊 **Onda 16.5 — Indicadores de Aproveitamento**
-**Status:** ⏳ PLANEJAMENTO — modelo mental travado, todas as decisões fechadas
+Núcleo
+src/lib/auth.ts            → NextAuth v5 (jwt relê User a cada request)
+src/lib/auth.config.ts
+src/lib/auth-helpers.ts    → requireAuth · requireRole · requireView · requireEdit
+                             requireEditRecord · requireDeleteRecord · requireAdmin
+                             requireAdminOrDev · requireDev · requireRegisterRecebimento
+                             requireCalibrateStock
+src/lib/permissions.ts     → canEdit / canView / podeRegistrarNoEvento / canCalibrateStock
+src/lib/mask.ts            → cpfPorRole
+src/lib/mask-by-role.ts    → maskFuncionarioList
+src/lib/cpf.ts             → normalizeCpf
+src/lib/branding.ts        → BRANDING.name / BRANDING.tagline
+src/lib/prisma.ts
+src/lib/stock/calculate-stock.ts   → fonte de verdade do estoque geral
+src/components/ui/BotaoVoltar.tsx
 
-### Próximo passo imediato (Onda 16.5)
+Branding (Onda 21)
+public/logos/annonae-color.png   → usada nos PDFs (base64 via readFileSync)
+public/logo-annonae.svg          → arte vetorial
+public/manifest.json · src/app/layout.tsx
+Paleta: VERDE #14532D · OURO #C9A227 · VINHO #9B2C2C · CINZA #6E6E6E
 
-1. 🛠️ Criar src/lib/stock/calculate-utilization.ts
-2. 🛠️ Criar /api/indicadores/aproveitamento (período + 4 filtros)
-3. 🛠️ Componentes de gráfico com toggle (recharts)
-4. 🛠️ Estender FiltrosIndicadores.tsx (Doador/Instituição/Produtor/Funcionário)
-5. 🛠️ Integrar export em tabela (src/lib/export/)
-6. ✅ Validar com dados reais
 
-### Nota de roadmap
-- 🗑️ Onda 16.3 (Filtros Multi-Select) ABSORVIDA pela 16.5
-- 🌊 Onda 16.4 (Cards All-Time) permanece pendente, sem alteração
+Abas do detalhe de evento: doacoes · locais · alimentos · operadores (admin) · graficos Rotas de ingresso: /campo (Ingresso→Alimento) · /arrecadacao-extra (Conheça seu Ídolo) · /folha-resumo (Ingresso Social por Família)
 
-### 📋 Pendências de input do Vitor
+Schema Prisma
+User · Product · Donor · Beneficiary · Employee · Producer
+Donation/DonationItem · Distribution/DistributionItem (origem: String default "DOACAO")
+Harvest/HarvestItem · DailyApproval · StockMarker · AuditLog · DeliveryReceipt
+Evento · LocalColeta · EventoOperador · EventoAlimento · Recebimento
+ReservaIngresso · LoteIngresso · ShowContador · ArrecadacaoExtra (+itens)
+enum EventoStatus { RASCUNHO ATIVO ENCERRADO }
 
-- 📋 **Lista de alimentos da Expo Del-Rei** (antes da Onda 17)
-- 🧠 **Definir estrutura do "Refugo" da Expo** nos indicadores (Onda 17)
-- 🎨 **Logo Annonae em PNG/SVG** (Onda 20 — Branding)
-- 📝 **Conteúdo/prints da aba Tutorial** (Onda 18)
+⚠️ 21 migrations aplicadas · DistributionItem.origem é String sem índice → Onda 27
 
-### 🐛 Pendências técnicas conhecidas
+🎯 10. Decisões Travadas
+4 roles: dev (Vitor), admin, operador, visualizador
+Nome Annonae + domínio annonae.com.br; branding concluído (app, PWA, PDFs, Excel)
+Teto de ingresso = 3 alimentos, GLOBAL por CPF (ReservaIngresso liga a lote, não a eventoId)
+Anti-race via updateMany where retirado:false
+Reversão de retirada e DELETE de folha-resumo: dev-only
+Estoque de Eventos é card na /estoque (mascarado); estoque geral será pool (Onda 27)
+Arrecadação Extra: Excel s/ CPF (admin/operador) · PDF c/ CPF (dev) · sorteio fora do app
+Empate no PDF de destaques → sorteio presencial, nomes listados com sobrenome mascarado
+CPF sempre normalizado para dígitos
+Editar registro deve recalcular totais
+Swipe de exclusão descartado — botão comum, só admin
+Recharts sempre lazy; páginas de evento usam revalidate, nunca force-dynamic
+🆕 Gate de auth exclusivamente via auth-helpers — auth() cru proibido em rota de API
+🆕 CPF cru em export é privilégio de dev; admin recebe mascarado
+Multi-tenancy = banco compartilhado + organizacaoId + Prisma extension + RLS, última onda
 
-- ⚠️ **Bug `_count` em `/api/funcionarios`** (pode afetar confiabilidade de indicadores)
-- ⚠️ **Dívida técnica:** unificar queries entre export e produção
+🐛 11. Pendências Técnicas
+| ⚠️ | Pendência | Onda |
+| --- | --- | --- |
+| 🔴 | Sem observabilidade — cegos em produção | 24 |
+| 🔴 | ExportarEventoPdf pesado no bundle | 23 |
+| 🔴 | Subpáginas de evento possivelmente force-dynamic | 23 |
+| 🟡 | jwt callback consulta o banco a cada request | 23 (avaliar) |
+| 🟡 | Loop duplicado sobre recebimentos em eventos/[id]/page.tsx | 23 |
+| 🟡 | origem é String sem índice | 27 |
+| 🟡 | package.json#prisma deprecado (Prisma 7) | 23 |
+| 🟢 | Rascunho fantasma (useDraft.ts) | 22-h (atual) |
+| 🟢 | Arquivos suspeitos na raiz (dev.db, fix-*.js) | 22-c (atual) |
+| 🟢 | Lógica de vínculo de evento duplicada | 22-d (atual) |
+| 🟢 | Refatoração do estoque geral p/ pool | 27 |
+| ✅ | auth() cru nas rotas de ingresso | resolvido 22-a |
+| ✅ | _count em /api/funcionarios | resolvido 22-g |
+| ✅ | [JWT DEBUG] em auth.ts | não existia |
 
----
+⚠️ Riscos operacionais
+Vercel Free: 10s por função serverless
+Banco único (dev = prod): toda migration afeta produção real
+Nunca migrar durante evento ativo
+Latência em campo → timeout + fallback manual obrigatórios
 
-## 💬 13. Estilo e Preferências do Vitor
+🔄 12. Fluxo de Trabalho
+Duas máquinas (casa/trabalho), branch único main, ambiente Windows/PowerShell
+Ritual: git status → git pull origin main → trabalha → git add . → commit semântico → git push origin main
+Sincronização real: git rev-parse HEAD idêntico nas duas máquinas + git status -sb sem ahead/behind
+Após pull: npm ci → npx prisma generate → npx prisma migrate status → npm run build
+⚠️ .env.local não vem no Git; NEXTAUTH_SECRET deve ser o mesmo valor nas duas máquinas
+⚠️ No PowerShell, mensagem de commit sempre entre aspas duplas — fix(x) sem aspas vira erro de sintaxe
+Commits semânticos: feat, fix, perf, chore, refactor, style
+Planejamento antes de código · arquivo inteiro, não trechos · ondas pequenas e testáveis
+Restart do TS Server / Next dev é parte do fluxo (cache engana)
 
-- ✅ Respostas organizadas com emojis e headings claros
-- ✅ Planejamento antes de código
-- ✅ Divisão em pequenas ondas (incremental, testável)
-- ✅ Explicações didáticas quando necessário
-- ✅ Commits semânticos (feat, fix, chore, refactor, etc.)
-- ✅ **Sempre código completo, não trechos**
-- ✅ **Alinhamento de modelo mental antes de codar**
-- ✅ Honestidade técnica — apontar riscos, não só elogiar
-- 🌎 São João del-Rei / MG, Brasil
-- 🗣️ Português (Brasil)
-- 📚 Background: cultura grega clássica e latim
+📌 13. Onde Estamos AGORA
+Último commit: 1b8ef0f — refactor(pdf): card de destaques em grid alinhado (base da Onda 22) Ambiente: ✅ working tree limpo · 21 migrations aplicadas · schema up to date
 
-### O que NÃO fazer
-- ❌ Não inventar features sem alinhar primeiro
-- ❌ Não sugerir bibliotecas pesadas sem justificar
-- ❌ Não pular o planejamento direto pro código
-- ❌ Não dar respostas vagas — Vitor quer precisão
-- ❌ Não esconder limitações
+Onda 22 — Faxina Técnica, em andamento:
 
----
+✅ 22-a / 22-b / 22-f / 22-g concluídos (com 1 falha de segurança LGPD corrigida)
+⏳ Próximo: 22-h — rascunho fantasma (useDraft.ts)
+⏳ Depois: 22-c (raiz) → 22-d (checarVinculoEvento())
+Arquivos que faltam enviar:
 
-## 🏛️ 14. Sobre o Nome Annonae
+src/hooks/useDraft.ts + um componente que o consome → 22-h
+Saída de git status --ignored --short → 22-c
+Rotas que checam vínculo de operador em evento → 22-d
+Depois: 23 (performance) → 24 (observabilidade) → 25 (relatórios) → 26 (backup) → 27 (preparações) → 28 (multi-tenancy)
 
-**Annonae** é a forma genitiva/plural de ***Annona***, divindade romana responsável pelo abastecimento de grãos da capital do Império. A *Cura Annonae* (cuidado com o abastecimento) era uma das funções mais críticas do governo romano — garantir que ninguém passasse fome em Roma.
+📋 Pendências de input do Vitor
+🔎 Saída das queries SQL de origem (para fidelizar calculate-stock.ts)
+🏛️ Prazo das reuniões Mesa Brasil / CGESAN (define urgência da Onda 25)
+🤝 Existe compromisso firmado de replicação institucional? (define quando disparar a Onda 28)
+🩹 Qual a maior dor de uso real da ONG hoje? (dor real bate roadmap teórico)
 
-🎯 **Conexão direta com o projeto:** sistema que coordena o abastecimento alimentar de uma cidade, herdando o nome de uma das primeiras políticas públicas alimentares da história ocidental.
-
----
-
-**Fim do backup oficial — atualizado em 02/06/2026**
-**Próxima atualização:** ao concluir Onda 16.1
+Fim do backup — 22/08/2026 · Onda 22 em andamento (22-a, 22-b, 22-f, 22-g concluídos)
