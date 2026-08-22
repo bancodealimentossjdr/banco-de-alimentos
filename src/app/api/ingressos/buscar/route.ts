@@ -1,14 +1,17 @@
 // src/app/api/ingressos/buscar/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { Prisma } from "@prisma/client";
+import { requireRole } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { normalizeCpf } from "@/lib/cpf";
+import type { UserRole } from "@/types/next-auth";
 
 // 🔑 Node runtime + sem cache (era isso que quebrava em produção)
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const rolesPermitidos = ["dev", "admin", "operador"];
+// 🔐 ONDA 22 — gate centralizado em requireRole (era auth() cru + check manual)
+const ROLES_PERMITIDOS: readonly UserRole[] = ["dev", "admin", "operador"];
 
 // ── Config App Cidades ──────────────────────────────────
 const BASE = "https://backend.appcidades.com.br";
@@ -22,8 +25,17 @@ const SHOWS = [
   { id: 164, showLabel: "16/08 • Mariana Fagundes", showData: "2026-08-16" },
 ];
 
+type RespostaApi = {
+  formId: number;
+  protocolo: string;
+  nome: string;
+};
+
 // ── Chama a API externa para 1 show (tolerante a falha) ──
-async function buscarShowNaApi(formId: number, cpf: string) {
+async function buscarShowNaApi(
+  formId: number,
+  cpf: string,
+): Promise<RespostaApi[]> {
   if (!TOKEN) return [];
 
   const ctrl = new AbortController();
@@ -63,8 +75,14 @@ async function buscarShowNaApi(formId: number, cpf: string) {
       return [];
     }
 
-    const json = await res.json();
-    const content: any[] = Array.isArray(json?.content) ? json.content : [];
+    const json = (await res.json()) as {
+      content?: Array<{
+        statusResposta?: string;
+        protocolo?: string | number;
+        cidadao?: { nome?: string };
+      }>;
+    };
+    const content = Array.isArray(json?.content) ? json.content : [];
 
     return content
       .filter((c) => c?.statusResposta === "FINALIZADA")
@@ -147,7 +165,7 @@ async function handle(cpfRaw: string, userId: string) {
       }
 
       // 2b) Monta as operações
-      const ops: any[] = [];
+      const ops: Prisma.PrismaPromise<{ id: string }>[] = [];
 
       // NOVOS → cria (única forma de o banco crescer, e só com verdade nova)
       for (const r of novos) {
@@ -257,21 +275,17 @@ async function handle(cpfRaw: string, userId: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  if (!rolesPermitidos.includes(session.user.role as string))
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  const result = await requireRole(ROLES_PERMITIDOS);
+  if (result instanceof NextResponse) return result;
 
   const body = await req.json().catch(() => ({}));
-  return handle(body?.cpf ?? "", session.user.id);
+  return handle(body?.cpf ?? "", result.user.id);
 }
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-  if (!rolesPermitidos.includes(session.user.role as string))
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+  const result = await requireRole(ROLES_PERMITIDOS);
+  if (result instanceof NextResponse) return result;
 
   const cpf = req.nextUrl.searchParams.get("cpf") ?? "";
-  return handle(cpf, session.user.id);
+  return handle(cpf, result.user.id);
 }

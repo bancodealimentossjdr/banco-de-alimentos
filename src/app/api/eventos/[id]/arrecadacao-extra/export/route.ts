@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { prisma } from '@/lib/prisma'
-import { requireAuth } from '@/lib/auth-helpers'
+import { requireAdminOrDev } from '@/lib/auth-helpers'
 import { cpfPorRole } from '@/lib/mask'
 import { BRANDING } from '@/lib/branding'
 import { jsPDF } from 'jspdf'
@@ -101,16 +101,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  // 🔐 gate server-side: dev OU admin. Não exige evento ATIVO.
-  const result = await requireAuth()
+  // 🔐 ONDA 22 — gate centralizado: dev OU admin. Não exige evento ATIVO.
+  const result = await requireAdminOrDev()
   if (result instanceof NextResponse) return result
 
-  const role = result.user.role
-  if (role !== 'dev' && role !== 'admin') {
-    return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
-  }
-
-  const isDev = role === 'dev'
+  const isDev = result.user.role === 'dev'
   const nomeUsuario = result.user.name ?? result.user.email ?? '—'
 
   const { id: eventoId } = await params

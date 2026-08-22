@@ -35,6 +35,26 @@ export async function requireAuth(): Promise<AuthSession | NextResponse> {
 }
 
 /**
+ * 🆕 ONDA 22 — Gate genérico por lista de roles.
+ *
+ * Substitui os checks manuais espalhados pelas rotas
+ * (`if (!rolesPermitidos.includes(session.user.role))`).
+ * Fail-secure: role ausente ou inválido → 403.
+ */
+export async function requireRole(
+  roles: readonly UserRole[],
+): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+
+  const role = result.user.role
+  if (!role || !roles.includes(role)) {
+    return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
+  }
+  return result
+}
+
+/**
  * Garante que o usuário tem permissão de VISUALIZAR o módulo.
  */
 export async function requireView(
@@ -143,6 +163,7 @@ export async function requireRegisterRecebimento(): Promise<
   }
   return result
 }
+
 /**
  * 🆕 Garante que o usuário é dev OU admin.
  * Útil para ações estruturais que dev e admin compartilham.
@@ -153,6 +174,22 @@ export async function requireAdminOrDev(): Promise<AuthSession | NextResponse> {
   if (result.user.role !== 'dev' && result.user.role !== 'admin') {
     return NextResponse.json(
       { error: 'Apenas administradores podem realizar esta ação' },
+      { status: 403 },
+    )
+  }
+  return result
+}
+
+/**
+ * 🔒 Garante que o usuário é DEV.
+ * Ações irreversíveis / dados crus sensíveis.
+ */
+export async function requireDev(): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (result.user.role !== 'dev') {
+    return NextResponse.json(
+      { error: 'Apenas o perfil dev pode realizar esta ação' },
       { status: 403 },
     )
   }
