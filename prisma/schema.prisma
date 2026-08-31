@@ -40,6 +40,9 @@ model User {
   recebimentosRegistrados Recebimento[]    @relation("RecebimentosRegistrados")
 
   arrecadacoesExtra ArrecadacaoExtra[] @relation("ArrecadacaoExtraOperador")
+
+  // ONDA 23 — PAA
+  entregasPaaCriadas EntregaPaa[] @relation("EntregaPaaCreatedBy")
 }
 
 // ==========================================
@@ -94,10 +97,21 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ONDA 23 — PAA
+  isPaa           Boolean  @default(false)
+  codigoConab     Int?     @unique
+  paaConvencional Decimal? @db.Decimal(10, 2)
+  paaOrganico     Decimal? @db.Decimal(10, 2)
+  paaUnidade      String?
+  paaFatorKg      Decimal  @default(1) @db.Decimal(6, 3)
+
   donationItems     DonationItem[]
   distributionItems DistributionItem[]
   harvestItems      HarvestItem[]
   eventoAlimentos   EventoAlimento[]
+  entregaPaaItens   EntregaPaaItem[]
+
+  @@index([isPaa])
 }
 
 // ==========================================
@@ -160,6 +174,10 @@ model Employee {
   harvestsAsEmployee1 SolidarityHarvest[] @relation("HarvestEmployee1")
   harvestsAsEmployee2 SolidarityHarvest[] @relation("HarvestEmployee2")
   harvestsAsEmployee3 SolidarityHarvest[] @relation("HarvestEmployee3")
+
+  // ONDA 23 — PAA
+  entregasPaaAsEmployee1 EntregaPaa[] @relation("EntregaPaaEmployee1")
+  entregasPaaAsEmployee2 EntregaPaa[] @relation("EntregaPaaEmployee2")
 }
 
 // ==========================================
@@ -202,11 +220,11 @@ model DonationItem {
 // ==========================================
 // DISTRIBUIÇÃO
 // ==========================================
-
 enum DistributionOrigin {
   DOACAO
   COLHEITA
   EVENTO
+  PAA
 }
 
 model Distribution {
@@ -263,7 +281,14 @@ model Producer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  harvests SolidarityHarvest[]
+  // ONDA 23 — PAA
+  atendeColheita Boolean @default(true)
+  atendePaa      Boolean @default(false)
+
+  harvests    SolidarityHarvest[]
+  entregasPaa EntregaPaa[]
+
+  @@index([atendePaa])
 }
 
 // ==========================================
@@ -301,6 +326,64 @@ model HarvestItem {
 
   harvest SolidarityHarvest @relation(fields: [harvestId], references: [id], onDelete: Cascade)
   product Product           @relation(fields: [productId], references: [id])
+}
+
+// ============================================
+// ONDA 23 — PAA (Programa de Aquisição de Alimentos)
+// ============================================
+enum TipoCultivoPaa {
+  CONVENCIONAL
+  ORGANICO
+}
+
+model EntregaPaa {
+  id          String   @id @default(cuid())
+  producerId  String
+  dataEntrega DateTime @db.Date
+  numeroNota  String?
+  observacoes String?
+
+  valorTotal  Decimal @default(0) @db.Decimal(12, 2)
+  pesoTotalKg Decimal @default(0) @db.Decimal(12, 3)
+
+  employeeId  String?
+  employee    Employee? @relation("EntregaPaaEmployee1", fields: [employeeId], references: [id])
+  employee2Id String?
+  employee2   Employee? @relation("EntregaPaaEmployee2", fields: [employee2Id], references: [id])
+
+  createdById String?
+  createdBy   User?   @relation("EntregaPaaCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  producer Producer         @relation(fields: [producerId], references: [id])
+  itens    EntregaPaaItem[]
+
+  @@index([producerId])
+  @@index([dataEntrega])
+  @@map("entregas_paa")
+}
+
+model EntregaPaaItem {
+  id           String @id @default(cuid())
+  entregaPaaId String
+  productId    String
+
+  tipoCultivo TipoCultivoPaa @default(CONVENCIONAL)
+
+  quantidade    Decimal @db.Decimal(12, 3)
+  precoUnitario Decimal @db.Decimal(10, 2)
+  fatorKg       Decimal @db.Decimal(6, 3)
+  pesoKg        Decimal @db.Decimal(12, 3)
+  subtotal      Decimal @db.Decimal(12, 2)
+
+  entregaPaa EntregaPaa @relation(fields: [entregaPaaId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@index([entregaPaaId])
+  @@index([productId])
+  @@map("entregas_paa_itens")
 }
 
 // ==========================================
