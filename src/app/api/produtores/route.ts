@@ -4,8 +4,10 @@ import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
 import { maskProdutorList } from '@/lib/mask-by-role'
 
-// GET - Listar todos os produtores
-export async function GET() {
+// GET - Listar produtores
+// ?paa=true   → só produtores que atendem PAA
+// ?active=true → só ativos
+export async function GET(request: NextRequest) {
   const authResult = await requireView('produtores')
   if (authResult instanceof NextResponse) return authResult
 
@@ -13,10 +15,17 @@ export async function GET() {
     const session = await auth()
     const role = session?.user?.role
 
+    const sp = request.nextUrl.searchParams
+    const where: any = {}
+    if (sp.get('paa') === 'true') where.atendePaa = true
+    if (sp.get('paa') === 'false') where.atendePaa = false
+    if (sp.get('active') === 'true') where.active = true
+
     const produtores = await prisma.producer.findMany({
+      where: Object.keys(where).length ? where : undefined,
       orderBy: { name: 'asc' },
       include: {
-        _count: { select: { harvests: true } },
+        _count: { select: { harvests: true, entregasPaa: true } },
       },
     })
 
@@ -35,7 +44,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { name, phone, address, property } = body
+    const { name, phone, address, property, atendePaa } = body
 
     if (!name || name.trim() === '') {
       return NextResponse.json({ error: 'Nome é obrigatório' }, { status: 400 })
@@ -47,9 +56,10 @@ export async function POST(request: NextRequest) {
         phone: phone || null,
         address: address || null,
         property: property || null,
+        atendePaa: Boolean(atendePaa), // backend nunca confia no default do form
       },
       include: {
-        _count: { select: { harvests: true } },
+        _count: { select: { harvests: true, entregasPaa: true } },
       },
     })
 
