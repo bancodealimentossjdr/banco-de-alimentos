@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireEdit } from '@/lib/auth-helpers'
+import { buildPaaData, checkCodigoColisao } from '@/lib/paa'
 
 export async function PUT(
   request: Request,
@@ -18,13 +19,36 @@ export async function PUT(
       return NextResponse.json({ error: 'Produto não encontrado' }, { status: 404 })
     }
 
+    if (!body.name?.trim() || !body.category || !body.unit) {
+      return NextResponse.json({ error: 'Nome, categoria e unidade são obrigatórios.' }, { status: 400 })
+    }
+
+    const paa = buildPaaData(body)
+    if ('error' in paa) return NextResponse.json({ error: paa.error }, { status: 400 })
+
+    // Bloqueia despromoção de produto com entregas PAA registradas
+    if (product.isPaa && !paa.data.isPaa) {
+      const usos = await prisma.entregaPaaItem.count({ where: { productId: id } })
+      if (usos > 0) {
+        return NextResponse.json(
+          { error: `Não é possível remover do PAA: existem ${usos} item(ns) em entregas PAA vinculados.` },
+          { status: 400 }
+        )
+      }
+    }
+
+    const colisao = await checkCodigoColisao(prisma, paa.data, id)
+    if (colisao) return NextResponse.json({ error: colisao }, { status: 409 })
+
     const updated = await prisma.product.update({
       where: { id },
       data: {
-        name: body.name,
+        name: body.name.trim(),
         category: body.category,
         unit: body.unit,
-        minStock: body.minStock || 0,
+        // ⚠️ não zera minStock quando o form não envia o campo
+        minStock: body.minStock === undefined ? product.minStock : Number(body.minStock) || 0,
+        ...paa.data,
       },
     })
 
@@ -52,6 +76,8 @@ export async function DELETE(
           select: {
             donationItems: true,
             distributionItems: true,
+            harvestItems: true,
+            entregaPaaItens: true,
           },
         },
       },
@@ -61,10 +87,13 @@ export async function DELETE(
       return NextResponse.json({ error: 'Produto não encontrado' }, { status: 404 })
     }
 
-    const total = product._count.donationItems + product._count.distributionItems
+    const c = product._count
+    const total = c.donationItems + c.distributionItems + c.harvestItems + c.entregaPaaItens
     if (total > 0) {
       return NextResponse.json(
-        { error: `Não é possível excluir: este produto possui ${product._count.donationItems} doação(ões) e ${product._count.distributionItems} distribuição(ões) vinculada(s).` },
+        {
+          error: `Não é possível excluir: ${c.donationItems} doação(ões), ${c.distributionItems} distribuição(ões), ${c.harvestItems} colheita(s) e ${c.entregaPaaItens} entrega(s) PAA vinculada(s).`,
+        },
         { status: 400 }
       )
     }

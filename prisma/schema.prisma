@@ -98,12 +98,16 @@ model Product {
   updatedAt DateTime @updatedAt
 
   // ONDA 23 — PAA
-  isPaa           Boolean  @default(false)
-  codigoConab     Int?     @unique
-  paaConvencional Decimal? @db.Decimal(10, 2)
-  paaOrganico     Decimal? @db.Decimal(10, 2)
-  paaUnidade      String?
-  paaFatorKg      Decimal  @default(1) @db.Decimal(6, 3)
+  isPaa                Boolean  @default(false)
+  codigoConab          Int?     @unique
+  paaConvencional      Decimal? @db.Decimal(10, 2)
+
+  temOrganico          Boolean  @default(false)
+  codigoConabOrganico  Int?     @unique // só nos 6 casos divergentes
+  paaOrganico          Decimal? @db.Decimal(10, 2)
+
+  paaUnidade           String?
+  paaFatorKg           Decimal  @default(1) @db.Decimal(6, 3)
 
   donationItems     DonationItem[]
   distributionItems DistributionItem[]
@@ -112,7 +116,9 @@ model Product {
   entregaPaaItens   EntregaPaaItem[]
 
   @@index([isPaa])
+  @@index([codigoConab])
 }
+
 
 // ==========================================
 // DOADORES
