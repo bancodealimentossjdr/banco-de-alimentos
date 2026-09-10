@@ -745,3 +745,11 @@ model TrocaAvulsaShow {
   @@index([showDia])
   @@map("trocas_avulsas_shows")
 }
+model ModuleFlag {
+  module    String   @id          // 'paa', 'eventos', ...
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@map("module_flags")
+}

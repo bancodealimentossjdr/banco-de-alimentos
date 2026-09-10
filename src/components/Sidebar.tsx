@@ -1,8 +1,10 @@
 ﻿'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import toast from 'react-hot-toast'
 import {
   LayoutDashboard,
   Package,
@@ -20,11 +22,18 @@ import {
   BarChart3,
   PartyPopper,
   Wheat,
+  Eye,
+  EyeOff,
   X,
 } from 'lucide-react'
 import { LogoFull, LogoMark } from '@/components/ui/Logo'
 import { BRANDING } from '@/lib/branding'
 import { getVisibleModules, type Module } from '@/lib/permissions'
+import {
+  HIDEABLE_MODULES,
+  isModuleHidden,
+  type ModuleFlagMap,
+} from '@/lib/module-flags'
 
 type MenuItem = {
   label: string
@@ -67,14 +76,71 @@ export default function Sidebar({
   const pathname = usePathname()
   const { data: session } = useSession()
 
-  // 🔐 Visibilidade derivada de VIEW_PERMISSIONS (permissions.ts).
-  // A aba Usuários some sozinha pra operador/visualizador, sem flag manual.
   const role = session?.user?.role
-  const allowed = role ? getVisibleModules(role) : []
-  const visibleItems = menuItems.filter((item) => allowed.includes(item.module))
+  const isDev = role === 'dev'
 
-  // Mostrar texto completo: quando NÃO colapsada OU quando aberta no mobile
+  // 🆕 Flags de módulo (ocultação cosmética controlada pelo dev).
+  // null = ainda não carregou → evita "piscar" módulo oculto pro usuário comum.
+  const [flags, setFlags] = useState<ModuleFlagMap | null>(null)
+  const [saving, setSaving] = useState<Module | null>(null)
+
+  useEffect(() => {
+    if (!session?.user) return
+    let cancelled = false
+
+    fetch('/api/dev/module-flags')
+      .then((r) => (r.ok ? r.json() : { flags: {} }))
+      .then((data) => {
+        if (!cancelled) setFlags(data.flags ?? {})
+      })
+      .catch(() => {
+        if (!cancelled) setFlags({})
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [session?.user])
+
+  // 🔐 Visibilidade derivada de VIEW_PERMISSIONS (permissions.ts).
+  const allowed = role ? getVisibleModules(role) : []
+
+  const visibleItems = menuItems.filter((item) => {
+    if (!allowed.includes(item.module)) return false
+    if (isDev) return true
+
+    // Anti-flicker: enquanto as flags não chegam, esconde os ocultáveis.
+    if (flags === null) return !HIDEABLE_MODULES.includes(item.module)
+
+    return !isModuleHidden(item.module, flags, false)
+  })
+
+  async function toggleModule(module: Module, currentlyEnabled: boolean) {
+    setSaving(module)
+    const next = !currentlyEnabled
+
+    // Otimista
+    setFlags((prev) => ({ ...(prev ?? {}), [module]: next }))
+
+    try {
+      const res = await fetch('/api/dev/module-flags', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module, enabled: next }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success(next ? 'Módulo visível para todos' : 'Módulo oculto (só dev vê)')
+    } catch {
+      // Rollback
+      setFlags((prev) => ({ ...(prev ?? {}), [module]: currentlyEnabled }))
+      toast.error('Falha ao atualizar o módulo')
+    } finally {
+      setSaving(null)
+    }
+  }
+
   const showFullLogo = !collapsed || sidebarOpen
+  const showLabel = !collapsed || sidebarOpen
 
   return (
     <>
@@ -140,21 +206,69 @@ export default function Sidebar({
                 item.href === '/'
                   ? pathname === '/'
                   : pathname === item.href || pathname.startsWith(`${item.href}/`)
-              const showLabel = !collapsed || sidebarOpen
+
+              // 🆕 Toggle só aparece pro dev, em módulos ocultáveis, menu expandido.
+              const canToggle =
+                isDev && HIDEABLE_MODULES.includes(item.module) && showLabel
+
+              const enabled = flags?.[item.module] !== false
+              const isSaving = saving === item.module
+
               return (
-                <li key={item.href}>
+                <li key={item.href} className="relative group">
                   <Link
                     href={item.href}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                       isActive
                         ? 'bg-green-600 text-white font-semibold'
                         : 'text-green-100 hover:bg-green-700'
-                    }`}
+                    } ${canToggle ? 'pr-10' : ''}`}
                     title={!showLabel ? item.label : undefined}
                   >
                     <item.icon size={20} className="shrink-0" />
-                    {showLabel && <span className="truncate">{item.label}</span>}
+                    {showLabel && (
+                      <span
+                        className={`truncate ${
+                          canToggle && !enabled ? 'italic opacity-60' : ''
+                        }`}
+                      >
+                        {item.label}
+                      </span>
+                    )}
+                    {canToggle && !enabled && (
+                      <span className="text-[10px] shrink-0" title="Em obra — oculto">
+                        🚧
+                      </span>
+                    )}
                   </Link>
+
+                  {canToggle && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        toggleModule(item.module, enabled)
+                      }}
+                      disabled={isSaving}
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded
+                        transition-colors disabled:opacity-40
+                        ${enabled
+                          ? 'text-green-300 hover:text-white hover:bg-green-600'
+                          : 'text-amber-300 hover:text-white hover:bg-green-600'
+                        }`}
+                      title={
+                        enabled
+                          ? `Ocultar "${item.label}" dos outros usuários`
+                          : `Reativar "${item.label}" para todos`
+                      }
+                      aria-label={
+                        enabled ? `Ocultar ${item.label}` : `Reativar ${item.label}`
+                      }
+                    >
+                      {enabled ? <Eye size={15} /> : <EyeOff size={15} />}
+                    </button>
+                  )}
                 </li>
               )
             })}
