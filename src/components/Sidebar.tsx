@@ -19,32 +19,36 @@ import {
   Shield,
   BarChart3,
   PartyPopper,
+  Wheat,
   X,
 } from 'lucide-react'
 import { LogoFull, LogoMark } from '@/components/ui/Logo'
 import { BRANDING } from '@/lib/branding'
+import { getVisibleModules, type Module } from '@/lib/permissions'
 
 type MenuItem = {
   label: string
   href: string
   icon: React.ComponentType<{ size?: number; className?: string }>
-  adminOnly?: boolean
+  /** Módulo do permissions.ts — fonte única de verdade da visibilidade. */
+  module: Module
 }
 
 const menuItems: MenuItem[] = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { label: 'Produtos', href: '/produtos', icon: Package },
-  { label: 'Doadores', href: '/doadores', icon: HandHeart },
-  { label: 'Beneficiários', href: '/beneficiarios', icon: Users },
-  { label: 'Funcionários', href: '/funcionarios', icon: UserCog },
-  { label: 'Produtores', href: '/produtores', icon: Tractor },
-  { label: 'Doações', href: '/doacoes', icon: ClipboardList },
-  { label: 'Distribuições', href: '/distribuicoes', icon: Truck },
-  { label: 'Colheita Solidária', href: '/colheita-solidaria', icon: Sprout },
-  { label: 'Estoque', href: '/estoque', icon: Warehouse },
-  { label: 'Eventos', href: '/eventos', icon: PartyPopper },
-  { label: 'Indicadores', href: '/indicadores', icon: BarChart3 },
-  { label: 'Usuários', href: '/usuarios', icon: Shield, adminOnly: true },
+  { label: 'Dashboard', href: '/', icon: LayoutDashboard, module: 'dashboard' },
+  { label: 'Produtos', href: '/produtos', icon: Package, module: 'produtos' },
+  { label: 'Doadores', href: '/doadores', icon: HandHeart, module: 'doadores' },
+  { label: 'Beneficiários', href: '/beneficiarios', icon: Users, module: 'beneficiarios' },
+  { label: 'Funcionários', href: '/funcionarios', icon: UserCog, module: 'funcionarios' },
+  { label: 'Produtores', href: '/produtores', icon: Tractor, module: 'produtores' },
+  { label: 'Doações', href: '/doacoes', icon: ClipboardList, module: 'doacoes' },
+  { label: 'Distribuições', href: '/distribuicoes', icon: Truck, module: 'distribuicoes' },
+  { label: 'Colheita Solidária', href: '/colheita-solidaria', icon: Sprout, module: 'colheita-solidaria' },
+  { label: 'PAA', href: '/paa', icon: Wheat, module: 'paa' }, // 🆕 ONDA 23
+  { label: 'Estoque', href: '/estoque', icon: Warehouse, module: 'estoque' },
+  { label: 'Eventos', href: '/eventos', icon: PartyPopper, module: 'eventos' },
+  { label: 'Indicadores', href: '/indicadores', icon: BarChart3, module: 'indicadores' },
+  { label: 'Usuários', href: '/usuarios', icon: Shield, module: 'usuarios' },
 ]
 
 interface SidebarProps {
@@ -63,10 +67,11 @@ export default function Sidebar({
   const pathname = usePathname()
   const { data: session } = useSession()
 
-  // 🔐 dev e admin veem itens adminOnly (a aba Usuários incluída)
+  // 🔐 Visibilidade derivada de VIEW_PERMISSIONS (permissions.ts).
+  // A aba Usuários some sozinha pra operador/visualizador, sem flag manual.
   const role = session?.user?.role
-  const isAdmin = role === 'admin' || role === 'dev'
-  const visibleItems = menuItems.filter((item) => !item.adminOnly || isAdmin)
+  const allowed = role ? getVisibleModules(role) : []
+  const visibleItems = menuItems.filter((item) => allowed.includes(item.module))
 
   // Mostrar texto completo: quando NÃO colapsada OU quando aberta no mobile
   const showFullLogo = !collapsed || sidebarOpen
@@ -131,7 +136,10 @@ export default function Sidebar({
         <nav className="flex-1 py-4 overflow-y-auto">
           <ul className="space-y-1 px-2">
             {visibleItems.map((item) => {
-              const isActive = pathname === item.href
+              const isActive =
+                item.href === '/'
+                  ? pathname === '/'
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`)
               const showLabel = !collapsed || sidebarOpen
               return (
                 <li key={item.href}>

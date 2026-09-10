@@ -206,6 +206,44 @@ export function maskNotesListIfReadOnly<T extends { notes?: string | null }>(
   if (!isReadOnlyInModule(role, module)) return list
   return list.map((item) => maskNotesIfReadOnly(item, role, module))
 }
+// ---------- ONDA 23 — ENTREGA PAA ----------
+type EntregaPaaLike = {
+  valorTotal?: unknown
+  itens?: { precoUnitario?: unknown; subtotal?: unknown; [k: string]: unknown }[]
+  [key: string]: unknown
+}
+
+/**
+ * 🎭 Mascara valores financeiros individualizados da entrega PAA.
+ *
+ * Política (decidida na 23.3):
+ * - Preço de tabela CONAB no CADASTRO de produto → público (não mascarado)
+ * - valorTotal / subtotal / precoUnitario da ENTREGA → financeiro individualizado
+ *   do produtor → mascarado para visualizador
+ * - pesoKg / pesoTotalKg / quantidade → permanecem VISÍVEIS (dado operacional)
+ */
+export function maskEntregaPaa<T extends EntregaPaaLike>(
+  e: T,
+  role: UserRole | undefined | null
+): T {
+  if (!shouldMaskPersonalData(role)) return e
+  return {
+    ...e,
+    valorTotal: null,
+    isMasked: true,
+    itens: Array.isArray(e.itens)
+      ? e.itens.map((i) => ({ ...i, precoUnitario: null, subtotal: null }))
+      : e.itens,
+  }
+}
+
+export function maskEntregaPaaList<T extends EntregaPaaLike>(
+  list: T[],
+  role: UserRole | undefined | null
+): T[] {
+  if (!shouldMaskPersonalData(role)) return list
+  return list.map((e) => maskEntregaPaa(e, role))
+}
 
 // ---------- Re-exports ----------
 export { maskCPF, maskPhone, maskEmail, maskAddress, maskContactName }

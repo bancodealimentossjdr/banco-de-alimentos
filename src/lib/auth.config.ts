@@ -20,6 +20,16 @@ export const authConfig: NextAuthConfig = {
       }
       return session
     },
+
+    /**
+     * Gate de rota por role. Registrado em src/proxy.ts (Next 16 renomeou
+     * middleware.ts → proxy.ts). O matcher é catch-all, então TODA rota nova
+     * passa por aqui automaticamente — basta mapeá-la em getModuleFromPath().
+     *
+     * ⚠️ Primeira camada apenas. A autorização real vive nas rotas de API
+     * (requireView / requireEdit / requireEditRecord / requireDeleteRecord)
+     * e nas páginas. Defesa em profundidade.
+     */
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user
       const userRole = auth?.user?.role as UserRole | undefined
@@ -40,12 +50,11 @@ export const authConfig: NextAuthConfig = {
       }
 
       if (isLoggedIn && !canAccessRoute(userRole, pathname)) {
-  const deniedModule = pathname.split('/').filter(Boolean)[0] || 'pagina'
-  const redirectUrl = new URL('/', nextUrl.origin)
-  redirectUrl.searchParams.set('acesso_negado', deniedModule)
-  return Response.redirect(redirectUrl)
-}
-
+        const deniedModule = pathname.split('/').filter(Boolean)[0] || 'pagina'
+        const redirectUrl = new URL('/', nextUrl.origin)
+        redirectUrl.searchParams.set('acesso_negado', deniedModule)
+        return Response.redirect(redirectUrl)
+      }
 
       return true
     },

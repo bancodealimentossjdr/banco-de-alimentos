@@ -7,6 +7,7 @@ import {
   canDeleteRecord,
   canRegisterRecebimento,
   canCalibrateStock,
+  canManageTabelaConab,
   type Module,
 } from './permissions'
 import type { UserRole } from '@/types/next-auth'
@@ -206,6 +207,21 @@ export async function requireCalibrateStock(): Promise<AuthSession | NextRespons
   if (!canCalibrateStock(result.user.role)) {
     return NextResponse.json(
       { error: 'Apenas o perfil dev pode calibrar o estoque' },
+      { status: 403 },
+    )
+  }
+  return result
+}
+/**
+ * 🆕 ONDA 23 — Garante que o usuário pode gerir a tabela CONAB.
+ * 🔒 Exclusivo do dev.
+ */
+export async function requireManageTabelaConab(): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (!canManageTabelaConab(result.user.role)) {
+    return NextResponse.json(
+      { error: 'Apenas o perfil dev pode alterar a tabela de preços CONAB' },
       { status: 403 },
     )
   }

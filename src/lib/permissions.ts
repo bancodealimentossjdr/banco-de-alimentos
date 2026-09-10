@@ -18,6 +18,7 @@ export type Module =
   | 'usuarios'
   | 'indicadores'
   | 'eventos' // 🆕 ONDA 17 — Eventos de arrecadação
+  | 'paa' // 🆕 ONDA 23 — Programa de Aquisição de Alimentos
 
 /**
  * Re-exporta UserRole como Role pra manter compatibilidade com o hook.
@@ -32,6 +33,7 @@ export const TIME_LOCKED_MODULES: Module[] = [
   'doacoes',
   'distribuicoes',
   'colheita-solidaria',
+  'paa', // 🆕 ONDA 23 — entrega é lançamento operacional com valor financeiro
 ]
 
 /**
@@ -40,7 +42,7 @@ export const TIME_LOCKED_MODULES: Module[] = [
 const ALL_MODULES: Module[] = [
   'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
   'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
-  'estoque', 'usuarios', 'indicadores', 'eventos',
+  'estoque', 'usuarios', 'indicadores', 'eventos', 'paa',
 ]
 
 /**
@@ -49,7 +51,7 @@ const ALL_MODULES: Module[] = [
 const ALL_EDIT_MODULES: Module[] = [
   'produtos', 'doadores', 'beneficiarios', 'funcionarios', 'produtores',
   'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque', 'usuarios',
-  'eventos',
+  'eventos', 'paa',
 ]
 
 /**
@@ -63,18 +65,21 @@ const VIEW_PERMISSIONS: Record<UserRole, Module[]> = {
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
     'estoque', 'usuarios', 'indicadores',
     'eventos', // 🆕 ONDA 17
+    'paa', // 🆕 ONDA 23
   ],
   operador: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios', 'funcionarios',
     'produtores', 'doacoes', 'distribuicoes', 'colheita-solidaria',
     'estoque', 'indicadores',
     'eventos', // 🆕 ONDA 17 — vê a lista; registro de recebimentos na 17.3
+    'paa', // 🆕 ONDA 23
   ],
   visualizador: [
     'dashboard', 'produtos', 'doadores', 'beneficiarios',
     'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque',
     'indicadores',
     'eventos', // 🆕 ONDA 17 — apenas a LISTA (não acessa o detalhe)
+    'paa', // 🆕 ONDA 23 — leitura com valores financeiros MASCARADOS no servidor
   ],
 }
 
@@ -94,9 +99,11 @@ const EDIT_PERMISSIONS: Record<UserRole, Module[]> = {
     'produtos', 'doadores', 'beneficiarios', 'funcionarios', 'produtores',
     'doacoes', 'distribuicoes', 'colheita-solidaria', 'estoque', 'usuarios',
     'eventos', // 🆕 ONDA 17 — só admin GERENCIA eventos
+    'paa', // 🆕 ONDA 23
   ],
   operador: [
     'doacoes', 'distribuicoes', 'colheita-solidaria',
+    'paa', // 🆕 ONDA 23 — cria/edita com trava temporal; NÃO exclui
     // 'eventos' NÃO entra aqui: operador NÃO gerencia eventos.
     // O registro de recebimentos (Opção A) usa canRegisterRecebimento().
   ],
@@ -105,9 +112,10 @@ const EDIT_PERMISSIONS: Record<UserRole, Module[]> = {
 
 /**
  * Verifica se o role pode VISUALIZAR o módulo.
+ * 🛡️ Fail-secure: role desconhecido → nega.
  */
 export function canView(role: UserRole, module: Module): boolean {
-  return VIEW_PERMISSIONS[role].includes(module)
+  return VIEW_PERMISSIONS[role]?.includes(module) ?? false
 }
 
 /**
@@ -115,7 +123,7 @@ export function canView(role: UserRole, module: Module): boolean {
  * Para módulos time-locked, use também canEditRecord().
  */
 export function canEdit(role: UserRole, module: Module): boolean {
-  return EDIT_PERMISSIONS[role].includes(module)
+  return EDIT_PERMISSIONS[role]?.includes(module) ?? false
 }
 
 /**
@@ -126,6 +134,20 @@ export function canEdit(role: UserRole, module: Module): boolean {
  * requireCalibrateStock() (auth-helpers), nunca só esconder o botão.
  */
 export function canCalibrateStock(role: UserRole): boolean {
+  return role === 'dev'
+}
+
+/**
+ * 🆕 ONDA 23 — Manutenção da TABELA CONAB (preços do PAA).
+ *
+ * 🔒 Poder EXCLUSIVO do dev. Alterar a tabela de preços muda a base de
+ * cálculo de toda prestação de contas futura; admin lança entregas, mas
+ * não redefine a régua. Ação estrutural, mesma família de canCalibrateStock.
+ *
+ * ⚠️ Ainda NÃO está gateado em nenhuma rota — será usado na 23.7/23.8,
+ * quando o versionamento por safra (débito técnico #4) for implementado.
+ */
+export function canManageTabelaConab(role: UserRole): boolean {
   return role === 'dev'
 }
 
@@ -192,7 +214,7 @@ export function isSameDay(a: Date | string, b: Date | string): boolean {
 
 /**
  * Verifica se um operador pode editar/excluir um registro específico
- * em módulos com trava temporal (doações, distribuições, colheita).
+ * em módulos com trava temporal (doações, distribuições, colheita, PAA).
  */
 export function canEditRecord(
   role: UserRole,
@@ -210,7 +232,7 @@ export function canEditRecord(
 
 /**
  * Verifica se um role pode EXCLUIR registros em módulos time-locked.
- * Apenas dev/admin podem excluir doações, distribuições e colheitas.
+ * Apenas dev/admin podem excluir doações, distribuições, colheitas e entregas PAA.
  */
 export function canDeleteRecord(role: UserRole, module: Module): boolean {
   if (!canEdit(role, module)) return false
@@ -224,7 +246,7 @@ export function canDeleteRecord(role: UserRole, module: Module): boolean {
  * Retorna todos os módulos visíveis para o role (útil pro Sidebar).
  */
 export function getVisibleModules(role: UserRole): Module[] {
-  return VIEW_PERMISSIONS[role]
+  return VIEW_PERMISSIONS[role] ?? []
 }
 
 /**
@@ -236,10 +258,10 @@ export function getModuleFromPath(pathname: string): Module | null {
 
   const routeMap: Array<[string, Module]> = [
     ['/produtos', 'produtos'],
+    ['/produtores', 'produtores'],
     ['/doadores', 'doadores'],
     ['/beneficiarios', 'beneficiarios'],
     ['/funcionarios', 'funcionarios'],
-    ['/produtores', 'produtores'],
     ['/doacoes', 'doacoes'],
     ['/distribuicoes', 'distribuicoes'],
     ['/colheita-solidaria', 'colheita-solidaria'],
@@ -247,6 +269,7 @@ export function getModuleFromPath(pathname: string): Module | null {
     ['/usuarios', 'usuarios'],
     ['/indicadores', 'indicadores'],
     ['/eventos', 'eventos'], // 🆕 ONDA 17
+    ['/paa', 'paa'], // 🆕 ONDA 23
   ]
 
   for (const [prefix, module] of routeMap) {
