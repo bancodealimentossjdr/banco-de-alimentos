@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma'
-import { endOfDayBrasilia } from '@/lib/date/day-boundaries'
 
 export type StockSnapshot = {
   hasMarker: boolean
@@ -12,11 +11,10 @@ export type StockSnapshot = {
   movements: {
     approvedKg: number
     harvestKg: number
-    distributedKg: number // ✅ agora = saída TOTAL (doação + colheita)
+    paaKg: number
+    distributedKg: number
   }
-  info: {
-    donationsKg: number
-  }
+  info: { donationsKg: number }
   currentStockKg: number
   calculatedAt: Date
 }
@@ -24,16 +22,36 @@ export type StockSnapshot = {
 const EMPTY_SNAPSHOT = (referenceDate: Date): StockSnapshot => ({
   hasMarker: false,
   baseMarker: null,
-  movements: {
-    approvedKg: 0,
-    harvestKg: 0,
-    distributedKg: 0,
-  },
+  movements: { approvedKg: 0, harvestKg: 0, paaKg: 0, distributedKg: 0 },
   info: { donationsKg: 0 },
   currentStockKg: 0,
   calculatedAt: referenceDate,
 })
 
+/**
+ * 📦 Saldo do estoque a partir do último marco de calibração.
+ *
+ * ⏱️ RÉGUA DO LEDGER: `createdAt`, não `date`.
+ *
+ * O marco é uma FOTO do que o sistema sabia no instante da calibragem.
+ * O peso digitado é o físico da câmara, que já reflete tudo lançado até ali.
+ * Logo, só movimenta o saldo o que foi REGISTRADO depois: createdAt > marco.
+ *
+ * Isso garante as duas propriedades que a operação exige:
+ *   1. Calibrar 0 às 14h  →  saldo exibido = 0,000 (nada anterior sobra)
+ *   2. Produtor chega 15h →  lançamento entra no saldo
+ *
+ * ⚠️ Por que NÃO usar `date`:
+ *    - DailyApproval.date e EntregaPaa.dataEntrega são @db.Date (sem hora),
+ *      então não há como saber se ocorreram antes ou depois da calibragem
+ *    - `date` é editável pelo operador; `createdAt` é imutável (@default(now))
+ *    - a tentativa anterior (cutoff por dia civil) jogava as movimentações do
+ *      próprio dia do marco para o lado errado e gerava saldo negativo
+ *
+ * ⚠️ Contrapartida aceita: lançamento retroativo posterior à calibragem entra
+ *    no saldo. Se o item já estava fisicamente pesado no marco, recalibre —
+ *    não é caso de ajustar a fórmula.
+ */
 export async function calculateStock(
   referenceDate: Date = new Date(),
 ): Promise<StockSnapshot> {
@@ -47,7 +65,7 @@ export async function calculateStock(
   }
 
   try {
-    // 1️⃣ Marco base
+    // 1️⃣ Marco base — o mais recente até a data de referência
     const baseMarker = await prisma.stockMarker.findFirst({
       where: { date: { lte: referenceDate } },
       orderBy: { date: 'desc' },
@@ -55,40 +73,50 @@ export async function calculateStock(
 
     if (!baseMarker) return EMPTY_SNAPSHOT(referenceDate)
 
-    // 🇧🇷 Cutoff = fim do dia do marco em horário de Brasília
-    const cutoff = endOfDayBrasilia(baseMarker.date)
+    // ⏱️ Instante da calibragem. Requer StockMarker.date como DateTime
+    //    (migration 23.6a-bis). Enquanto era @db.Date valia meia-noite UTC,
+    //    que em Brasília é o dia anterior às 21h — origem do bug.
+    const cutoff = baseMarker.date
 
-    // 2️⃣ Movimentações após o marco
-    const [approvalAgg, distItems, harvestItems, donationItems] =
+    // 2️⃣ Movimentações registradas APÓS o marco
+    const [approvalAgg, distItems, harvestItems, donationItems, paaAgg] =
       await Promise.all([
         prisma.dailyApproval.aggregate({
-          where: { date: { gt: cutoff, lte: referenceDate } },
+          where: { createdAt: { gt: cutoff, lte: referenceDate } },
           _sum: { approvedQty: true },
         }),
-        // 📤 Saída ÚNICA — TODA distribuição (sem separar origem)
-        // ⚠️ Exclui EVENTO: eventos são controlados por unidade à parte do kg
+        // 📤 Saída ÚNICA — toda distribuição
+        // ⚠️ Exclui EVENTO: controlado por unidade, à parte do kg
         prisma.distributionItem.findMany({
           where: {
             origem: { not: 'EVENTO' },
-            distribution: { date: { gt: cutoff, lte: referenceDate } },
+            distribution: { createdAt: { gt: cutoff, lte: referenceDate } },
           },
           select: { quantity: true },
         }),
-        // 🌾 Entradas de colheita realizada
         prisma.harvestItem.findMany({
           where: {
             harvest: {
-              date: { gt: cutoff, lte: referenceDate },
+              createdAt: { gt: cutoff, lte: referenceDate },
               status: 'realizada',
             },
           },
           select: { quantity: true },
         }),
+        // ℹ️ Informativo: entrada bruta. Não soma no saldo — quem entra é o
+        //    aproveitado (DailyApproval), já descontado o refugo da triagem.
         prisma.donationItem.findMany({
           where: {
-            donation: { date: { gt: cutoff, lte: referenceDate } },
+            donation: { createdAt: { gt: cutoff, lte: referenceDate } },
           },
           select: { quantity: true },
+        }),
+        // 🌾 ONDA 23.6a — PAA. Produto adquirido do produtor: não passa por
+        //    triagem, não gera refugo. Entra 100%, igual à colheita.
+        //    pesoTotalKg já vem congelado (quantidade × fatorKg).
+        prisma.entregaPaa.aggregate({
+          where: { createdAt: { gt: cutoff, lte: referenceDate } },
+          _sum: { pesoTotalKg: true },
         }),
       ])
 
@@ -96,10 +124,10 @@ export async function calculateStock(
     const harvestKg = sumQty(harvestItems)
     const distributedKg = sumQty(distItems)
     const donationsKg = sumQty(donationItems)
+    const paaKg = decimalToNumber(paaAgg._sum.pesoTotalKg)
 
-    // 📦 ESTOQUE ÚNICO:
-    //    marco + (aproveitado + colheita) − distribuído total
-    const entradasKg = round3(approvedKg + harvestKg)
+    // 📦 ESTOQUE ÚNICO: marco + (aproveitado + colheita + PAA) − distribuído
+    const entradasKg = round3(approvedKg + harvestKg + paaKg)
     const currentStockKg = round3(
       baseMarker.quantityKg + entradasKg - distributedKg,
     )
@@ -115,6 +143,7 @@ export async function calculateStock(
       movements: {
         approvedKg: round3(approvedKg),
         harvestKg: round3(harvestKg),
+        paaKg: round3(paaKg),
         distributedKg: round3(distributedKg),
       },
       info: { donationsKg: round3(donationsKg) },
@@ -129,6 +158,13 @@ export async function calculateStock(
 
 function sumQty(items: { quantity: number }[]): number {
   return items.reduce((sum, i) => sum + i.quantity, 0)
+}
+
+// Prisma.Decimal | null → number (aceita Decimal, string ou number)
+function decimalToNumber(value: unknown): number {
+  if (value === null || value === undefined) return 0
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
 }
 
 function round3(n: number): number {

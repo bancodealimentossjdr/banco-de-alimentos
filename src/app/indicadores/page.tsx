@@ -2,27 +2,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import FiltrosIndicadores, {
+import FiltrosIndicadores from '@/components/indicadores/FiltrosIndicadores';
+import {
   type FiltrosState,
-} from '@/components/indicadores/FiltrosIndicadores';
+  buildIndicadoresQuery,
+} from '@/lib/indicadores/filters';
 import KpiCard from '@/components/indicadores/KpiCard';
 import GraficoTendencia, {
   SerieData,
 } from '@/components/indicadores/GraficoTendencia';
-import GraficoPizza from '@/components/indicadores/GraficoPizza';
 import GraficoBarras from '@/components/indicadores/GraficoBarras';
 import BotoesExportacao from '@/components/indicadores/BotoesExportacao';
 import TopFuncionariosCard from '@/components/indicadores/TopFuncionariosCard';
 import TabelaParticipacaoFuncionarios from '@/components/indicadores/TabelaParticipacaoFuncionarios';
 import type { FuncionarioParticipacao } from '@/lib/data/indicadores-data';
-import { useDebounce } from '@/hooks/useDebounce';
 import AnnonaeLoader from '@/components/ui/AnnonaeLoader';
 
 interface Macro {
   totalDoado: number;
   totalDistribuido: number;
   totalColheita: number;
-  emEstoque: number;
   percentualAproveitamento: number;
   beneficiariosAtendidos: number;
 }
@@ -36,69 +35,61 @@ export default function IndicadoresPage() {
   const [topDoadores, setTopDoadores] = useState<any[]>([]);
   const [topBeneficiarios, setTopBeneficiarios] = useState<any[]>([]);
   const [topProdutores, setTopProdutores] = useState<any[]>([]);
+  const [participacao, setParticipacao] = useState<FuncionarioParticipacao[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [participacao, setParticipacao] = useState<FuncionarioParticipacao[]>([]);
-  const [loadingPart, setLoadingPart] = useState(false);
-
-  const filtersDebounced = useDebounce(filters, 350);
-
+  /* ------------------------------------------------------------------
+   * 🔁 UM ÚNICO efeito.
+   *
+   * Antes existiam dois: o primeiro montava a query à mão com apenas
+   * from/to (dropdowns nunca chegavam ao servidor) e o segundo, com
+   * debounce, enviava os IDs só para participacao-funcionarios. Daí o
+   * sintoma: "data filtra, dropdown não".
+   *
+   * Agora a query é serializada por buildIndicadoresQuery() e o efeito
+   * só roda quando o usuário clica em "Aplicar" — debounce dispensável.
+   * ------------------------------------------------------------------ */
   useEffect(() => {
     if (!filters) return;
+    const qs = buildIndicadoresQuery(filters);
+    const ac = new AbortController();
+    const get = (url: string) =>
+      fetch(url, { signal: ac.signal }).then((r) => r.json());
+
     setLoading(true);
-
-    const qs = `from=${filters.from}&to=${filters.to}`;
-
     Promise.all([
-      fetch(`/api/indicadores/macro?${qs}`).then((r) => r.json()),
-      fetch(`/api/indicadores/aproveitamento?${qs}&serie=true`).then((r) => r.json()),
-      fetch(`/api/indicadores/rankings?${qs}&type=produtos`).then((r) => r.json()),
-      fetch(`/api/indicadores/rankings?${qs}&type=doadores`).then((r) => r.json()),
-      fetch(`/api/indicadores/rankings?${qs}&type=beneficiarios`).then((r) => r.json()),
-      fetch(`/api/indicadores/rankings?${qs}&type=produtores`).then((r) => r.json()),
+      get(`/api/indicadores/macro?${qs}`),
+      get(`/api/indicadores/aproveitamento?${qs}&serie=true`),
+      get(`/api/indicadores/rankings?${qs}&type=produtos`),
+      get(`/api/indicadores/rankings?${qs}&type=doadores`),
+      get(`/api/indicadores/rankings?${qs}&type=beneficiarios`),
+      get(`/api/indicadores/rankings?${qs}&type=produtores`),
+      get(`/api/indicadores/participacao-funcionarios?${qs}`),
     ])
-      .then(([m, serie, p, d, b, pr]) => {
+      .then(([m, serie, p, d, b, pr, part]) => {
         setMacro(m);
-        setTendencia(serie && Array.isArray(serie.points) ? (serie as SerieData) : null);
+        setTendencia(
+          serie && Array.isArray(serie.points) ? (serie as SerieData) : null,
+        );
         setTopProdutos(Array.isArray(p) ? p : []);
         setTopDoadores(Array.isArray(d) ? d : []);
         setTopBeneficiarios(Array.isArray(b) ? b : []);
         setTopProdutores(Array.isArray(pr) ? pr : []);
+        setParticipacao(Array.isArray(part) ? part : []);
       })
-      .catch((e) => console.error('Erro ao carregar indicadores:', e))
+      .catch((e) => {
+        if (e.name !== 'AbortError')
+          console.error('Erro ao carregar indicadores:', e);
+      })
       .finally(() => setLoading(false));
-  }, [filters?.from, filters?.to]);
 
-  useEffect(() => {
-    if (!filtersDebounced) return;
-
-    const params = new URLSearchParams();
-    params.set('from', filtersDebounced.from);
-    params.set('to', filtersDebounced.to);
-    if (filtersDebounced.doadorIds.length)
-      params.set('doadorIds', filtersDebounced.doadorIds.join(','));
-    if (filtersDebounced.produtorIds.length)
-      params.set('produtorIds', filtersDebounced.produtorIds.join(','));
-    if (filtersDebounced.beneficiarioIds.length)
-      params.set('beneficiarioIds', filtersDebounced.beneficiarioIds.join(','));
-    if (filtersDebounced.funcionarioIds.length)
-      params.set('funcionarioIds', filtersDebounced.funcionarioIds.join(','));
-
-    setLoadingPart(true);
-    fetch(`/api/indicadores/participacao-funcionarios?${params.toString()}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setParticipacao(data);
-      })
-      .catch((err) => console.error('Erro ao buscar participação:', err))
-      .finally(() => setLoadingPart(false));
-  }, [filtersDebounced]);
+    return () => ac.abort();
+  }, [filters]);
 
   const fmt = (n: number) =>
-    n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+    (n ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
   const exportFilters = filters ? { from: filters.from, to: filters.to } : null;
-
   const mostrarTabelaDetalhada = (filters?.funcionarioIds.length ?? 0) > 0;
 
   return (
@@ -115,7 +106,6 @@ export default function IndicadoresPage() {
 
       <FiltrosIndicadores onChange={setFilters} />
 
-      {/* 🟡 Loader da marca — primeira carga (sem dados ainda) */}
       {loading && !macro && (
         <div className="py-16">
           <AnnonaeLoader label="Calculando indicadores..." />
@@ -124,48 +114,52 @@ export default function IndicadoresPage() {
 
       {macro && (
         <div className="relative">
-          {/* 🟡 Overlay — recargas por troca de filtro (mantém contexto visível) */}
           {loading && (
-            <div className="absolute inset-0 z-10 flex items-start justify-center bg-white/70 backdrop-blur-[1px] pt-24">
+            <div className="absolute inset-0 z-10 flex items-start justify-center bg-white/70 pt-24 backdrop-blur-[1px]">
               <AnnonaeLoader label="Atualizando..." />
             </div>
           )}
 
           <div className={loading ? 'pointer-events-none select-none' : ''}>
-            {/* ===== KPIs ===== */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+            {/* ===== KPIs — 5 cards (📦 Em Estoque removido na 23.7d) ===== */}
+            <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
               <KpiCard label="Total Doado" value={fmt(macro.totalDoado)} unit="kg" emoji="🏪" />
               <KpiCard label="Distribuído" value={fmt(macro.totalDistribuido)} unit="kg" emoji="📤" />
               <KpiCard label="Colheita" value={fmt(macro.totalColheita)} unit="kg" emoji="🌾" />
-              <KpiCard label="Em Estoque" value={fmt(macro.emEstoque)} unit="kg" emoji="📦" />
               <KpiCard label="Aproveitamento" value={fmt(macro.percentualAproveitamento)} unit="%" emoji="✅" />
               <KpiCard label="Beneficiários" value={macro.beneficiariosAtendidos} emoji="👥" />
             </div>
 
-            {/* ===== Gráfico tendência ===== */}
             <div className="mb-6">
               <GraficoTendencia data={tendencia} />
             </div>
 
-            {/* ===== Rankings ===== */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              <GraficoPizza data={topProdutos} titulo="Top 5 Produtos Doados" />
-              <GraficoBarras data={topDoadores} titulo="Top 10 Doadores" cor="#16a34a" />
+            {/* 🌾 Top Produtos agora soma doação + colheita + PAA (23.7d) */}
+            <div className="mb-6">
+              <GraficoBarras
+                data={topProdutos}
+                titulo="Top 10 Produtos Recebidos"
+                cor="#16a34a"
+              />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <GraficoBarras data={topDoadores} titulo="Top 10 Doadores" cor="#16a34a" />
               <GraficoBarras data={topBeneficiarios} titulo="Top 10 Beneficiários" cor="#2563eb" />
+            </div>
+
+            <div className="mb-6">
               <GraficoBarras data={topProdutores} titulo="Top 10 Produtores Rurais" cor="#ea580c" />
             </div>
 
-            {/* ===== Top 5 Funcionários ===== */}
-            <div className="border-t border-gray-200 pt-6 mt-2">
-              <TopFuncionariosCard dados={participacao} loading={loadingPart} />
-
+            <div className="mt-2 border-t border-gray-200 pt-6">
+              <TopFuncionariosCard dados={participacao} loading={loading} />
               {mostrarTabelaDetalhada && (
-                <TabelaParticipacaoFuncionarios dados={participacao} loading={loadingPart} />
+                <TabelaParticipacaoFuncionarios dados={participacao} loading={loading} />
               )}
             </div>
+
+            {/* 🌾 Seção PAA entra aqui na 23.7e */}
           </div>
         </div>
       )}

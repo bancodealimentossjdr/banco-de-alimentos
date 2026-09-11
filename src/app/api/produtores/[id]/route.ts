@@ -91,6 +91,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 // PATCH - Atualização parcial (toggle de ativo / flag PAA)
+// PATCH - Atualização parcial (toggle de ativo / flag PAA / cota override)
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireEdit('produtores')
   if (authResult instanceof NextResponse) return authResult
@@ -98,6 +99,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try {
     const { id } = await params
     const body = await request.json()
+
+    const session = await auth()
+    const role = session?.user?.role
 
     const existing = await prisma.producer.findUnique({ where: { id } })
     if (!existing) {
@@ -119,6 +123,39 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
       data.atendePaa = novo
+    }
+
+    // 🔒 Cota individual — EXCLUSIVO do dev (backend lê a role da sessão, nunca do body)
+    if (body.cotaOverride !== undefined || body.cotaOverrideNota !== undefined) {
+      if (role !== 'dev') {
+        return NextResponse.json(
+          { error: 'Apenas o desenvolvedor pode definir cota individual.' },
+          { status: 403 }
+        )
+      }
+
+      if (body.cotaOverride === null || body.cotaOverride === '') {
+        // ↩️ Volta para a cota padrão global
+        data.cotaOverride = null
+        data.cotaOverrideNota = null
+      } else {
+        const v = Number(body.cotaOverride)
+        if (!Number.isFinite(v) || v <= 0) {
+          return NextResponse.json(
+            { error: 'cotaOverride deve ser um número positivo.' },
+            { status: 400 }
+          )
+        }
+        const nota = String(body.cotaOverrideNota ?? '').trim()
+        if (nota.length < 5) {
+          return NextResponse.json(
+            { error: 'Justifique a cota individual com pelo menos 5 caracteres.' },
+            { status: 400 }
+          )
+        }
+        data.cotaOverride = v
+        data.cotaOverrideNota = nota
+      }
     }
 
     if (Object.keys(data).length === 0) {

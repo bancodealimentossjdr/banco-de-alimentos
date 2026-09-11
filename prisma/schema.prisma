@@ -43,6 +43,9 @@ model User {
 
   // ONDA 23 — PAA
   entregasPaaCriadas EntregaPaa[] @relation("EntregaPaaCreatedBy")
+
+  // ONDA 23.7b — cota PAA
+  cotaResetsCriados PaaCotaReset[] @relation("PaaCotaResetCreatedBy")
 }
 
 // ==========================================
@@ -98,16 +101,16 @@ model Product {
   updatedAt DateTime @updatedAt
 
   // ONDA 23 — PAA
-  isPaa                Boolean  @default(false)
-  codigoConab          Int?     @unique
-  paaConvencional      Decimal? @db.Decimal(10, 2)
+  isPaa           Boolean  @default(false)
+  codigoConab     Int?     @unique
+  paaConvencional Decimal? @db.Decimal(10, 2)
 
-  temOrganico          Boolean  @default(false)
-  codigoConabOrganico  Int?     @unique // só nos 6 casos divergentes
-  paaOrganico          Decimal? @db.Decimal(10, 2)
+  temOrganico         Boolean  @default(false)
+  codigoConabOrganico Int?     @unique // só nos 6 casos divergentes
+  paaOrganico         Decimal? @db.Decimal(10, 2)
 
-  paaUnidade           String?
-  paaFatorKg           Decimal  @default(1) @db.Decimal(6, 3)
+  paaUnidade String?
+  paaFatorKg Decimal @default(1) @db.Decimal(6, 3)
 
   donationItems     DonationItem[]
   distributionItems DistributionItem[]
@@ -118,7 +121,6 @@ model Product {
   @@index([isPaa])
   @@index([codigoConab])
 }
-
 
 // ==========================================
 // DOADORES
@@ -291,8 +293,15 @@ model Producer {
   atendeColheita Boolean @default(true)
   atendePaa      Boolean @default(false)
 
+  // ONDA 23.7b — cota PAA
+  /// Teto anual em R$ deste produtor. NULL = usa o padrão global (PaaConfig).
+  cotaOverride     Decimal? @db.Decimal(12, 2)
+  /// Justificativa do override (auditoria).
+  cotaOverrideNota String?
+
   harvests    SolidarityHarvest[]
   entregasPaa EntregaPaa[]
+  cotaResets  PaaCotaReset[]
 
   @@index([atendePaa])
 }
@@ -368,6 +377,8 @@ model EntregaPaa {
 
   @@index([producerId])
   @@index([dataEntrega])
+  // 🚀 23.7b: cota corta o acumulado por createdAt dentro de um produtor.
+  @@index([producerId, createdAt])
   @@map("entregas_paa")
 }
 
@@ -390,6 +401,52 @@ model EntregaPaaItem {
   @@index([entregaPaaId])
   @@index([productId])
   @@map("entregas_paa_itens")
+}
+
+// ============================================
+// ONDA 23.7b — COTA PAA
+// ============================================
+
+/// ⚙️ Config global do PAA. Tabela de linha única, id fixo "default".
+model PaaConfig {
+  id String @id @default("default")
+
+  /// Teto padrão em R$ por produtor. Todos começam com 15.000,00.
+  cotaPadrao Decimal @default(15000) @db.Decimal(12, 2)
+
+  /// % do teto que dispara o aviso de proximidade.
+  alertaPercentual Int @default(80)
+
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@map("paa_config")
+}
+
+/// ♻️ Marco de reset manual de cota (admin/dev).
+/// Mesmo padrão de StockMarker: NÃO apaga entregas — grava um corte datado.
+/// O acumulado passa a somar apenas entregas com createdAt >= resetAt.
+/// producerId NULL = reset global (vale para todos os produtores).
+model PaaCotaReset {
+  id         String    @id @default(cuid())
+  producerId String?
+  producer   Producer? @relation(fields: [producerId], references: [id])
+
+  /// Instante do corte. Compara-se com EntregaPaa.createdAt (ato de lançamento).
+  resetAt DateTime @default(now())
+  motivo  String
+
+  /// 📸 Snapshot do valor zerado — prova do acumulado no momento do reset.
+  valorZerado Decimal @db.Decimal(12, 2)
+
+  createdById String
+  createdBy   User   @relation("PaaCotaResetCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([producerId, resetAt])
+  @@index([resetAt])
+  @@map("paa_cota_resets")
 }
 
 // ==========================================
@@ -425,7 +482,7 @@ enum StockMarkerType {
 model StockMarker {
   id         String          @id @default(cuid())
   type       StockMarkerType
-  date       DateTime        @unique @db.Date
+  date       DateTime // ⏱️ 23.6a-bis: instante da calibragem (era @unique @db.Date)
   quantityKg Float
   note       String?
 
@@ -433,7 +490,7 @@ model StockMarker {
   createdBy   User     @relation("StockMarkerCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
 
-  @@index([date])
+  @@index([date]) // ⚠️ sem @unique — unicidade por dia civil validada na API
   @@index([type])
   @@map("stock_markers")
 }
@@ -745,8 +802,9 @@ model TrocaAvulsaShow {
   @@index([showDia])
   @@map("trocas_avulsas_shows")
 }
+
 model ModuleFlag {
-  module    String   @id          // 'paa', 'eventos', ...
+  module    String   @id // 'paa', 'eventos', ...
   enabled   Boolean  @default(true)
   updatedAt DateTime @updatedAt
   updatedBy String?

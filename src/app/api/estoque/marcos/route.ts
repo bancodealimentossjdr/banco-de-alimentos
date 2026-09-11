@@ -3,10 +3,19 @@ import { prisma } from '@/lib/prisma'
 import { requireCalibrateStock, requireView } from '@/lib/auth-helpers'
 import { z } from 'zod'
 
-// "YYYY-MM-DD" → meia-noite UTC (compatível com @db.Date do StockMarker)
-function dateOnlyUTC(dateStr: string): Date {
+// "YYYY-MM-DD" → intervalo do dia civil (timestamp, sem timezone)
+function dayRange(dateStr: string): { start: Date; end: Date } {
   const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0))
+  return {
+    start: new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0)),
+    end: new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999)),
+  }
+}
+
+// Timestamp do marco: fim do dia civil → garante que
+// movimentações do mesmo dia fiquem "antes" do marco
+function markerTimestamp(dateStr: string): Date {
+  return dayRange(dateStr).end
 }
 
 const createSchema = z.object({
@@ -39,7 +48,7 @@ export async function GET() {
   }
 }
 
-// ➕ POST — cria/atualiza o marco (upsert por data) · 🔒 exclusivo dev
+// ➕ POST — cria/atualiza o marco do dia · 🔒 exclusivo dev
 export async function POST(req: NextRequest) {
   const authResult = await requireCalibrateStock()
   if (authResult instanceof NextResponse) return authResult
@@ -48,12 +57,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const data = createSchema.parse(body)
 
-    const markerDate = dateOnlyUTC(data.date)
+    const { start, end } = dayRange(data.date)
     const note = data.note?.trim() || null
 
-    // 🔍 date é @unique → upsert seguro
-    const existing = await prisma.stockMarker.findUnique({
-      where: { date: markerDate },
+    // 🔍 date não é mais unique → busca por intervalo do dia civil
+    const existing = await prisma.stockMarker.findFirst({
+      where: { date: { gte: start, lte: end } },
+      orderBy: { date: 'desc' },
     })
 
     const marker = existing
@@ -61,6 +71,7 @@ export async function POST(req: NextRequest) {
           where: { id: existing.id },
           data: {
             type: 'ADJUSTMENT',
+            date: markerTimestamp(data.date),
             quantityKg: data.quantityKg,
             note,
             createdById: authResult.user.id,
@@ -70,7 +81,7 @@ export async function POST(req: NextRequest) {
       : await prisma.stockMarker.create({
           data: {
             type: 'ADJUSTMENT',
-            date: markerDate,
+            date: markerTimestamp(data.date),
             quantityKg: data.quantityKg,
             note,
             createdById: authResult.user.id,

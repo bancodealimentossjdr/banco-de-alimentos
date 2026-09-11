@@ -1,3 +1,4 @@
+// src/components/indicadores/GraficoBarras.tsx
 'use client';
 
 import {
@@ -7,13 +8,22 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
 } from 'recharts';
 
+export interface SerieBarra {
+  key: string;
+  nome: string;
+  cor: string;
+}
+
 interface Props {
-  data: { nome: string; total: number }[];
+  data: Record<string, unknown>[];
   titulo: string;
   cor?: string;
+  /** 🌾 23.7d — quando informado, renderiza barras EMPILHADAS por origem. */
+  series?: SerieBarra[];
 }
 
 const fmtTooltip = (value: unknown): string => {
@@ -30,7 +40,10 @@ export default function GraficoBarras({
   data,
   titulo,
   cor = '#2563eb',
+  series,
 }: Props) {
+  const empilhado = !!series?.length;
+
   return (
     <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
       <h3 className="text-lg font-semibold mb-3">📊 {titulo}</h3>
@@ -39,13 +52,31 @@ export default function GraficoBarras({
           Sem dados no período selecionado
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={320}>
+        <ResponsiveContainer width="100%" height={empilhado ? 360 : 320}>
           <BarChart data={data} layout="vertical" margin={{ left: 80 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis type="number" />
             <YAxis type="category" dataKey="nome" width={120} />
-            <Tooltip formatter={fmtTooltip as any} />
-            <Bar dataKey="total" fill={cor} />
+            <Tooltip formatter={fmtTooltip as never} />
+            {empilhado ? (
+              <>
+                <Legend verticalAlign="bottom" height={28} />
+                {series!.map((s, i) => (
+                  <Bar
+                    key={s.key}
+                    dataKey={s.key}
+                    name={s.nome}
+                    stackId="origem"
+                    fill={s.cor}
+                    radius={
+                      i === series!.length - 1 ? [0, 4, 4, 0] : undefined
+                    }
+                  />
+                ))}
+              </>
+            ) : (
+              <Bar dataKey="total" fill={cor} radius={[0, 4, 4, 0]} />
+            )}
           </BarChart>
         </ResponsiveContainer>
       )}

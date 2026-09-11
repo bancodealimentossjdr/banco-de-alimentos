@@ -2,76 +2,56 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView } from '@/lib/auth-helpers'
 import { calculateUtilization } from '@/lib/stock/calculate-utilization'
-import { calculateStock } from '@/lib/stock/calculate-stock'
+import {
+  parseIndicadoresQuery,
+  validatePeriodo,
+} from '@/lib/indicadores/filters'
 
 export async function GET(req: NextRequest) {
-  // 🛡️ Backend nunca confia no frontend: valida role no servidor.
-  const auth = await requireView('estoque')
+  // 🛡️ Backend nunca confia no frontend.
+  const auth = await requireView('indicadores')
   if (auth instanceof NextResponse) return auth
 
-  const { searchParams } = new URL(req.url)
-  const fromRaw = searchParams.get('from')
-  const toRaw = searchParams.get('to')
+  const q = parseIndicadoresQuery(req)
+  const erro = validatePeriodo(q)
+  if (erro) return NextResponse.json({ error: erro }, { status: 400 })
 
-  // ----------------------------------------------------------------
-  // 📅 Período → afeta APENAS os FLUXOS:
-  //    doado, distribuído, colheita, % aproveitamento, beneficiários.
-  //
-  // 🔧 FIX (fuso): as bordas do dia são fixadas em UTC, NÃO no fuso
-  //    da máquina. Antes usávamos setHours() (horário local), o que
-  //    no localhost (-03:00) cortava o último dia: a borda `to` caía
-  //    em 02:59:59Z e excluía registros gravados ao meio-dia UTC.
-  //    Em produção (UTC) o bug não aparecia → "Vercel OK, local não".
-  //    Usando setUTCHours, o comportamento é idêntico em qualquer fuso.
-  // ----------------------------------------------------------------
-  const from = fromRaw ? new Date(fromRaw) : new Date('1970-01-01')
-  const to = toRaw ? new Date(toRaw) : new Date()
-
-  from.setUTCHours(0, 0, 0, 0)
-  to.setUTCHours(23, 59, 59, 999)
+  // 📅 Bordas já em horário de Brasília (day-boundaries).
+  // Removido o setUTCHours local — divergia de /aproveitamento.
+  const from = q.from ?? new Date('1970-01-01T00:00:00.000Z')
+  const to = q.to ?? new Date()
 
   try {
-    // ----------------------------------------------------------------
-    // 🧮 Fonte ÚNICA das fórmulas (Onda 16.5).
-    //    Sem filtros de entidade → utilization vem preenchido.
-    //    OBS: o currentStockKg DESTE snapshot é ignorado de propósito
-    //    (ele respeita o `to`; queremos saldo VIVO — ver abaixo).
-    // ----------------------------------------------------------------
-    const snapshot = await calculateUtilization({ from, to })
-    const { volumes, utilization } = snapshot
+    // 🧮 Fonte ÚNICA das fórmulas (Onda 16.5), agora com os 4 filtros.
+    const { volumes, utilization } = await calculateUtilization({
+      from,
+      to,
+      donorIds: q.doadorIds,
+      producerIds: q.produtorIds,
+      beneficiaryIds: q.beneficiarioIds,
+      employeeIds: q.funcionarioIds,
+    })
 
-    // ----------------------------------------------------------------
-    // 📦 ESTOQUE = saldo VIVO. NÃO respeita o período da tela.
-    //    Sempre até AGORA, a partir do último marco.
-    //    ❌ ANTES: calculateStock(to)  → congelava no fim do período.
-    //    ✅ AGORA: calculateStock()    → soma movimentações de hoje.
-    // ----------------------------------------------------------------
-    const stockNow = await calculateStock(new Date())
-    const emEstoque = stockNow.hasMarker ? stockNow.currentStockKg : 0
+    // 📦 emEstoque REMOVIDO (23.7c): saldo instantâneo não é indicador
+    //    de período. Vive em /estoque, sua fonte de verdade.
+    //    Bônus: uma query a menos por carga.
 
-    // ----------------------------------------------------------------
-    // 👥 Beneficiários únicos atendidos no período.
-    // ----------------------------------------------------------------
     const beneficiariosUnicos = await prisma.distribution.findMany({
-      where: { date: { gte: from, lte: to } },
+      where: {
+        date: { gte: from, lte: to },
+        ...(q.beneficiarioIds ? { beneficiaryId: { in: q.beneficiarioIds } } : {}),
+        ...(q.funcionarioIds ? { employeeId: { in: q.funcionarioIds } } : {}),
+      },
       select: { beneficiaryId: true },
       distinct: ['beneficiaryId'],
     })
 
-    // ----------------------------------------------------------------
-    // 📤 Resposta.
-    // ----------------------------------------------------------------
     return NextResponse.json({
-      // 🔁 Fluxos: respeitam o período selecionado.
       totalDoado: volumes.donationsKg,
       totalDistribuido: volumes.distributedKg,
       totalColheita: volumes.harvestKg,
-      percentualAproveitamento: utilization.utilizationPct ?? 0,
+      percentualAproveitamento: utilization?.utilizationPct ?? 0,
       beneficiariosAtendidos: beneficiariosUnicos.length,
-
-      // 📦 Estoque: saldo vivo, independente do período.
-      emEstoque,
-
       calculatedAt: new Date(),
     })
   } catch (error) {
