@@ -14,7 +14,7 @@ import {
  *
  * ⚠️ REESCRITA TOTAL (Onda 23.7d).
  * A versão anterior era `GET()` sem request e devolvia listas de CADASTRO
- * ordenadas por nome (cópia de /api/indicadores/produtos). Nunca houve
+ * lista de produtos ordenada por nome (antes duplicada em rota própria, removida na Onda 23.7d)
  * agregação por volume — nem de doação, nem de colheita.
  *
  * 🌾 Produtos somam as TRÊS origens que alimentam o estoque:

@@ -13,7 +13,10 @@ function fileDatePart(d: string | null): string {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireView('estoque');
+  // 🛡️ Onda 23.7d: era requireView('estoque') — divergia da tela que
+  //    dispara o download, protegida por 'indicadores'. Quem tinha
+  //    indicadores sem estoque via o botão e levava 403.
+  const auth = await requireView('indicadores');
   if (auth instanceof NextResponse) return auth;
 
   const { searchParams } = new URL(req.url);
@@ -21,40 +24,49 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get('to');
   const format = (searchParams.get('format') || 'excel').toLowerCase();
 
+  if (!['excel', 'xlsx', 'pdf'].includes(format)) {
+    return NextResponse.json({ error: 'format inválido' }, { status: 400 });
+  }
+
   // 🛡️ Censura: só admin pode desligar. Backend NUNCA confia no frontend.
   const isAdmin = auth.user.role === 'admin';
   const censurar = !isAdmin || searchParams.get('mask') !== 'false';
-
-  const data = await getIndicadoresData({ from, to, censurar });
 
   const baseName = `banco-de-alimentos-indicadores-${fileDatePart(
     from,
   )}-${fileDatePart(to)}-by-annonae`;
 
-  if (format === 'excel' || format === 'xlsx') {
-    const buf = await gerarExcelIndicadores(data);
+  try {
+    const data = await getIndicadoresData({ from, to, censurar });
+
+    // 📄 Onda 23.7d: o branch PDF chamava gerarExcelIndicadores e servia
+    //    o XLSX com Content-Type application/pdf. Arquivo corrompido em
+    //    qualquer leitor. gerarPdfIndicadores é SÍNCRONA (retorna Buffer).
+    const isPdf = format === 'pdf';
+    const buf = isPdf
+      ? gerarPdfIndicadores(data)
+      : await gerarExcelIndicadores(data);
+
+    const contentType = isPdf
+      ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    const ext = isPdf ? 'pdf' : 'xlsx';
+
     return new NextResponse(buf as unknown as BodyInit, {
       status: 200,
       headers: {
-        'Content-Type':
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${baseName}.xlsx"`,
+        'Content-Type': contentType,
+        'Content-Disposition': `attachment; filename="${baseName}.${ext}"`,
+        'Content-Length': String(buf.byteLength),
         'Cache-Control': 'no-store',
       },
     });
+  } catch (error) {
+    console.error('[indicadores/export] Erro:', error);
+    return NextResponse.json(
+      { error: 'Erro ao gerar relatório.' },
+      { status: 500 },
+    );
   }
-
-  if (format === 'pdf') {
-    const buf = await gerarExcelIndicadores(data);
-    return new NextResponse(buf as unknown as BodyInit, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${baseName}.pdf"`,
-        'Cache-Control': 'no-store',
-      },
-    });
-  }
-
-  return NextResponse.json({ error: 'format inválido' }, { status: 400 });
 }
