@@ -1,31 +1,32 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit, requireAdminOrDev } from '@/lib/auth-helpers'
-import { auth } from '@/lib/auth'
 import { maskDoador } from '@/lib/mask-by-role'
+import { podeVerRegistro } from '@/lib/visibilidade'
+
+const NAO_ENCONTRADO = () =>
+  NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const authResult = await requireView('doadores')
   if (authResult instanceof NextResponse) return authResult
 
+  const role = authResult.user.role
+
   try {
     const { id } = await params
-    const session = await auth()
-    const role = session?.user?.role
 
     const donor = await prisma.donor.findUnique({
       where: { id },
-      include: {
-        _count: { select: { donations: true } },
-      },
+      include: { _count: { select: { donations: true } } },
     })
 
-    if (!donor) {
-      return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
-    }
+    if (!donor) return NAO_ENCONTRADO()
+    // 👁️ oculto = inexistente para não-dev
+    if (!podeVerRegistro(role, donor)) return NAO_ENCONTRADO()
 
     const masked = maskDoador(donor, role)
     return NextResponse.json(masked)
@@ -37,24 +38,30 @@ export async function GET(
 
 export async function PUT(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const authResult = await requireEdit('doadores')
   if (authResult instanceof NextResponse) return authResult
+
+  const role = authResult.user.role
 
   try {
     const { id } = await params
     const body = await request.json()
 
     const donor = await prisma.donor.findUnique({ where: { id } })
-    if (!donor) {
-      return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
+    if (!donor) return NAO_ENCONTRADO()
+    if (!podeVerRegistro(role, donor)) return NAO_ENCONTRADO()
+
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (name.length === 0) {
+      return NextResponse.json({ error: 'Nome é obrigatório' }, { status: 400 })
     }
 
-        const updated = await prisma.donor.update({
+    const updated = await prisma.donor.update({
       where: { id },
       data: {
-        name: body.name,
+        name,
         type: body.type,
         category: body.category,
         contact: body.contact || null,
@@ -65,7 +72,6 @@ export async function PUT(
       },
     })
 
-
     return NextResponse.json(updated)
   } catch (error) {
     console.error('Erro PUT doador:', error)
@@ -75,10 +81,12 @@ export async function PUT(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const authResult = await requireEdit('doadores')
   if (authResult instanceof NextResponse) return authResult
+
+  const role = authResult.user.role
 
   try {
     const { id } = await params
@@ -88,16 +96,15 @@ export async function DELETE(
       include: { _count: { select: { donations: true } } },
     })
 
-    if (!donor) {
-      return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
-    }
+    if (!donor) return NAO_ENCONTRADO()
+    if (!podeVerRegistro(role, donor)) return NAO_ENCONTRADO()
 
     if (donor._count.donations > 0) {
       return NextResponse.json(
         {
           error: `Não é possível excluir: este doador possui ${donor._count.donations} doação(ões) vinculada(s).`,
         },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
@@ -108,16 +115,22 @@ export async function DELETE(
     return NextResponse.json({ error: 'Erro ao excluir doador' }, { status: 500 })
   }
 }
+
 /**
  * PATCH → alterna apenas o status (ativo/inativo). Admin ou DEV.
  * Não desvincula nada: preserva o histórico de doações.
+ *
+ * ⚠️ Não confundir com PATCH /[id]/visibilidade — `active` é estado de
+ * negócio, `hiddenAt` é limpeza de cadastro (exclusivo do dev).
  */
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const authResult = await requireAdminOrDev()
   if (authResult instanceof NextResponse) return authResult
+
+  const role = authResult.user.role
 
   try {
     const { id } = await params
@@ -126,14 +139,13 @@ export async function PATCH(
     if (typeof body.active !== 'boolean') {
       return NextResponse.json(
         { error: 'Campo "active" (boolean) é obrigatório' },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
     const donor = await prisma.donor.findUnique({ where: { id } })
-    if (!donor) {
-      return NextResponse.json({ error: 'Doador não encontrado' }, { status: 404 })
-    }
+    if (!donor) return NAO_ENCONTRADO()
+    if (!podeVerRegistro(role, donor)) return NAO_ENCONTRADO()
 
     const updated = await prisma.donor.update({
       where: { id },
