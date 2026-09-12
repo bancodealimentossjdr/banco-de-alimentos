@@ -41,7 +41,7 @@ export type UtilizationSnapshot = {
 }
 
 /* ------------------------------------------------------------------ */
-/* 🆕 Tipos da SÉRIE TEMPORAL (Onda 16.5.B)                            */
+/* Tipos da SÉRIE TEMPORAL (Onda 16.5.B)                               */
 /* ------------------------------------------------------------------ */
 
 export type SeriesGranularity = 'day' | 'week' | 'month'
@@ -58,6 +58,10 @@ export type UtilizationSeriesPoint = {
   approvedTotalKg: number
   distributedKg: number // distribuição no bucket
   lossKg: number // perda = max(0, doação - approved)
+  // 🌾 23.7e-1: entregas PAA no bucket (kg). NÃO entra em approvedTotalKg
+  //    nem em lossKg — PAA é compra institucional, não doação triada.
+  //    Alterar isso mudaria a taxa de aproveitamento histórica.
+  paaKg: number
 }
 
 export type UtilizationSeries = {
@@ -143,7 +147,6 @@ export async function calculateUtilization(
   try {
     // ----------------------------------------------------------------
     // Filtro de funcionário: o nome pode estar em 3 slots distintos.
-    // Construímos um OR reutilizável para cada model.
     // ----------------------------------------------------------------
     const employeeOR = employeeIds
       ? {
@@ -155,9 +158,6 @@ export async function calculateUtilization(
         }
       : {}
 
-    // ----------------------------------------------------------------
-    // WHERE de cada model (período sempre; entidades quando ativas)
-    // ----------------------------------------------------------------
     const donationWhere = {
       date: { gte: from, lte: to },
       ...(donorIds ? { donorId: { in: donorIds } } : {}),
@@ -203,7 +203,6 @@ export async function calculateUtilization(
 
     // ----------------------------------------------------------------
     // UTILIZATION — só faz sentido na VISÃO GERAL.
-    // Com qualquer filtro de entidade ativo, vira null (hífen na tela).
     // ----------------------------------------------------------------
     if (hasEntityFilter) {
       return {
@@ -222,8 +221,6 @@ export async function calculateUtilization(
     }
 
     // ---- Visão geral: aproveitamento agregado (DailyApproval) ----
-    // DailyApproval.date é @db.Date (meia-noite UTC). O range
-    // [from .. to] em fronteira Brasília cobre o dia inteiro corretamente.
     const approvalAgg = await prisma.dailyApproval.aggregate({
       where: { date: { gte: from, lte: to } },
       _sum: { approvedQty: true },
@@ -232,35 +229,19 @@ export async function calculateUtilization(
     const approvedKg = round3(approvalAgg._sum.approvedQty ?? 0)
 
     // ----------------------------------------------------------------
-    // 🧮 FÓRMULAS OFICIAIS (Onda 16.5)
-    //
-    // Entradas aproveitáveis = doação bruta + colheita realizada
-    // Aproveitado TOTAL      = DailyApproval + colheita (100% aproveitada)
-    //
-    // A colheita é 100% aproveitada (decisão travada do checkpoint):
-    // entra como ENTRADA e como APROVEITADO ao mesmo tempo.
+    // 🧮 FÓRMULAS OFICIAIS (Onda 16.5) — intocadas na 23.7e.
     // ----------------------------------------------------------------
     const entradasKg = round3(donationsKg + harvestKg)
     const aproveitadoTotalKg = round3(approvedKg + harvestKg)
 
-    // 📊 Taxa de aproveitamento:
-    //    (Aprov + Colheita) / (Doação bruta + Colheita) × 100
-    //    → "De tudo que entrou, quanto foi salvo do lixo?"
     const utilizationPct =
       entradasKg > 0 ? round1((aproveitadoTotalKg / entradasKg) * 100) : 0
 
-    // 📤 Taxa de destinação:
-    //    Distribuído / (Aprov + Colheita) × 100
-    //    → "De tudo que aproveitei, quanto já saiu pro beneficiário?"
     const destinationPct =
       aproveitadoTotalKg > 0
         ? round1((distributedKg / aproveitadoTotalKg) * 100)
         : 0
 
-    // 🗑️ Perda = Doação bruta − Aproveitamento (nunca negativo).
-    //    Colheita NÃO gera perda (é 100% aproveitada), por isso o
-    //    denominador da perda é só a doação bruta.
-    //    Consistência: perda = entradas − aproveitadoTotal = doação − approved
     const lossKg = round3(Math.max(0, donationsKg - approvedKg))
 
     // 📦 Estoque atual: reutiliza a lib oficial (parte do último marco)
@@ -287,10 +268,7 @@ export async function calculateUtilization(
 }
 
 /* ------------------------------------------------------------------ */
-/* 🆕 Função SÉRIE TEMPORAL (Onda 16.5.B)                              */
-/*                                                                     */
-/* Evolução do aproveitado total (DailyApproval + colheita) e dos      */
-/* demais volumes, agrupados por dia/semana/mês em horário de Brasília.*/
+/* Função SÉRIE TEMPORAL (Onda 16.5.B · PAA na 23.7e-1)                */
 /*                                                                     */
 /* Granularidade (auto):                                               */
 /*   ≤ 31 dias → 'day'   |   ≤ 92 dias → 'week'   |   > 92 → 'month'    */
@@ -298,10 +276,9 @@ export async function calculateUtilization(
 /* ⚠️ DailyApproval não tem entidade → série só na VISÃO GERAL.        */
 /*                                                                     */
 /* 🇧🇷 FONTE ÚNICA DE FRONTEIRA: as chaves de bucket derivam de         */
-/*    startOfDayBrasilia (day-boundaries.ts). Movimentações (DateTime)  */
-/*    usam bucketKey (com offset); aprovações (@db.Date) usam           */
-/*    bucketKeyDateOnly (sem offset, pois o dia civil já é absoluto).   */
-/*    Ambas resultam na MESMA chave de dia civil → Σ série == snapshot. */
+/*    startOfDayBrasilia. Movimentações (DateTime) usam bucketKey;      */
+/*    @db.Date (DailyApproval, EntregaPaa.dataEntrega) usam             */
+/*    bucketKeyDateOnly — o dia civil já é absoluto, sem offset.        */
 /* ------------------------------------------------------------------ */
 
 export async function calculateUtilizationSeries(
@@ -336,42 +313,58 @@ export async function calculateUtilizationSeries(
   }
 
   try {
+    // 📅 23.7e-1: EntregaPaa.dataEntrega é @db.Date. from/to são bordas de
+    //    Brasília (03:00Z) e EXCLUIRIAM o primeiro dia. Range em dia civil UTC.
+    const paaRange = dateOnlyRange(from, to)
+
     // ----------------------------------------------------------------
     // Busca crua com as DATAS (agrupamos por bucket no JS).
     // ----------------------------------------------------------------
-    const [donationItems, harvestItems, distributionItems, approvalRows] =
-      await Promise.all([
-        prisma.donationItem.findMany({
-          where: { donation: { date: { gte: from, lte: to } } },
-          select: { quantity: true, donation: { select: { date: true } } },
-        }),
-        prisma.harvestItem.findMany({
-          where: {
-            harvest: { date: { gte: from, lte: to }, status: 'realizada' },
-          },
-          select: { quantity: true, harvest: { select: { date: true } } },
-        }),
-        prisma.distributionItem.findMany({
-          where: { distribution: { date: { gte: from, lte: to } } },
-          select: {
-            quantity: true,
-            distribution: { select: { date: true } },
-          },
-        }),
-        prisma.dailyApproval.findMany({
-          where: { date: { gte: from, lte: to } },
-          select: { date: true, approvedQty: true },
-        }),
-      ])
+    const [
+      donationItems,
+      harvestItems,
+      distributionItems,
+      approvalRows,
+      paaItems,
+    ] = await Promise.all([
+      prisma.donationItem.findMany({
+        where: { donation: { date: { gte: from, lte: to } } },
+        select: { quantity: true, donation: { select: { date: true } } },
+      }),
+      prisma.harvestItem.findMany({
+        where: {
+          harvest: { date: { gte: from, lte: to }, status: 'realizada' },
+        },
+        select: { quantity: true, harvest: { select: { date: true } } },
+      }),
+      prisma.distributionItem.findMany({
+        where: { distribution: { date: { gte: from, lte: to } } },
+        select: {
+          quantity: true,
+          distribution: { select: { date: true } },
+        },
+      }),
+      prisma.dailyApproval.findMany({
+        where: { date: { gte: from, lte: to } },
+        select: { date: true, approvedQty: true },
+      }),
+      // 🌾 23.7e-1: pesoKg do item (quantidade pode estar em cx/dz/mç).
+      prisma.entregaPaaItem.findMany({
+        where: { entregaPaa: { dataEntrega: paaRange } },
+        select: {
+          pesoKg: true,
+          entregaPaa: { select: { dataEntrega: true } },
+        },
+      }),
+    ])
 
     // ----------------------------------------------------------------
-    // Esqueleto de buckets (todos zerados) — dias/semanas/meses sem
-    // dado aparecem como 0 na linha.
+    // Esqueleto de buckets (todos zerados) — dias sem dado viram 0,
+    // e não furo na série.
     // ----------------------------------------------------------------
     const buckets = buildBuckets(from, to, granularity)
 
     // 🇧🇷 Movimentações DateTime → bucket em horário de Brasília.
-    //    bucketKey aplica o offset (startOfDayBrasilia) e gera o dia civil.
     const addLocal = (
       date: Date,
       field: 'donationsKg' | 'harvestKg' | 'distributedKg',
@@ -382,14 +375,16 @@ export async function calculateUtilizationSeries(
       if (point) point[field] = round3(point[field] + qty)
     }
 
-    // 📅 DailyApproval é @db.Date: o valor JÁ É o dia civil (meia-noite UTC).
+    // 📅 @db.Date: o valor JÁ É o dia civil (meia-noite UTC).
     //    NÃO aplicar offset Brasília aqui (deslocaria 1 dia pra trás).
-    //    bucketKeyDateOnly lê os componentes UTC direto → mesma chave do
-    //    esqueleto e das movimentações do mesmo dia civil.
-    const addApproval = (date: Date, qty: number) => {
+    const addDateOnly = (
+      date: Date,
+      field: 'approvedKg' | 'paaKg',
+      qty: number,
+    ) => {
       const key = bucketKeyDateOnly(date, granularity)
       const point = buckets.get(key)
-      if (point) point.approvedKg = round3(point.approvedKg + qty)
+      if (point) point[field] = round3(point[field] + qty)
     }
 
     for (const it of donationItems) {
@@ -402,7 +397,12 @@ export async function calculateUtilizationSeries(
       addLocal(it.distribution.date, 'distributedKg', it.quantity)
     }
     for (const ap of approvalRows) {
-      addApproval(ap.date, ap.approvedQty)
+      addDateOnly(ap.date, 'approvedKg', ap.approvedQty)
+    }
+    for (const it of paaItems) {
+      const kg = Number(it.pesoKg ?? 0) // Decimal → number
+      if (!Number.isFinite(kg)) continue
+      addDateOnly(it.entregaPaa.dataEntrega, 'paaKg', kg)
     }
 
     // ----------------------------------------------------------------
@@ -420,6 +420,8 @@ export async function calculateUtilizationSeries(
         approvedTotalKg: round3(p.approvedKg + p.harvestKg),
         // 🗑️ perda só sobre doação bruta
         lossKg: round3(Math.max(0, p.donationsKg - p.approvedKg)),
+        // 🌾 PAA exibido lado a lado, fora das fórmulas de aproveitamento
+        paaKg: p.paaKg,
       }),
     )
 
@@ -458,7 +460,7 @@ function nonEmpty(arr?: string[]): string[] | undefined {
 }
 
 /* ------------------------------------------------------------------ */
-/* 🆕 Helpers da série temporal — FONTE ÚNICA: day-boundaries.ts        */
+/* Helpers da série temporal — FONTE ÚNICA: day-boundaries.ts           */
 /* ------------------------------------------------------------------ */
 
 // Escolhe granularidade automaticamente pelo tamanho do período
@@ -470,8 +472,6 @@ function pickGranularity(from: Date, to: Date): SeriesGranularity {
 }
 
 // 🇧🇷 Componentes "civis" de Brasília de uma data DateTime.
-// Reusa a fonte única (startOfDayBrasilia retorna 03:00 UTC = 00:00 BSB),
-// e lemos os getters UTC, que já representam o dia civil de Brasília.
 function brasiliaCivilParts(date: Date): { y: number; m: number; d: number } {
   const start = startOfDayBrasilia(date) // 03:00 UTC = 00:00 BSB do dia civil
   return {
@@ -482,10 +482,22 @@ function brasiliaCivilParts(date: Date): { y: number; m: number; d: number } {
 }
 
 // Início do dia (chave UTC hora 0) a partir de partes civis (y, m, d).
-// A hora 0 UTC serve só como identificador estável de bucket — o que
-// importa é o YYYY-MM-DD do slice.
 function dayKeyFromParts(y: number, m: number, d: number): Date {
   return new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
+}
+
+/**
+ * 🌾 23.7e-1: range para colunas @db.Date a partir de bordas Brasília.
+ * Converte [from..to] no par de dias civis UTC correspondentes, para que
+ * o primeiro e o último dia do período NÃO sejam perdidos.
+ */
+function dateOnlyRange(from: Date, to: Date): { gte: Date; lte: Date } {
+  const f = brasiliaCivilParts(from)
+  const t = brasiliaCivilParts(to)
+  return {
+    gte: dayKeyFromParts(f.y, f.m, f.d),
+    lte: dayKeyFromParts(t.y, t.m, t.d),
+  }
 }
 
 // Recua para a segunda-feira da semana do dia informado.
@@ -515,8 +527,7 @@ function bucketKey(date: Date, g: SeriesGranularity): string {
   return bucketStartFromParts(y, m, d, g).toISOString().slice(0, 10)
 }
 
-// 📅 Chave de bucket para @db.Date (DailyApproval) → usa o dia UTC direto,
-// SEM offset (o @db.Date já representa o dia civil correto).
+// 📅 Chave de bucket para @db.Date → usa o dia UTC direto, SEM offset.
 function bucketKeyDateOnly(date: Date, g: SeriesGranularity): string {
   const y = date.getUTCFullYear()
   const m = date.getUTCMonth()
@@ -530,7 +541,6 @@ function bucketEnd(start: Date, g: SeriesGranularity): Date {
   if (g === 'week') {
     return new Date(start.getTime() + 6 * MS_PER_DAY)
   }
-  // mês: último dia = dia 0 do mês seguinte
   return new Date(
     Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 0, 0, 0, 0),
   )
@@ -545,49 +555,35 @@ function bucketLabel(start: Date, g: SeriesGranularity): string {
 
   if (g === 'day') return fmtDM(start)
 
-  // 🆕 semana vira INTERVALO: "DD/MM – DD/MM"
   if (g === 'week') {
     const end = bucketEnd(start, g)
     return `${fmtDM(start)} – ${fmtDM(end)}`
   }
 
-  // mês: MM/YYYY
   const mm = String(start.getUTCMonth() + 1).padStart(2, '0')
   const yyyy = start.getUTCFullYear()
   return `${mm}/${yyyy}`
 }
 
+/* Tipo interno do esqueleto de buckets (+ paaKg na 23.7e-1) */
+type BucketAcc = {
+  bucket: string
+  label: string
+  donationsKg: number
+  harvestKg: number
+  approvedKg: number
+  distributedKg: number
+  paaKg: number
+}
+
 // Constrói o Map de buckets do período inteiro, todos zerados.
-// O período é interpretado em horário de Brasília (fonte única).
 function buildBuckets(
   from: Date,
   to: Date,
   g: SeriesGranularity,
-): Map<
-  string,
-  {
-    bucket: string
-    label: string
-    donationsKg: number
-    harvestKg: number
-    approvedKg: number
-    distributedKg: number
-  }
-> {
-  const map = new Map<
-    string,
-    {
-      bucket: string
-      label: string
-      donationsKg: number
-      harvestKg: number
-      approvedKg: number
-      distributedKg: number
-    }
-  >()
+): Map<string, BucketAcc> {
+  const map = new Map<string, BucketAcc>()
 
-  // from/to já vêm em fronteira Brasília (parseYMDtoBrasilia*).
-  // O cursor anda pela base civil de Brasília — mesma âncora dos dados.
   const fromParts = brasiliaCivilParts(from)
   const toParts = brasiliaCivilParts(to)
 
@@ -603,6 +599,7 @@ function buildBuckets(
       harvestKg: 0,
       approvedKg: 0,
       distributedKg: 0,
+      paaKg: 0,
     })
 
     if (g === 'day') {

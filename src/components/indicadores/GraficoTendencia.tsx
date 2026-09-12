@@ -24,6 +24,8 @@ export interface SeriePoint {
   approvedTotalKg: number;
   distributedKg: number;
   lossKg: number;
+  /* 🌾 23.7e-1 — opcional: séries antigas em cache não têm o campo */
+  paaKg?: number;
 }
 
 export interface SerieData {
@@ -68,6 +70,10 @@ export default function GraficoTendencia({ data }: Props) {
 
   // 🔁 com muitos buckets diários, gira os labels pra não amassar
   const rotateLabels = isDaily && points.length > 12;
+
+  // 🌾 23.7e-1: só desenha a barra de PAA se houver PAA no período.
+  //    Evita legenda e slot de barra ocupados por uma série toda zero.
+  const temPaa = points.some((p) => (p.paaKg ?? 0) > 0);
 
   return (
     <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
@@ -126,6 +132,17 @@ export default function GraficoTendencia({ data }: Props) {
               radius={[2, 2, 0, 0]}
               maxBarSize={14}
             />
+
+            {/* 🌾 PAA (23.7e-1) — entregas do programa, kg */}
+            {temPaa && (
+              <Bar
+                dataKey="paaKg"
+                name="PAA"
+                fill="#ca8a04"
+                radius={[2, 2, 0, 0]}
+                maxBarSize={14}
+              />
+            )}
 
             {/* 📤 Distribuído */}
             <Bar

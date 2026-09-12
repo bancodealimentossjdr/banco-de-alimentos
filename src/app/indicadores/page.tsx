@@ -26,6 +26,18 @@ interface Macro {
   beneficiariosAtendidos: number;
 }
 
+/* 🌾 Onda 23.7e-1 — GET /api/indicadores/paa */
+interface PaaIndicadores {
+  card: {
+    totalKg: number;
+    totalEntregas: number;
+    produtoresAtivos: number;
+    totalValor: number | null; // null = mascarado no servidor
+  };
+  topProdutos: unknown[];
+  topProdutosOrganicos: unknown[];
+}
+
 export default function IndicadoresPage() {
   const [filters, setFilters] = useState<FiltrosState | null>(null);
 
@@ -36,18 +48,15 @@ export default function IndicadoresPage() {
   const [topBeneficiarios, setTopBeneficiarios] = useState<any[]>([]);
   const [topProdutores, setTopProdutores] = useState<any[]>([]);
   const [participacao, setParticipacao] = useState<FuncionarioParticipacao[]>([]);
+  const [paa, setPaa] = useState<PaaIndicadores | null>(null);
   const [loading, setLoading] = useState(false);
 
   /* ------------------------------------------------------------------
-   * 🔁 UM ÚNICO efeito.
+   * 🔁 UM ÚNICO efeito. (histórico do fix "data filtra, dropdown não")
    *
-   * Antes existiam dois: o primeiro montava a query à mão com apenas
-   * from/to (dropdowns nunca chegavam ao servidor) e o segundo, com
-   * debounce, enviava os IDs só para participacao-funcionarios. Daí o
-   * sintoma: "data filtra, dropdown não".
-   *
-   * Agora a query é serializada por buildIndicadoresQuery() e o efeito
-   * só roda quando o usuário clica em "Aplicar" — debounce dispensável.
+   * 🌾 23.7e-1: entra /api/indicadores/paa. O .catch(() => null) é
+   *    proposital — quem não tem permissão de PAA recebe 403 e apenas
+   *    não vê a seção, sem derrubar a página inteira.
    * ------------------------------------------------------------------ */
   useEffect(() => {
     if (!filters) return;
@@ -65,8 +74,9 @@ export default function IndicadoresPage() {
       get(`/api/indicadores/rankings?${qs}&type=beneficiarios`),
       get(`/api/indicadores/rankings?${qs}&type=produtores`),
       get(`/api/indicadores/participacao-funcionarios?${qs}`),
+      get(`/api/indicadores/paa?${qs}`).catch(() => null),
     ])
-      .then(([m, serie, p, d, b, pr, part]) => {
+      .then(([m, serie, p, d, b, pr, part, paaRes]) => {
         setMacro(m);
         setTendencia(
           serie && Array.isArray(serie.points) ? (serie as SerieData) : null,
@@ -76,6 +86,7 @@ export default function IndicadoresPage() {
         setTopBeneficiarios(Array.isArray(b) ? b : []);
         setTopProdutores(Array.isArray(pr) ? pr : []);
         setParticipacao(Array.isArray(part) ? part : []);
+        setPaa(paaRes && paaRes.card ? (paaRes as PaaIndicadores) : null);
       })
       .catch((e) => {
         if (e.name !== 'AbortError')
@@ -121,20 +132,52 @@ export default function IndicadoresPage() {
           )}
 
           <div className={loading ? 'pointer-events-none select-none' : ''}>
-            {/* ===== KPIs — 5 cards (📦 Em Estoque removido na 23.7d) ===== */}
-            <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-              <KpiCard label="Total Doado" value={fmt(macro.totalDoado)} unit="kg" emoji="🏪" />
-              <KpiCard label="Distribuído" value={fmt(macro.totalDistribuido)} unit="kg" emoji="📤" />
-              <KpiCard label="Colheita" value={fmt(macro.totalColheita)} unit="kg" emoji="🌾" />
-              <KpiCard label="Aproveitamento" value={fmt(macro.percentualAproveitamento)} unit="%" emoji="✅" />
-              <KpiCard label="Beneficiários" value={macro.beneficiariosAtendidos} emoji="👥" />
+            {/* ===== KPIs — 📦 Em Estoque removido na 23.7d · 🌾 PAA entra na 23.7e ===== */}
+            <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+              <KpiCard
+                label="Total Doado"
+                value={fmt(macro.totalDoado)}
+                unit="kg"
+                emoji="🏪"
+              />
+              <KpiCard
+                label="Distribuído"
+                value={fmt(macro.totalDistribuido)}
+                unit="kg"
+                emoji="📤"
+              />
+              <KpiCard
+                label="Colheita"
+                value={fmt(macro.totalColheita)}
+                unit="kg"
+                emoji="🌾"
+              />
+              {paa && (
+                <KpiCard
+                  label={`PAA · ${paa.card.totalEntregas} entregas`}
+                  value={fmt(paa.card.totalKg)}
+                  unit="kg"
+                  emoji="🌾"
+                />
+              )}
+              <KpiCard
+                label="Aproveitamento"
+                value={fmt(macro.percentualAproveitamento)}
+                unit="%"
+                emoji="✅"
+              />
+              <KpiCard
+                label="Beneficiários"
+                value={macro.beneficiariosAtendidos}
+                emoji="👥"
+              />
             </div>
 
             <div className="mb-6">
               <GraficoTendencia data={tendencia} />
             </div>
 
-            {/* 🌾 Top Produtos agora soma doação + colheita + PAA (23.7d) */}
+            {/* 🌾 Top Produtos soma doação + colheita + PAA (23.7d) */}
             <div className="mb-6">
               <GraficoBarras
                 data={topProdutos}
@@ -144,22 +187,51 @@ export default function IndicadoresPage() {
             </div>
 
             <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <GraficoBarras data={topDoadores} titulo="Top 10 Doadores" cor="#16a34a" />
-              <GraficoBarras data={topBeneficiarios} titulo="Top 10 Beneficiários" cor="#2563eb" />
+              <GraficoBarras
+                data={topDoadores}
+                titulo="Top 10 Doadores"
+                cor="#16a34a"
+              />
+              <GraficoBarras
+                data={topBeneficiarios}
+                titulo="Top 10 Beneficiários"
+                cor="#2563eb"
+              />
             </div>
 
             <div className="mb-6">
-              <GraficoBarras data={topProdutores} titulo="Top 10 Produtores Rurais" cor="#ea580c" />
+              <GraficoBarras
+                data={topProdutores}
+                titulo="Top 10 Produtores Rurais"
+                cor="#ea580c"
+              />
             </div>
+
+            {/* ===== 🌾 PAA — produtos entregues (23.7e-1) ===== */}
+            {paa && (
+              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <GraficoBarras
+                  data={paa.topProdutos as any[]}
+                  titulo="🌾 Top 10 Produtos Entregues (PAA)"
+                  cor="#ca8a04"
+                />
+                <GraficoBarras
+                  data={paa.topProdutosOrganicos as any[]}
+                  titulo="🍃 Top 10 Produtos Orgânicos (PAA)"
+                  cor="#15803d"
+                />
+              </div>
+            )}
 
             <div className="mt-2 border-t border-gray-200 pt-6">
               <TopFuncionariosCard dados={participacao} loading={loading} />
               {mostrarTabelaDetalhada && (
-                <TabelaParticipacaoFuncionarios dados={participacao} loading={loading} />
+                <TabelaParticipacaoFuncionarios
+                  dados={participacao}
+                  loading={loading}
+                />
               )}
             </div>
-
-            {/* 🌾 Seção PAA entra aqui na 23.7e */}
           </div>
         </div>
       )}

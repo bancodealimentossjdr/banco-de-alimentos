@@ -6,6 +6,7 @@ import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useFuncionarios } from '@/hooks/useCadastros'
 import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
+import CalculadoraPeso from '@/components/CalculadoraPeso'
 
 interface ProdutoPaa {
   id: string
@@ -64,6 +65,28 @@ const hoje = () => {
 const brl = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+/**
+ * 🏷️ ONDA 23.7e-2 — abreviação cosmética da unidade do PAA.
+ * NÃO altera cálculo: `paaFatorKg` continua sendo a fonte de verdade do peso.
+ */
+const abrevUnidade = (u: string | null | undefined): string => {
+  const v = (u ?? 'Kg').trim().toLowerCase()
+  if (v.startsWith('litro') || v === 'l') return 'L'
+  if (v.startsWith('dúzia') || v.startsWith('duzia') || v === 'dz') return 'Dz'
+  if (v.startsWith('maço') || v.startsWith('maco')) return 'Mç'
+  if (v.startsWith('unid') || v === 'un') return 'Un'
+  return 'Kg'
+}
+
+/**
+ * 🧮 A calculadora devolve PESO LÍQUIDO em kg.
+ * Só pode alimentar `quantidade` quando a unidade de negociação é o próprio kg.
+ * Ovos (Dúzia) e Iogurte (Litro) são pagos por unidade de volume/contagem —
+ * aplicar kg ali corromperia peso E valor.
+ */
+const aceitaCalculadora = (p: ProdutoPaa | undefined): boolean =>
+  !!p && abrevUnidade(p.paaUnidade) === 'Kg'
+
 const formInicial = () => ({
   producerId: '',
   dataEntrega: hoje(),
@@ -107,6 +130,9 @@ export default function PaaPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(formInicial())
+
+  // 🧮 Índice do item com a calculadora aberta (null = nenhuma)
+  const [calcAberta, setCalcAberta] = useState<number | null>(null)
 
   // 🔍 Filtros
   const [filtroProducerId, setFiltroProducerId] = useState('')
@@ -160,7 +186,7 @@ export default function PaaPage() {
       fator,
       pesoKg: qtd * fator,
       subtotal: qtd * preco,
-      unidade: p.paaUnidade ?? 'Kg',
+      unidade: abrevUnidade(p.paaUnidade),
       erro,
     }
   }
@@ -180,6 +206,7 @@ export default function PaaPage() {
     setForm(formInicial())
     setEditingId(null)
     setShowForm(false)
+    setCalcAberta(null)
   }
 
   const startEdit = (e: Entrega) => {
@@ -201,6 +228,7 @@ export default function PaaPage() {
     })
     setEditingId(e.id)
     setShowForm(true)
+    setCalcAberta(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -213,18 +241,32 @@ export default function PaaPage() {
   const removeItem = (index: number) => {
     if (form.itens.length <= 1) return
     setForm({ ...form, itens: form.itens.filter((_, i) => i !== index) })
+    // 🧮 Reindexa a calculadora aberta para não vazar para a linha errada
+    setCalcAberta((atual) => {
+      if (atual === null) return null
+      if (atual === index) return null
+      return atual > index ? atual - 1 : atual
+    })
   }
 
   const updateItem = (index: number, field: keyof FormItem, value: string | number) => {
     const itens = [...form.itens]
     itens[index] = { ...itens[index], [field]: value } as FormItem
 
-    // Produto sem orgânico → força convencional
     if (field === 'productId') {
       const p = findProduto(String(value))
+      // Produto sem orgânico → força convencional
       if (p && !p.temOrganico) itens[index].tipoCultivo = 'CONVENCIONAL'
+      // 🧮 Trocar para produto em L/Dz fecha a calculadora
+      if (calcAberta === index && !aceitaCalculadora(p)) setCalcAberta(null)
     }
     setForm({ ...form, itens })
+  }
+
+  /** 🧮 Peso líquido em kg vira a quantidade — válido só em produtos por Kg */
+  const aplicarPeso = (index: number, pesoLiquido: number) => {
+    updateItem(index, 'quantidade', parseFloat(pesoLiquido.toFixed(3)))
+    setCalcAberta(null)
   }
 
   const onSubmit = async (ev: React.FormEvent) => {
@@ -256,7 +298,6 @@ export default function PaaPage() {
         if (res.ok) {
           resetForm()
           mutateEntregas()
-          // 🔄 Preparado para a 23.6 (integração com estoque)
           invalidate('/api/estoque/resumo')
         } else {
           const data = await res.json()
@@ -430,7 +471,7 @@ export default function PaaPage() {
             <div className="hidden lg:flex gap-3 items-end mb-1 px-1">
               <div className="flex-1"><span className="text-xs text-gray-500">Produto *</span></div>
               <div className="w-36"><span className="text-xs text-gray-500">Cultivo</span></div>
-              <div className="w-28"><span className="text-xs text-gray-500">Quantidade *</span></div>
+              <div className="w-32"><span className="text-xs text-gray-500">Quantidade *</span></div>
               <div className="w-24 text-right"><span className="text-xs text-gray-500">Preço</span></div>
               <div className="w-24 text-right"><span className="text-xs text-gray-500">Peso (kg)</span></div>
               <div className="w-28 text-right"><span className="text-xs text-gray-500">Subtotal</span></div>
@@ -441,92 +482,130 @@ export default function PaaPage() {
               {form.itens.map((item, index) => {
                 const c = calcLinha(item)
                 const prod = findProduto(item.productId)
+                const podeCalcular = aceitaCalculadora(prod)
+
                 return (
-                  <div
-                    key={index}
-                    className={`flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 rounded-lg lg:rounded-none ${
-                      c.erro ? 'bg-red-50 lg:bg-red-50/60' : 'bg-gray-50 lg:bg-transparent'
-                    }`}
-                  >
-                    <div className="flex-1">
-                      <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => updateItem(index, 'productId', e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                      >
-                        <option value="">Selecione um produto do PAA</option>
-                        {produtos.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} ({p.paaUnidade ?? 'Kg'})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="lg:w-36">
-                      <label className="block text-xs text-gray-500 mb-1 lg:hidden">Cultivo</label>
-                      <select
-                        value={item.tipoCultivo}
-                        onChange={(e) => updateItem(index, 'tipoCultivo', e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                        disabled={!prod?.temOrganico}
-                      >
-                        <option value="CONVENCIONAL">Convencional</option>
-                        {prod?.temOrganico && <option value="ORGANICO">🍃 Orgânico</option>}
-                      </select>
-                    </div>
-
-                    <div className="lg:w-28">
-                      <label className="block text-xs text-gray-500 mb-1 lg:hidden">
-                        Quantidade * {c.unidade && `(${c.unidade})`}
-                      </label>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.001"
-                        min="0"
-                        value={item.quantidade || ''}
-                        onChange={(e) =>
-                          updateItem(index, 'quantidade', parseFloat(e.target.value) || 0)
-                        }
-                        className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                        placeholder="0"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between lg:justify-end gap-3">
-                      <div className="lg:w-24 text-right">
-                        <span className="block text-xs text-gray-500 lg:hidden">Preço</span>
-                        <span className="text-sm text-gray-600">
-                          {c.preco > 0 ? brl(c.preco) : '—'}
-                        </span>
-                      </div>
-                      <div className="lg:w-24 text-right">
-                        <span className="block text-xs text-gray-500 lg:hidden">Peso</span>
-                        <span className="text-sm font-medium text-green-700">
-                          {c.pesoKg > 0 ? `${c.pesoKg.toFixed(3)} kg` : '—'}
-                        </span>
-                      </div>
-                      <div className="lg:w-28 text-right">
-                        <span className="block text-xs text-gray-500 lg:hidden">Subtotal</span>
-                        <span className="text-sm font-semibold text-amber-700">
-                          {c.subtotal > 0 ? brl(c.subtotal) : '—'}
-                        </span>
-                      </div>
-                      {form.itens.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(index)}
-                          className="shrink-0 p-2 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-sm"
+                  <div key={index}>
+                    <div
+                      className={`flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 rounded-lg lg:rounded-none ${
+                        c.erro ? 'bg-red-50 lg:bg-red-50/60' : 'bg-gray-50 lg:bg-transparent'
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
+                        <select
+                          value={item.productId}
+                          onChange={(e) => updateItem(index, 'productId', e.target.value)}
+                          className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
                         >
-                          ✕
-                        </button>
+                          <option value="">Selecione um produto do PAA</option>
+                          {produtos.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({abrevUnidade(p.paaUnidade)})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="lg:w-36">
+                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">Cultivo</label>
+                        <select
+                          value={item.tipoCultivo}
+                          onChange={(e) => updateItem(index, 'tipoCultivo', e.target.value)}
+                          className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                          disabled={!prod?.temOrganico}
+                        >
+                          <option value="CONVENCIONAL">Convencional</option>
+                          {prod?.temOrganico && <option value="ORGANICO">🍃 Orgânico</option>}
+                        </select>
+                      </div>
+
+                      {/* Quantidade + 🧮 */}
+                      <div className="lg:w-32">
+                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">
+                          Quantidade * {c.unidade && `(${c.unidade})`}
+                        </label>
+                        <div className="flex gap-1.5">
+                          <div className="relative flex-1">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.001"
+                              min="0"
+                              value={item.quantidade || ''}
+                              onChange={(e) =>
+                                updateItem(index, 'quantidade', parseFloat(e.target.value) || 0)
+                              }
+                              className="w-full border rounded-lg px-3 py-2.5 pr-9 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                              placeholder="0"
+                            />
+                            {c.unidade && (
+                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
+                                {c.unidade}
+                              </span>
+                            )}
+                          </div>
+                          {podeCalcular && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCalcAberta(calcAberta === index ? null : index)
+                              }
+                              title="Calculadora de caixas (peso líquido)"
+                              aria-label="Abrir calculadora de peso"
+                              className={`shrink-0 px-2.5 rounded-lg border text-sm transition ${
+                                calcAberta === index
+                                  ? 'bg-blue-500 border-blue-500 text-white'
+                                  : 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                              }`}
+                            >
+                              🧮
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between lg:justify-end gap-3">
+                        <div className="lg:w-24 text-right">
+                          <span className="block text-xs text-gray-500 lg:hidden">Preço</span>
+                          <span className="text-sm text-gray-600">
+                            {c.preco > 0 ? brl(c.preco) : '—'}
+                          </span>
+                        </div>
+                        <div className="lg:w-24 text-right">
+                          <span className="block text-xs text-gray-500 lg:hidden">Peso</span>
+                          <span className="text-sm font-medium text-green-700">
+                            {c.pesoKg > 0 ? `${c.pesoKg.toFixed(3)} kg` : '—'}
+                          </span>
+                        </div>
+                        <div className="lg:w-28 text-right">
+                          <span className="block text-xs text-gray-500 lg:hidden">Subtotal</span>
+                          <span className="text-sm font-semibold text-amber-700">
+                            {c.subtotal > 0 ? brl(c.subtotal) : '—'}
+                          </span>
+                        </div>
+                        {form.itens.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(index)}
+                            className="shrink-0 p-2 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-sm"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      {c.erro && (
+                        <p className="text-xs text-red-600 lg:hidden">⚠️ {c.erro}</p>
                       )}
                     </div>
 
-                    {c.erro && (
-                      <p className="text-xs text-red-600 lg:absolute lg:hidden">⚠️ {c.erro}</p>
+                    {/* 🧮 Calculadora — mesmo componente de Doações/Distribuições/Colheita */}
+                    {calcAberta === index && podeCalcular && (
+                      <CalculadoraPeso
+                        onApply={(pesoLiquido) => aplicarPeso(index, pesoLiquido)}
+                        onClose={() => setCalcAberta(null)}
+                      />
                     )}
                   </div>
                 )
@@ -731,7 +810,8 @@ export default function PaaPage() {
                           <span className="ml-1 text-xs text-emerald-600">🍃 orgânico</span>
                         )}
                         <span className="text-gray-500 ml-1">
-                          {i.quantidade} {i.product.paaUnidade ?? 'Kg'} · {i.pesoKg.toFixed(3)} kg
+                          {i.quantidade} {abrevUnidade(i.product.paaUnidade)} ·{' '}
+                          {i.pesoKg.toFixed(3)} kg
                         </span>
                       </div>
                       {!masked && i.subtotal !== null && (

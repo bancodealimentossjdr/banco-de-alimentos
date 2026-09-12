@@ -21,6 +21,9 @@ function formatarPeriodo(from: string | null, to: string | null): string {
   return `${f} a ${t}`;
 }
 
+const brl = (v: number) =>
+  v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 /**
  * Lê a logo do disco e converte para base64 (data URI).
  * Falha graciosamente: se não achar o arquivo, retorna null (PDF sai sem logo).
@@ -42,13 +45,13 @@ function carregarLogoBase64(): string | null {
 export function gerarPdfIndicadores(data: IndicadoresData): Buffer {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
 
   /* ----------------------------- HEADER ----------------------------- */
   const logo = carregarLogoBase64();
   if (logo) {
     try {
-      // logo quadrada ~18mm no canto superior esquerdo
       doc.addImage(logo, 'PNG', margin, 12, 18, 18);
     } catch {
       /* ignora erro de imagem */
@@ -99,15 +102,32 @@ export function gerarPdfIndicadores(data: IndicadoresData): Buffer {
 
   let cursorY = 42;
 
+  /** Avança o cursor a partir do fim da última tabela */
+  const aposTabela = (espaco = 10) => {
+    // @ts-expect-error lastAutoTable é injetado pelo plugin autotable
+    cursorY = doc.lastAutoTable.finalY + espaco;
+  };
+
+  /** Quebra de página se não couber título + algumas linhas */
+  const garantirEspaco = (minimo = 40) => {
+    if (cursorY > pageHeight - minimo) {
+      doc.addPage();
+      cursorY = 20;
+    }
+  };
+
+  const titulo = (texto: string) => {
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...CINZA_ESCURO);
+    doc.text(texto, margin, cursorY);
+  };
+
   /* --------------------------- KPIs (macro) ------------------------- */
-  doc.setFontSize(13);
-  doc.setTextColor(...CINZA_ESCURO);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Resumo Geral', margin, cursorY);
-  cursorY += 2;
+  titulo('Resumo Geral');
 
   autoTable(doc, {
-    startY: cursorY + 2,
+    startY: cursorY + 4,
     head: [['Indicador', 'Valor', 'Unidade']],
     body: [
       ['Total Doado', data.macro.totalDoado.toLocaleString('pt-BR'), 'kg'],
@@ -135,24 +155,49 @@ export function gerarPdfIndicadores(data: IndicadoresData): Buffer {
     margin: { left: margin, right: margin },
     styles: { fontSize: 9, cellPadding: 2 },
   });
+  aposTabela();
 
-  // @ts-expect-error lastAutoTable é injetado pelo plugin autotable
-  cursorY = doc.lastAutoTable.finalY + 10;
-
-  /* ------------------------- Tendência mensal ----------------------- */
-  doc.setFontSize(13);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...CINZA_ESCURO);
-  doc.text('Tendência Mensal', margin, cursorY);
+  /* ------------------------------ PAA ------------------------------- */
+  garantirEspaco();
+  titulo('Programa de Aquisição de Alimentos (PAA)');
 
   autoTable(doc, {
     startY: cursorY + 4,
-    head: [['Mês', 'Doações (kg)', 'Distribuições (kg)', 'Colheita (kg)']],
+    head: [['Indicador', 'Valor', 'Unidade']],
+    body: [
+      ['Total Entregue', data.paa.totalKg.toLocaleString('pt-BR'), 'kg'],
+      ['Entregas Registradas', String(data.paa.totalEntregas), ''],
+      ['Produtores Ativos', String(data.paa.produtoresAtivos), ''],
+      [
+        'Valor Total Repassado',
+        // 🔒 censurado → travessão, nunca zero
+        data.paa.totalValor === null ? '—' : brl(data.paa.totalValor),
+        '',
+      ],
+    ],
+    theme: 'striped',
+    headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: CINZA_CLARO },
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 9, cellPadding: 2 },
+  });
+  aposTabela();
+
+  /* ------------------------- Tendência mensal ----------------------- */
+  garantirEspaco();
+  titulo('Tendência Mensal');
+
+  autoTable(doc, {
+    startY: cursorY + 4,
+    head: [
+      ['Mês', 'Doações (kg)', 'Distribuições (kg)', 'Colheita (kg)', 'PAA (kg)'],
+    ],
     body: data.tendencia.map((t) => [
       t.mes,
       t.doacoes.toLocaleString('pt-BR'),
       t.distribuicoes.toLocaleString('pt-BR'),
       t.colheita.toLocaleString('pt-BR'),
+      t.paa.toLocaleString('pt-BR'),
     ]),
     theme: 'striped',
     headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
@@ -160,58 +205,63 @@ export function gerarPdfIndicadores(data: IndicadoresData): Buffer {
     margin: { left: margin, right: margin },
     styles: { fontSize: 9, cellPadding: 2 },
   });
-
-  // @ts-expect-error lastAutoTable injetado pelo plugin
-  cursorY = doc.lastAutoTable.finalY + 10;
+  aposTabela();
 
   /* --------------------------- Rankings ----------------------------- */
   const addRankingTable = (
-    titulo: string,
+    tituloTabela: string,
     coluna: string,
     rows: Array<{ nome: string; total: number }>,
+    vazio = 'Nenhum registro no período',
   ) => {
-    // quebra de página se faltar espaço
-    const pageHeight = doc.internal.pageSize.getHeight();
-    if (cursorY > pageHeight - 40) {
-      doc.addPage();
-      cursorY = 20;
-    }
-
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...CINZA_ESCURO);
-    doc.text(titulo, margin, cursorY);
+    garantirEspaco();
+    titulo(tituloTabela);
 
     autoTable(doc, {
       startY: cursorY + 4,
       head: [['#', coluna, 'Total (kg)']],
-      body: rows.map((r, i) => [
-        String(i + 1),
-        r.nome,
-        r.total.toLocaleString('pt-BR'),
-      ]),
+      body:
+        rows.length > 0
+          ? rows.map((r, i) => [
+              String(i + 1),
+              r.nome,
+              r.total.toLocaleString('pt-BR'),
+            ])
+          : [['', vazio, '']],
       theme: 'striped',
       headStyles: { fillColor: VERDE, textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: CINZA_CLARO },
       columnStyles: { 0: { cellWidth: 12 }, 2: { cellWidth: 30 } },
       margin: { left: margin, right: margin },
       styles: { fontSize: 9, cellPadding: 2 },
+      ...(rows.length === 0
+        ? { bodyStyles: { textColor: [156, 163, 175] as [number, number, number], fontStyle: 'italic' as const } }
+        : {}),
     });
-
-    // @ts-expect-error lastAutoTable injetado pelo plugin
-    cursorY = doc.lastAutoTable.finalY + 10;
+    aposTabela();
   };
 
   addRankingTable('Top 10 Produtos Doados', 'Produto', data.topProdutos);
   addRankingTable('Top 10 Doadores', 'Doador', data.topDoadores);
   addRankingTable('Top 10 Beneficiários', 'Beneficiário', data.topBeneficiarios);
   addRankingTable('Top 10 Produtores Rurais', 'Produtor', data.topProdutores);
+  addRankingTable(
+    'Top 10 Produtos Entregues (PAA)',
+    'Produto',
+    data.topProdutosPaa,
+    'Nenhuma entrega do PAA no período',
+  );
+  addRankingTable(
+    'Top 10 Produtos Orgânicos Entregues (PAA)',
+    'Produto',
+    data.topProdutosPaaOrganicos,
+    'Nenhuma entrega orgânica no período',
+  );
 
   /* ----------------------------- FOOTER ----------------------------- */
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    const pageHeight = doc.internal.pageSize.getHeight();
     doc.setDrawColor(220, 220, 220);
     doc.setLineWidth(0.3);
     doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);

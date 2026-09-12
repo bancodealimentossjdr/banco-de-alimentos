@@ -25,8 +25,10 @@ function estilizarHeader(ws: ExcelJS.Worksheet, linha: number, colunas: number) 
 
 /**
  * ⚠️ ONDA 21.6 — migrado de `xlsx` (SheetJS) para `exceljs`.
- * A função agora é ASSÍNCRONA: wb.xlsx.writeBuffer() retorna Promise.
- * Todo chamador precisa de `await`.
+ * A função é ASSÍNCRONA: wb.xlsx.writeBuffer() retorna Promise.
+ *
+ * 🌾 ONDA 23.7e-1 — inclui bloco PAA no Resumo, coluna na Tendência
+ *    e duas abas de produtos entregues.
  */
 export async function gerarExcelIndicadores(
   data: IndicadoresData,
@@ -37,7 +39,7 @@ export async function gerarExcelIndicadores(
 
   /* ----------------------------- Resumo ----------------------------- */
   const wsResumo = wb.addWorksheet('Resumo');
-  wsResumo.columns = [{ width: 28 }, { width: 22 }, { width: 10 }];
+  wsResumo.columns = [{ width: 30 }, { width: 22 }, { width: 10 }];
 
   const tituloRow = wsResumo.addRow([
     'Banco de Alimentos — Relatório de Indicadores',
@@ -68,6 +70,26 @@ export async function gerarExcelIndicadores(
     row.getCell(2).alignment = { horizontal: 'right' };
   }
 
+  /* --------------------- Bloco PAA no Resumo ------------------------ */
+  wsResumo.addRow([]);
+  const headPaa = wsResumo.addRow(['🌾 PAA', 'Valor', 'Unidade']);
+  estilizarHeader(wsResumo, headPaa.number, 3);
+
+  const linhasPaa: [string, number | string, string][] = [
+    ['Total Entregue', data.paa.totalKg, 'kg'],
+    ['Entregas Registradas', data.paa.totalEntregas, ''],
+    ['Produtores Ativos', data.paa.produtoresAtivos, ''],
+    // 🔒 censurado → em branco, não zero
+    ['Valor Total Repassado', data.paa.totalValor ?? '—', data.paa.totalValor === null ? '' : 'R$'],
+  ];
+  for (const [nome, valor, unidade] of linhasPaa) {
+    const row = wsResumo.addRow([nome, valor, unidade]);
+    if (typeof valor === 'number') {
+      row.getCell(2).numFmt = nome === 'Valor Total Repassado' ? 'R$ #,##0.00' : '#,##0.000';
+    }
+    row.getCell(2).alignment = { horizontal: 'right' };
+  }
+
   /* --------------------------- Tendência ---------------------------- */
   const wsTend = wb.addWorksheet('Tendência Mensal');
   wsTend.columns = [
@@ -75,8 +97,9 @@ export async function gerarExcelIndicadores(
     { header: 'Doações (kg)', key: 'doacoes', width: 16 },
     { header: 'Distribuições (kg)', key: 'distribuicoes', width: 18 },
     { header: 'Colheita (kg)', key: 'colheita', width: 14 },
+    { header: 'PAA (kg)', key: 'paa', width: 14 },
   ];
-  estilizarHeader(wsTend, 1, 4);
+  estilizarHeader(wsTend, 1, 5);
 
   for (const t of data.tendencia) {
     const row = wsTend.addRow({
@@ -84,8 +107,9 @@ export async function gerarExcelIndicadores(
       doacoes: t.doacoes,
       distribuicoes: t.distribuicoes,
       colheita: t.colheita,
+      paa: t.paa,
     });
-    for (const c of [2, 3, 4]) row.getCell(c).numFmt = '#,##0.00';
+    for (const c of [2, 3, 4, 5]) row.getCell(c).numFmt = '#,##0.00';
   }
   wsTend.views = [{ state: 'frozen', ySplit: 1 }];
 
@@ -94,6 +118,7 @@ export async function gerarExcelIndicadores(
     nome: string,
     titulo: string,
     rows: Array<{ nome: string; total: number }>,
+    vazio = 'Nenhum registro no período',
   ) => {
     const ws = wb.addWorksheet(nome);
     ws.columns = [
@@ -103,10 +128,17 @@ export async function gerarExcelIndicadores(
     ];
     estilizarHeader(ws, 1, 3);
 
+    if (rows.length === 0) {
+      const r = ws.addRow({ pos: '', nome: vazio, total: '' });
+      r.font = { italic: true, color: { argb: 'FF9CA3AF' } };
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+      return;
+    }
+
     rows.forEach((r, i) => {
       const row = ws.addRow({ pos: i + 1, nome: r.nome, total: r.total });
       row.getCell('total').numFmt = '#,##0.00';
-      // 🏅 TOP 3 em destaque (paridade visual com o PDF da SubOnda 4)
+      // 🏅 TOP 3 em destaque (paridade visual com o PDF)
       if (i < 3) {
         row.font = { bold: true, color: { argb: HEX_VERDE } };
         row.eachCell((c) => {
@@ -120,15 +152,25 @@ export async function gerarExcelIndicadores(
     });
 
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    if (rows.length > 0) {
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 3 } };
-    }
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 3 } };
   };
 
   addRanking('Top Produtos', 'Produto', data.topProdutos);
   addRanking('Top Doadores', 'Doador', data.topDoadores);
   addRanking('Top Beneficiários', 'Beneficiário', data.topBeneficiarios);
   addRanking('Top Produtores', 'Produtor', data.topProdutores);
+  addRanking(
+    'PAA Produtos',
+    'Produto',
+    data.topProdutosPaa,
+    'Nenhuma entrega do PAA no período',
+  );
+  addRanking(
+    'PAA Orgânicos',
+    'Produto',
+    data.topProdutosPaaOrganicos,
+    'Nenhuma entrega orgânica no período',
+  );
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);

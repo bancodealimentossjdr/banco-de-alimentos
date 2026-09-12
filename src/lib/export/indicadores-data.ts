@@ -19,16 +19,28 @@ export interface IndicadoresData {
     percentualAproveitamento: number;
     beneficiariosAtendidos: number;
   };
+  /** 🌾 ONDA 23.7e-1 — bloco PAA */
+  paa: {
+    totalKg: number;
+    totalEntregas: number;
+    produtoresAtivos: number;
+    /** null quando censurado — fail-secure, nunca zero */
+    totalValor: number | null;
+  };
   tendencia: Array<{
     mes: string;
     doacoes: number;
     distribuicoes: number;
     colheita: number;
+    paa: number;
   }>;
   topProdutos: Array<{ nome: string; total: number }>;
   topDoadores: Array<{ nome: string; total: number }>;
   topBeneficiarios: Array<{ nome: string; total: number }>;
   topProdutores: Array<{ nome: string; total: number }>;
+  /** 🌾 PAA — produtos entregues (kg) */
+  topProdutosPaa: Array<{ nome: string; total: number }>;
+  topProdutosPaaOrganicos: Array<{ nome: string; total: number }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -43,9 +55,32 @@ function maskName(name: string): string {
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
 const sumQty = (items: { quantity: number }[]) =>
   items.reduce((a, i) => a + (i.quantity ?? 0), 0);
+
+/** Decimal do Prisma → number na borda. Nunca vaza Decimal pro JSON. */
+const dec = (v: unknown): number => {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'object' && 'toNumber' in (v as object)) {
+    return (v as { toNumber(): number }).toNumber();
+  }
+  return Number(v) || 0;
+};
+
+/** Top-N a partir de um Map nome→total */
+function topN(
+  map: Map<string, number>,
+  limite = 10,
+  transform: (n: string) => string = (n) => n,
+): Array<{ nome: string; total: number }> {
+  return Array.from(map.entries())
+    .map(([nome, total]) => ({ nome: transform(nome), total: round1(total) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limite);
+}
 
 /* ------------------------------------------------------------------ */
 /* Coleta principal                                                    */
@@ -59,12 +94,14 @@ export async function getIndicadoresData(opts: {
   const { from, to, censurar } = opts;
 
   // 🇧🇷 Fronteira de dia em horário de Brasília (UTC−3)
-const dateFilter: { gte?: Date; lte?: Date } = {};
-if (from) dateFilter.gte = parseYMDtoBrasiliaStart(from);
-if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
+  const dateFilter: { gte?: Date; lte?: Date } = {};
+  if (from) dateFilter.gte = parseYMDtoBrasiliaStart(from);
+  if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
 
   const hasDate = Object.keys(dateFilter).length > 0;
   const whereDate = hasDate ? { date: dateFilter } : {};
+  // 🌾 PAA usa `dataEntrega`, não `date`
+  const wherePaa = hasDate ? { dataEntrega: dateFilter } : {};
 
   const applyMask = (nome: string) => (censurar ? maskName(nome) : nome);
 
@@ -123,6 +160,56 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
     beneficiariosAtendidos: beneficiariosUnicos.length,
   };
 
+  /* ============================= PAA ============================= */
+  // Uma leitura só, reaproveitada em card, tendência e rankings.
+  const entregasPaa = await prisma.entregaPaa.findMany({
+    where: wherePaa,
+    select: {
+      id: true,
+      dataEntrega: true,
+      producerId: true,
+      valorTotal: true,
+      itens: {
+        select: {
+          pesoKg: true,
+          tipoCultivo: true,
+          product: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  let paaTotalKg = 0;
+  let paaTotalValor = 0;
+  const paaProdutores = new Set<string>();
+  const paaProdMap = new Map<string, number>();
+  const paaOrgMap = new Map<string, number>();
+
+  for (const e of entregasPaa) {
+    paaProdutores.add(e.producerId);
+    paaTotalValor += dec(e.valorTotal);
+    for (const i of e.itens) {
+      const kg = dec(i.pesoKg);
+      paaTotalKg += kg;
+      const nome = i.product?.name ?? 'Sem produto';
+      paaProdMap.set(nome, (paaProdMap.get(nome) ?? 0) + kg);
+      if (i.tipoCultivo === 'ORGANICO') {
+        paaOrgMap.set(nome, (paaOrgMap.get(nome) ?? 0) + kg);
+      }
+    }
+  }
+
+  const paa = {
+    totalKg: round3(paaTotalKg),
+    totalEntregas: entregasPaa.length,
+    produtoresAtivos: paaProdutores.size,
+    // 🔒 Máscara financeira antecipada da 23.8
+    totalValor: censurar ? null : round1(paaTotalValor),
+  };
+
+  const topProdutosPaa = topN(paaProdMap);
+  const topProdutosPaaOrganicos = topN(paaOrgMap);
+
   /* ========================== TENDÊNCIA ========================== */
   const [donations, distributions, harvests] = await Promise.all([
     prisma.donation.findMany({
@@ -147,11 +234,18 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
     doacoes: number;
     distribuicoes: number;
     colheita: number;
+    paa: number;
   };
   const map = new Map<string, Bucket>();
   const ensure = (key: string): Bucket => {
     if (!map.has(key))
-      map.set(key, { mes: key, doacoes: 0, distribuicoes: 0, colheita: 0 });
+      map.set(key, {
+        mes: key,
+        doacoes: 0,
+        distribuicoes: 0,
+        colheita: 0,
+        paa: 0,
+      });
     return map.get(key)!;
   };
 
@@ -161,6 +255,10 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
     ensure(monthKey(new Date(d.date))).distribuicoes += sumQty(d.items);
   for (const h of harvests)
     ensure(monthKey(new Date(h.date))).colheita += sumQty(h.items);
+  for (const e of entregasPaa) {
+    const bucket = ensure(monthKey(new Date(e.dataEntrega)));
+    for (const i of e.itens) bucket.paa += dec(i.pesoKg);
+  }
 
   const tendencia = Array.from(map.values())
     .map((d) => ({
@@ -168,6 +266,7 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
       doacoes: round1(d.doacoes),
       distribuicoes: round1(d.distribuicoes),
       colheita: round1(d.colheita),
+      paa: round1(d.paa),
     }))
     .sort((a, b) => a.mes.localeCompare(b.mes));
 
@@ -201,16 +300,13 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
       }),
     ]);
 
-  // Top produtos (não tem máscara — produto não é dado sensível)
+  // Top produtos (produto não é dado sensível — sem máscara)
   const prodMap = new Map<string, number>();
   for (const i of produtosItems) {
     const k = i.product?.name ?? 'Sem produto';
     prodMap.set(k, (prodMap.get(k) ?? 0) + (i.quantity ?? 0));
   }
-  const topProdutos = Array.from(prodMap.entries())
-    .map(([nome, total]) => ({ nome, total: round1(total) }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10);
+  const topProdutos = topN(prodMap);
 
   // Top doadores (mascarável)
   const doadorMap = new Map<string, number>();
@@ -218,10 +314,7 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
     const k = d.donor?.name ?? 'Sem doador';
     doadorMap.set(k, (doadorMap.get(k) ?? 0) + sumQty(d.items));
   }
-  const topDoadores = Array.from(doadorMap.entries())
-    .map(([nome, total]) => ({ nome: applyMask(nome), total: round1(total) }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10);
+  const topDoadores = topN(doadorMap, 10, applyMask);
 
   // Top beneficiários (mascarável)
   const benefMap = new Map<string, number>();
@@ -229,10 +322,7 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
     const k = d.beneficiary?.name ?? 'Sem beneficiário';
     benefMap.set(k, (benefMap.get(k) ?? 0) + sumQty(d.items));
   }
-  const topBeneficiarios = Array.from(benefMap.entries())
-    .map(([nome, total]) => ({ nome: applyMask(nome), total: round1(total) }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10);
+  const topBeneficiarios = topN(benefMap, 10, applyMask);
 
   // Top produtores (mascarável)
   const prodtMap = new Map<string, number>();
@@ -240,19 +330,19 @@ if (to) dateFilter.lte = parseYMDtoBrasiliaEnd(to);
     const k = h.producer?.name ?? 'Sem produtor';
     prodtMap.set(k, (prodtMap.get(k) ?? 0) + sumQty(h.items));
   }
-  const topProdutores = Array.from(prodtMap.entries())
-    .map(([nome, total]) => ({ nome: applyMask(nome), total: round1(total) }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10);
+  const topProdutores = topN(prodtMap, 10, applyMask);
 
   return {
     periodo: { from, to },
     censurado: censurar,
     macro,
+    paa,
     tendencia,
     topProdutos,
     topDoadores,
     topBeneficiarios,
     topProdutores,
+    topProdutosPaa,
+    topProdutosPaaOrganicos,
   };
 }
