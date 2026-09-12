@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
-import { canToggleVisibility } from '@/lib/permissions'
+import { canSeeHidden } from '@/lib/permissions'
+import { filtroLista, lerModoOcultos } from '@/lib/visibilidade'
 import { maskFuncionarioList } from '@/lib/mask-by-role'
 
 const COUNT_SELECT = {
@@ -23,28 +24,16 @@ type ContagemFuncionario = Record<keyof typeof COUNT_SELECT, number>
  * 🐛 ONDA 22 (22-g) — o `_count` do Prisma devolve 9 chaves separadas
  * (employee1/2/3 de doação, distribuição e colheita). Nenhuma delas
  * representa "quantas vezes este funcionário foi usado".
- *
- * Consolidação no servidor:
- *   - totalUsos          → soma das 9 contagens (bloqueia exclusão)
- *   - usos.doacoes       → soma dos 3 slots de doação
- *   - usos.distribuicoes → soma dos 3 slots de distribuição
- *   - usos.colheitas     → soma dos 3 slots de colheita
  */
 function derivarUsos(count: ContagemFuncionario) {
   const doacoes =
-    count.donationsAsEmployee1 +
-    count.donationsAsEmployee2 +
-    count.donationsAsEmployee3
-
+    count.donationsAsEmployee1 + count.donationsAsEmployee2 + count.donationsAsEmployee3
   const distribuicoes =
     count.distributionsAsEmployee1 +
     count.distributionsAsEmployee2 +
     count.distributionsAsEmployee3
-
   const colheitas =
-    count.harvestsAsEmployee1 +
-    count.harvestsAsEmployee2 +
-    count.harvestsAsEmployee3
+    count.harvestsAsEmployee1 + count.harvestsAsEmployee2 + count.harvestsAsEmployee3
 
   return {
     usos: { doacoes, distribuicoes, colheitas },
@@ -58,33 +47,23 @@ export async function GET(request: Request) {
   if (authResult instanceof NextResponse) return authResult
 
   const role = authResult.user.role
-  const podeVerOcultos = canToggleVisibility(role)
+  const podeVerOcultos = canSeeHidden(role)
 
   try {
     const { searchParams } = new URL(request.url)
     const apenasAtivos = searchParams.get('apenasAtivos') === '1'
     const incluir = searchParams.get('incluir')
-    const ocultos = searchParams.get('ocultos') // 'todos' | 'apenas' | null
+    const modo = lerModoOcultos(searchParams)
 
-    // 👁️ ONDA 23.7e-3 — visibilidade
-    // Dropdown (apenasAtivos) NUNCA vê oculto, nem o dev: selecionar um
-    // registro oculto criaria vínculo ilegível para os outros usuários.
-    const filtroVisibilidade: Prisma.EmployeeWhereInput = (() => {
-      if (apenasAtivos || !podeVerOcultos) return { hiddenAt: null }
-      if (ocultos === 'apenas') return { hiddenAt: { not: null } }
-      if (ocultos === 'todos') return {}
-      return { hiddenAt: null }
-    })()
-
-    const filtroAtivo: Prisma.EmployeeWhereInput = apenasAtivos
-      ? { active: true }
-      : {}
+    // 👁️ ONDA 23.7e-3 — filtro centralizado em lib/visibilidade
+    const visibilidade = filtroLista(role, modo, apenasAtivos) as Prisma.EmployeeWhereInput
+    const filtroAtivo: Prisma.EmployeeWhereInput = apenasAtivos ? { active: true } : {}
 
     // `incluir` fura os filtros por id — permite editar registro antigo
     // vinculado a funcionário inativo/oculto sem perder a referência.
     const where: Prisma.EmployeeWhereInput = incluir
-      ? { OR: [{ AND: [filtroVisibilidade, filtroAtivo] }, { id: incluir }] }
-      : { AND: [filtroVisibilidade, filtroAtivo] }
+      ? { OR: [{ AND: [visibilidade, filtroAtivo] }, { id: incluir }] }
+      : { AND: [visibilidade, filtroAtivo] }
 
     const [employees, contadores] = await Promise.all([
       prisma.employee.findMany({
@@ -106,11 +85,9 @@ export async function GET(request: Request) {
       ...derivarUsos(e._count as ContagemFuncionario),
     }))
 
-    const masked = maskFuncionarioList(comUsos, role)
-
-    // Payload continua sendo array puro (compatibilidade).
+    // Payload continua array puro (compatibilidade).
     // Contadores viajam em header para não quebrar consumidores.
-    const res = NextResponse.json(masked)
+    const res = NextResponse.json(maskFuncionarioList(comUsos, role))
     if (contadores) {
       res.headers.set('X-Visiveis', String(contadores[0]))
       res.headers.set('X-Ocultos', String(contadores[1]))

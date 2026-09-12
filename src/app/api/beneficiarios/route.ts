@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
-import { canToggleVisibility } from '@/lib/permissions'
+import { canSeeHidden } from '@/lib/permissions'
+import { filtroLista, lerModoOcultos } from '@/lib/visibilidade'
 import { maskBeneficiarioList } from '@/lib/mask-by-role'
 
 export async function GET(request: Request) {
@@ -11,30 +12,22 @@ export async function GET(request: Request) {
   if (authResult instanceof NextResponse) return authResult
 
   const role = authResult.user.role
-  const podeVerOcultos = canToggleVisibility(role)
+  const podeVerOcultos = canSeeHidden(role)
 
   try {
     const { searchParams } = new URL(request.url)
     // ⚠️ Beneficiary usa `status: 'ativo'`, não `active: boolean`.
     const apenasAtivos = searchParams.get('apenasAtivos') === '1'
     const incluir = searchParams.get('incluir')
-    const ocultos = searchParams.get('ocultos')
+    const modo = lerModoOcultos(searchParams)
 
     // 👁️ ONDA 23.7e-3 — visibilidade
-    const filtroVisibilidade: Prisma.BeneficiaryWhereInput = (() => {
-      if (apenasAtivos || !podeVerOcultos) return { hiddenAt: null }
-      if (ocultos === 'apenas') return { hiddenAt: { not: null } }
-      if (ocultos === 'todos') return {}
-      return { hiddenAt: null }
-    })()
-
-    const filtroAtivo: Prisma.BeneficiaryWhereInput = apenasAtivos
-      ? { status: 'ativo' }
-      : {}
+    const visibilidade = filtroLista(role, modo, apenasAtivos) as Prisma.BeneficiaryWhereInput
+    const filtroAtivo: Prisma.BeneficiaryWhereInput = apenasAtivos ? { status: 'ativo' } : {}
 
     const where: Prisma.BeneficiaryWhereInput = incluir
-      ? { OR: [{ AND: [filtroVisibilidade, filtroAtivo] }, { id: incluir }] }
-      : { AND: [filtroVisibilidade, filtroAtivo] }
+      ? { OR: [{ AND: [visibilidade, filtroAtivo] }, { id: incluir }] }
+      : { AND: [visibilidade, filtroAtivo] }
 
     const [beneficiaries, contadores] = await Promise.all([
       prisma.beneficiary.findMany({
@@ -50,9 +43,7 @@ export async function GET(request: Request) {
         : Promise.resolve(null),
     ])
 
-    const masked = maskBeneficiarioList(beneficiaries, role)
-
-    const res = NextResponse.json(masked)
+    const res = NextResponse.json(maskBeneficiarioList(beneficiaries, role))
     if (contadores) {
       res.headers.set('X-Visiveis', String(contadores[0]))
       res.headers.set('X-Ocultos', String(contadores[1]))

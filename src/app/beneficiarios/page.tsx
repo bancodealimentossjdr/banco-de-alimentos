@@ -1,9 +1,12 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import toast from 'react-hot-toast'
 import PhoneLink from '@/components/PhoneLink'
+import ModalOcultar from '@/components/ModalOcultar'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
+import { useVisibilidade } from '@/hooks/useVisibilidade'
 
 interface Beneficiary {
   id: string
@@ -14,6 +17,8 @@ interface Beneficiary {
   contact: string | null
   status: string
   notes: string | null
+  hiddenAt?: string | null
+  hiddenNota?: string | null
   _count: { distributions: number }
 }
 
@@ -31,6 +36,8 @@ const INSTITUTION_TYPES = [
   { value: 'outros', label: 'Outros' },
 ]
 
+const estaOculto = (b: Beneficiary) => Boolean(b.hiddenAt)
+
 export default function BeneficiariosPage() {
   const { canEdit } = usePermissions()
   const podeEditar = canEdit('beneficiarios')
@@ -42,13 +49,16 @@ export default function BeneficiariosPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [mostrarInativos, setMostrarInativos] = useState(true)
   const [form, setForm] = useState({
     name: '', type: 'cras', address: '', phone: '', contact: '', status: 'ativo', notes: '',
   })
 
-  const fetchBeneficiaries = async () => {
+  const [verOcultosQs, setVerOcultosQs] = useState('')
+
+  const fetchBeneficiaries = useCallback(async () => {
     try {
-      const res = await fetch('/api/beneficiarios')
+      const res = await fetch(`/api/beneficiarios${verOcultosQs ? `?${verOcultosQs}` : ''}`)
       const data = await res.json()
       setBeneficiaries(Array.isArray(data) ? data : [])
     } catch (error) {
@@ -57,9 +67,12 @@ export default function BeneficiariosPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [verOcultosQs])
 
-  useEffect(() => { fetchBeneficiaries() }, [])
+  const vis = useVisibilidade<Beneficiary>('beneficiarios', fetchBeneficiaries)
+
+  useEffect(() => { setVerOcultosQs(vis.qsOcultos) }, [vis.qsOcultos])
+  useEffect(() => { setLoading(true); fetchBeneficiaries() }, [fetchBeneficiaries])
 
   const resetForm = () => {
     setForm({ name: '', type: 'cras', address: '', phone: '', contact: '', status: 'ativo', notes: '' })
@@ -99,11 +112,12 @@ export default function BeneficiariosPage() {
           resetForm()
           fetchBeneficiaries()
         } else {
-          const data = await res.json()
-          alert(data.error || 'Erro ao salvar')
+          const data = await res.json().catch(() => ({}))
+          toast.error(data.error || 'Erro ao salvar')
         }
       } catch (error) {
         console.error('Erro ao salvar instituição:', error)
+        toast.error('Falha de conexão')
       }
     })
   }
@@ -113,14 +127,15 @@ export default function BeneficiariosPage() {
     try {
       const res = await fetch(`/api/beneficiarios/${id}`, { method: 'DELETE' })
       if (res.ok) {
+        toast.success('Instituição excluída')
         fetchBeneficiaries()
       } else {
-        const data = await res.json()
-        alert(data.error || 'Erro ao excluir')
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || 'Erro ao excluir')
       }
     } catch (error) {
       console.error('Erro ao excluir:', error)
-      alert('Erro ao excluir instituição')
+      toast.error('Erro ao excluir instituição')
     }
   }
 
@@ -135,6 +150,12 @@ export default function BeneficiariosPage() {
       default: return 'bg-gray-100 text-gray-700'
     }
   }
+
+  const totalInativos = beneficiaries.filter(b => b.status !== 'ativo').length
+  const totalOcultos = beneficiaries.filter(estaOculto).length
+  const listaVisivel = mostrarInativos
+    ? beneficiaries
+    : beneficiaries.filter(b => b.status === 'ativo')
 
   return (
     <div>
@@ -237,9 +258,7 @@ export default function BeneficiariosPage() {
               disabled={isSubmitting}
               className="bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
             >
-              {isSubmitting
-                ? 'Salvando...'
-                : editingId ? 'Atualizar Instituição' : 'Salvar Instituição'}
+              {isSubmitting ? 'Salvando...' : editingId ? 'Atualizar Instituição' : 'Salvar Instituição'}
             </button>
             {editingId && (
               <button
@@ -255,12 +274,49 @@ export default function BeneficiariosPage() {
         </form>
       )}
 
+      {/* Barra de controle: não-ativos + ocultos */}
+      {!loading && (totalInativos > 0 || vis.podeOcultar) && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-xl shadow-sm border px-4 py-3 mb-4">
+          <span className="text-sm text-gray-600">
+            {listaVisivel.length} exibida{listaVisivel.length !== 1 ? 's' : ''}
+            {totalInativos > 0 && ` · ${totalInativos} não ativa${totalInativos !== 1 ? 's' : ''}`}
+            {vis.podeOcultar && vis.verOcultos && totalOcultos > 0 &&
+              ` · ${totalOcultos} oculta${totalOcultos !== 1 ? 's' : ''}`}
+          </span>
+
+          <div className="flex flex-wrap gap-2">
+            {totalInativos > 0 && (
+              <button
+                type="button"
+                onClick={() => setMostrarInativos(v => !v)}
+                className="text-sm font-medium text-purple-600 hover:text-purple-700 px-3 py-1.5 rounded-lg hover:bg-purple-50 transition"
+              >
+                {mostrarInativos ? 'Só ativas' : 'Mostrar todas'}
+              </button>
+            )}
+            {vis.podeOcultar && (
+              <button
+                type="button"
+                onClick={() => { setLoading(true); vis.setVerOcultos(v => !v) }}
+                className={`text-sm font-medium px-3 py-1.5 rounded-lg transition border ${
+                  vis.verOcultos
+                    ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {vis.verOcultos ? '🚫 Vendo ocultas' : '👁️ Ver ocultas'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Listagem */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
         </div>
-      ) : beneficiaries.length === 0 ? (
+      ) : listaVisivel.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">👥</p>
           <p className="text-xl">Nenhuma instituição cadastrada</p>
@@ -270,7 +326,7 @@ export default function BeneficiariosPage() {
         </div>
       ) : (
         <>
-          {/* ====== TABELA - só aparece em telas md+ ====== */}
+          {/* ====== TABELA - md+ ====== */}
           <div className="hidden md:block bg-white rounded-xl shadow-sm border">
             <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -282,126 +338,204 @@ export default function BeneficiariosPage() {
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Telefone</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Entregas</th>
                     <th className="px-6 py-3 text-sm font-semibold text-gray-600">Status</th>
-                    {podeEditar && (
+                    {(podeEditar || vis.podeOcultar) && (
                       <th className="px-6 py-3 text-sm font-semibold text-gray-600">Ações</th>
                     )}
                   </tr>
                 </thead>
                 <tbody>
-                  {beneficiaries.map(b => (
-                    <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="px-6 py-4 font-medium text-gray-900">{b.name}</td>
-                      <td className="px-6 py-4">
-                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                          {getTypeLabel(b.type)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">{b.contact || '-'}</td>
-                      <td className="px-6 py-4 text-gray-600">
-                        <PhoneLink phone={b.phone} />
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">{b._count.distributions}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
-                          {b.status}
-                        </span>
-                      </td>
-                      {podeEditar && (
-                        <td className="px-6 py-4">
-                          <div className="flex gap-3">
-                            <button
-                              onClick={() => startEdit(b)}
-                              className="text-blue-500 hover:text-blue-700 text-sm font-medium"
-                            >
-                              Editar
-                            </button>
-                            <button
-                              onClick={() => handleDelete(b.id, b.name)}
-                              className="text-red-500 hover:text-red-700 text-sm font-medium"
-                            >
-                              Excluir
-                            </button>
+                  {listaVisivel.map(b => {
+                    const oculto = estaOculto(b)
+                    return (
+                      <tr
+                        key={b.id}
+                        className={`border-b last:border-0 hover:bg-gray-50 ${
+                          b.status !== 'ativo' ? 'opacity-60' : ''
+                        } ${oculto ? 'bg-purple-50/40' : ''}`}
+                      >
+                        <td className="px-6 py-4 font-medium text-gray-900">
+                          <div className="flex items-center gap-2">
+                            <span>{b.name}</span>
+                            {oculto && (
+                              <span
+                                title={b.hiddenNota || undefined}
+                                className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-dashed border-purple-300"
+                              >
+                                🚫 Oculta
+                              </span>
+                            )}
                           </div>
+                          {oculto && b.hiddenNota && (
+                            <p className="text-xs text-purple-600 mt-1 italic">{b.hiddenNota}</p>
+                          )}
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        <td className="px-6 py-4">
+                          <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                            {getTypeLabel(b.type)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-600">{b.contact || '-'}</td>
+                        <td className="px-6 py-4 text-gray-600">
+                          <PhoneLink phone={b.phone} />
+                        </td>
+                        <td className="px-6 py-4 text-gray-600">{b._count.distributions}</td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
+                            {b.status}
+                          </span>
+                        </td>
+                        {(podeEditar || vis.podeOcultar) && (
+                          <td className="px-6 py-4">
+                            <div className="flex gap-3 items-center">
+                              {podeEditar && (
+                                <>
+                                  <button
+                                    onClick={() => startEdit(b)}
+                                    className="text-blue-500 hover:text-blue-700 text-sm font-medium"
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(b.id, b.name)}
+                                    className="text-red-500 hover:text-red-700 text-sm font-medium"
+                                  >
+                                    Excluir
+                                  </button>
+                                </>
+                              )}
+                              {vis.podeOcultar && (
+                                <button
+                                  onClick={() => vis.acionar(b)}
+                                  disabled={vis.alterandoId === b.id}
+                                  title={oculto ? 'Tornar visível' : 'Ocultar dos outros usuários'}
+                                  className="text-purple-600 hover:text-purple-800 text-base disabled:opacity-40"
+                                >
+                                  {oculto ? '🚫' : '👁️'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* ====== CARDS - só aparece no mobile (< md) ====== */}
+          {/* ====== CARDS - mobile ====== */}
           <div className="md:hidden space-y-3">
-            {beneficiaries.map(b => (
-              <div key={b.id} className="bg-white rounded-xl shadow-sm border p-4 overflow-hidden">
-                {/* Topo: nome + status */}
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-bold text-gray-900 break-words">{b.name}</h3>
-                    <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                      {getTypeLabel(b.type)}
+            {listaVisivel.map(b => {
+              const oculto = estaOculto(b)
+              return (
+                <div
+                  key={b.id}
+                  className={`bg-white rounded-xl shadow-sm p-4 overflow-hidden ${
+                    b.status !== 'ativo' ? 'opacity-60' : ''
+                  } ${oculto ? 'border-2 border-dashed border-purple-300 bg-purple-50/30' : 'border'}`}
+                >
+                  {/* Topo: nome + status */}
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-bold text-gray-900 break-words">{b.name}</h3>
+                      <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                        {getTypeLabel(b.type)}
+                      </span>
+                      {oculto && (
+                        <p className="text-xs text-purple-700 mt-1 font-medium break-words">
+                          🚫 Oculta{b.hiddenNota ? ` · ${b.hiddenNota}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <span className={`shrink-0 px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
+                      {b.status}
                     </span>
                   </div>
-                  <span className={`shrink-0 px-2 py-1 rounded-full text-xs font-medium capitalize ${getStatusStyle(b.status)}`}>
-                    {b.status}
-                  </span>
-                </div>
 
-                {/* Informações */}
-                <div className="space-y-1.5 text-sm text-gray-600 mb-3">
-                  {b.contact && (
-                    <div className="flex items-start gap-2 min-w-0">
-                      <span className="text-gray-400 w-5 text-center shrink-0">👤</span>
-                      <span className="min-w-0 break-words">{b.contact}</span>
-                    </div>
-                  )}
-                  {b.phone && (
-                    <div className="flex items-start gap-2 min-w-0">
-                      <span className="text-gray-400 w-5 text-center shrink-0">📞</span>
-                      <div className="min-w-0 break-words">
-                        <PhoneLink phone={b.phone} />
+                  {/* Informações */}
+                  <div className="space-y-1.5 text-sm text-gray-600 mb-3">
+                    {b.contact && (
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="text-gray-400 w-5 text-center shrink-0">👤</span>
+                        <span className="min-w-0 break-words">{b.contact}</span>
                       </div>
-                    </div>
-                  )}
-                  {b.address && (
+                    )}
+                    {b.phone && (
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="text-gray-400 w-5 text-center shrink-0">📞</span>
+                        <div className="min-w-0 break-words">
+                          <PhoneLink phone={b.phone} />
+                        </div>
+                      </div>
+                    )}
+                    {b.address && (
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="text-gray-400 w-5 text-center shrink-0">📍</span>
+                        <span className="min-w-0 break-words">{b.address}</span>
+                      </div>
+                    )}
                     <div className="flex items-start gap-2 min-w-0">
-                      <span className="text-gray-400 w-5 text-center shrink-0">📍</span>
-                      <span className="min-w-0 break-words">{b.address}</span>
+                      <span className="text-gray-400 w-5 text-center shrink-0">📦</span>
+                      <span className="min-w-0">
+                        {b._count.distributions} {b._count.distributions === 1 ? 'entrega' : 'entregas'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Observações */}
+                  {b.notes && (
+                    <p className="text-xs text-gray-400 italic mb-3 break-words">📝 {b.notes}</p>
+                  )}
+
+                  {/* Ações */}
+                  {(podeEditar || vis.podeOcultar) && (
+                    <div className="flex gap-2 pt-2 border-t border-gray-100">
+                      {podeEditar && (
+                        <>
+                          <button
+                            onClick={() => startEdit(b)}
+                            className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            onClick={() => handleDelete(b.id, b.name)}
+                            className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
+                          >
+                            🗑️ Excluir
+                          </button>
+                        </>
+                      )}
+                      {vis.podeOcultar && (
+                        <button
+                          onClick={() => vis.acionar(b)}
+                          disabled={vis.alterandoId === b.id}
+                          className="shrink-0 px-3 text-purple-600 hover:bg-purple-50 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40"
+                        >
+                          {oculto ? '🚫' : '👁️'}
+                        </button>
+                      )}
                     </div>
                   )}
-                  <div className="flex items-start gap-2 min-w-0">
-                    <span className="text-gray-400 w-5 text-center shrink-0">📦</span>
-                    <span className="min-w-0">{b._count.distributions} {b._count.distributions === 1 ? 'entrega' : 'entregas'}</span>
-                  </div>
                 </div>
-
-                {/* Observações */}
-                {b.notes && (
-                  <p className="text-xs text-gray-400 italic mb-3 break-words">📝 {b.notes}</p>
-                )}
-
-                {/* Ações — só aparecem pra quem pode editar */}
-                {podeEditar && (
-                  <div className="flex gap-2 pt-2 border-t border-gray-100">
-                    <button
-                      onClick={() => startEdit(b)}
-                      className="flex-1 text-center text-blue-600 hover:bg-blue-50 py-2 rounded-lg text-sm font-medium transition"
-                    >
-                      ✏️ Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(b.id, b.name)}
-                      className="flex-1 text-center text-red-600 hover:bg-red-50 py-2 rounded-lg text-sm font-medium transition"
-                    >
-                      🗑️ Excluir
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         </>
+      )}
+
+      {/* Modal de ocultação */}
+      {vis.alvo && (
+        <ModalOcultar
+          nome={vis.alvo.name}
+          label="instituição"
+          nota={vis.nota}
+          onNotaChange={vis.setNota}
+          onConfirmar={vis.confirmar}
+          onCancelar={() => { vis.setAlvo(null); vis.setNota('') }}
+          enviando={vis.alterandoId === vis.alvo.id}
+        />
       )}
     </div>
   )

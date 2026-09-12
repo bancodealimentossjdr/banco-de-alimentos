@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
-import { canToggleVisibility } from '@/lib/permissions'
+import { canSeeHidden } from '@/lib/permissions'
+import { filtroLista, lerModoOcultos } from '@/lib/visibilidade'
 import { maskDoadorList } from '@/lib/mask-by-role'
 
 export async function GET(request: Request) {
@@ -11,29 +12,21 @@ export async function GET(request: Request) {
   if (authResult instanceof NextResponse) return authResult
 
   const role = authResult.user.role
-  const podeVerOcultos = canToggleVisibility(role)
+  const podeVerOcultos = canSeeHidden(role)
 
   try {
     const { searchParams } = new URL(request.url)
     const apenasAtivos = searchParams.get('apenasAtivos') === '1'
     const incluir = searchParams.get('incluir')
-    const ocultos = searchParams.get('ocultos')
+    const modo = lerModoOcultos(searchParams)
 
     // 👁️ ONDA 23.7e-3 — visibilidade
-    const filtroVisibilidade: Prisma.DonorWhereInput = (() => {
-      if (apenasAtivos || !podeVerOcultos) return { hiddenAt: null }
-      if (ocultos === 'apenas') return { hiddenAt: { not: null } }
-      if (ocultos === 'todos') return {}
-      return { hiddenAt: null }
-    })()
-
-    const filtroAtivo: Prisma.DonorWhereInput = apenasAtivos
-      ? { active: true }
-      : {}
+    const visibilidade = filtroLista(role, modo, apenasAtivos) as Prisma.DonorWhereInput
+    const filtroAtivo: Prisma.DonorWhereInput = apenasAtivos ? { active: true } : {}
 
     const where: Prisma.DonorWhereInput = incluir
-      ? { OR: [{ AND: [filtroVisibilidade, filtroAtivo] }, { id: incluir }] }
-      : { AND: [filtroVisibilidade, filtroAtivo] }
+      ? { OR: [{ AND: [visibilidade, filtroAtivo] }, { id: incluir }] }
+      : { AND: [visibilidade, filtroAtivo] }
 
     const [donors, contadores] = await Promise.all([
       prisma.donor.findMany({
@@ -49,9 +42,7 @@ export async function GET(request: Request) {
         : Promise.resolve(null),
     ])
 
-    const masked = maskDoadorList(donors, role)
-
-    const res = NextResponse.json(masked)
+    const res = NextResponse.json(maskDoadorList(donors, role))
     if (contadores) {
       res.headers.set('X-Visiveis', String(contadores[0]))
       res.headers.set('X-Ocultos', String(contadores[1]))
@@ -72,17 +63,14 @@ export async function POST(request: Request) {
 
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (name.length === 0) {
-      return NextResponse.json(
-        { error: 'O nome do doador é obrigatório' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'O nome do doador é obrigatório' }, { status: 400 })
     }
 
     const donor = await prisma.donor.create({
       data: {
         name,
-        type: body.type,
-        category: body.category,
+        type: body.type || 'PJ',
+        category: body.category || 'outros',
         contact: body.contact || null,
         phone: body.phone || null,
         email: body.email || null,

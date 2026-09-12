@@ -99,3 +99,51 @@ export async function toggleVisibilidade({
     select: { id: true, name: true, hiddenAt: true, hiddenNota: true },
   })
 }
+/**
+ * 🛡️ ONDA 23.7e-3 — guard de registro único.
+ *
+ * Complementa `filtroVisibilidade`: aquele protege LISTAS, este protege
+ * `/api/<cadastro>/[id]`. Sem ele o filtro de lista é contornável pela
+ * barra de endereço — basta o id.
+ *
+ * Regra: registro oculto se comporta como INEXISTENTE para não-dev.
+ * Devolve 404, nunca 403 — 403 confirmaria que o registro existe.
+ */
+export function podeVerRegistro(
+  role: UserRole | undefined,
+  registro: { hiddenAt: Date | null },
+): boolean {
+  if (!registro.hiddenAt) return true
+  return !!role && canSeeHidden(role)
+}
+/** Modo de visibilidade pedido pelo cliente. */
+export type ModoOcultos = 'visiveis' | 'todos' | 'apenas'
+
+/**
+ * Lê `?ocultos=` aceitando `todos` | `apenas` | `true` (alias de `todos`).
+ * Qualquer outro valor → 'visiveis' (fail-secure).
+ */
+export function lerModoOcultos(searchParams: URLSearchParams): ModoOcultos {
+  const v = searchParams.get('ocultos')
+  if (v === 'apenas') return 'apenas'
+  if (v === 'todos' || v === 'true') return 'todos'
+  return 'visiveis'
+}
+
+/**
+ * 🛡️ Filtro de visibilidade para listagens.
+ *
+ * @param apenasAtivos dropdown — NUNCA vê oculto, nem o dev. Selecionar um
+ *                     registro oculto criaria vínculo ilegível para os outros.
+ */
+export function filtroLista(
+  role: UserRole | undefined,
+  modo: ModoOcultos,
+  apenasAtivos = false,
+): { hiddenAt?: null | { not: null } } {
+  if (apenasAtivos) return { hiddenAt: null }
+  if (!role || !canSeeHidden(role)) return { hiddenAt: null }
+  if (modo === 'apenas') return { hiddenAt: { not: null } }
+  if (modo === 'todos') return {}
+  return { hiddenAt: null }
+}
