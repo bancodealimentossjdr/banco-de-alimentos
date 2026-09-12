@@ -139,6 +139,16 @@ model Donor {
   updatedAt DateTime @updatedAt
 
   donations Donation[]
+
+    // ONDA 23.7e-3 — visibilidade
+/// Oculto da listagem geral. NULL = visível. Só dev alterna.
+hiddenAt   DateTime?
+hiddenById String?
+hiddenNota String?
+
+@@index([hiddenAt])
+
+
 }
 
 // ==========================================
@@ -157,6 +167,16 @@ model Beneficiary {
   updatedAt DateTime @updatedAt
 
   distributions Distribution[]
+
+  // ONDA 23.7e-3 — visibilidade
+/// Oculto da listagem geral. NULL = visível. Só dev alterna.
+hiddenAt   DateTime?
+hiddenById String?
+hiddenNota String?
+
+@@index([hiddenAt])
+
+
 }
 
 // ==========================================
@@ -186,6 +206,16 @@ model Employee {
   // ONDA 23 — PAA
   entregasPaaAsEmployee1 EntregaPaa[] @relation("EntregaPaaEmployee1")
   entregasPaaAsEmployee2 EntregaPaa[] @relation("EntregaPaaEmployee2")
+
+    // ONDA 23.7e-3 — visibilidade
+/// Oculto da listagem geral. NULL = visível. Só dev alterna.
+hiddenAt   DateTime?
+hiddenById String?
+hiddenNota String?
+
+@@index([hiddenAt])
+
+
 }
 
 // ==========================================
@@ -280,30 +310,29 @@ model DistributionItem {
 // PRODUTORES RURAIS
 // ==========================================
 model Producer {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String?
-  address   String?
-  property  String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // ONDA 23 — PAA
-  atendeColheita Boolean @default(true)
-  atendePaa      Boolean @default(false)
-
-  // ONDA 23.7b — cota PAA
-  /// Teto anual em R$ deste produtor. NULL = usa o padrão global (PaaConfig).
+  id               String   @id @default(cuid())
+  name             String
+  phone            String?
+  address          String?
+  property         String?
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  atendeColheita   Boolean  @default(true)
+  atendePaa        Boolean  @default(false)
   cotaOverride     Decimal? @db.Decimal(12, 2)
-  /// Justificativa do override (auditoria).
   cotaOverrideNota String?
+
+  // 🆕 ONDA 23.7e-3 — soft-hide (exclusivo dev)
+  hiddenAt   DateTime?
+  hiddenById String?
+  hiddenNota String?
 
   harvests    SolidarityHarvest[]
   entregasPaa EntregaPaa[]
   cotaResets  PaaCotaReset[]
 
-  @@index([atendePaa])
+  @@index([hiddenAt])
 }
 
 // ==========================================

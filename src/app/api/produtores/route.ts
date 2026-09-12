@@ -3,10 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { auth } from '@/lib/auth'
 import { maskProdutorList } from '@/lib/mask-by-role'
+import { filtroVisibilidade, pediuOcultos } from '@/lib/visibilidade'
 
 // GET - Listar produtores
-// ?paa=true   → só produtores que atendem PAA
-// ?active=true → só ativos
+// ?paa=true     → só produtores que atendem PAA
+// ?active=true  → só ativos
+// ?ocultos=true → inclui ocultos (IGNORADO se não for dev)
 export async function GET(request: NextRequest) {
   const authResult = await requireView('produtores')
   if (authResult instanceof NextResponse) return authResult
@@ -16,13 +18,19 @@ export async function GET(request: NextRequest) {
     const role = session?.user?.role
 
     const sp = request.nextUrl.searchParams
-    const where: any = {}
+
+    // 🆕 23.7e-3 — soft-hide decidido no SERVIDOR, nunca no cliente.
+    // Por padrão hiddenAt: null → cadastro normal SEMPRE aparece.
+    const where: Record<string, unknown> = {
+      ...filtroVisibilidade(role, pediuOcultos(sp)),
+    }
+
     if (sp.get('paa') === 'true') where.atendePaa = true
     if (sp.get('paa') === 'false') where.atendePaa = false
     if (sp.get('active') === 'true') where.active = true
 
     const produtores = await prisma.producer.findMany({
-      where: Object.keys(where).length ? where : undefined,
+      where,
       orderBy: { name: 'asc' },
       include: {
         _count: { select: { harvests: true, entregasPaa: true } },
@@ -33,7 +41,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro ao buscar produtores:', error)
-    return NextResponse.json({ error: 'Erro ao buscar produtores' }, { status: 500 })
+    // ⚠️ devolve envelope de erro, não array: o front não deve
+    // confundir falha de query com "nenhum produtor cadastrado"
+    return NextResponse.json(
+      { error: 'Erro ao buscar produtores' },
+      { status: 500 },
+    )
   }
 }
 

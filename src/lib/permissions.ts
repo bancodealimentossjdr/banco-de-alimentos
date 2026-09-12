@@ -37,6 +37,17 @@ export const TIME_LOCKED_MODULES: Module[] = [
 ]
 
 /**
+ * 🆕 ONDA 23.7e-3 — Cadastros que suportam soft-hide (hiddenAt).
+ * Usado para validar o parâmetro de rota e o toggle na UI.
+ */
+export const HIDEABLE_MODULES: Module[] = [
+  'produtores',
+  'funcionarios',
+  'doadores',
+  'beneficiarios',
+]
+
+/**
  * Lista completa de módulos (usada pelo role dev — vê tudo).
  */
 const ALL_MODULES: Module[] = [
@@ -148,6 +159,30 @@ export function canCalibrateStock(role: UserRole): boolean {
  * quando o versionamento por safra (débito técnico #4) for implementado.
  */
 export function canManageTabelaConab(role: UserRole): boolean {
+  return role === 'dev'
+}
+
+/**
+ * 🆕 ONDA 23.7e-3 — Ocultar/reexibir cadastros (soft-hide).
+ *
+ * 🔒 Poder EXCLUSIVO do dev. Difere de `active`: `active` é estado de
+ * negócio (admin controla, o registro continua na lista); `hiddenAt`
+ * remove da listagem sem apagar histórico — serve para poluição de
+ * cadastro e duplicatas. Admin não alcança, senão vira exclusão informal
+ * sem rastro. Mesma família de canCalibrateStock/canManageTabelaConab.
+ */
+export function canToggleVisibility(role: UserRole): boolean {
+  return role === 'dev'
+}
+
+/**
+ * 🆕 ONDA 23.7e-3 — Quem pode VER registros ocultos.
+ *
+ * Só o dev. Para os demais roles o registro simplesmente não existe na
+ * lista — o filtro é aplicado no SERVIDOR (where hiddenAt: null), nunca
+ * escondendo no cliente.
+ */
+export function canSeeHidden(role: UserRole): boolean {
   return role === 'dev'
 }
 

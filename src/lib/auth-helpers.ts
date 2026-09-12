@@ -8,6 +8,7 @@ import {
   canRegisterRecebimento,
   canCalibrateStock,
   canManageTabelaConab,
+  canToggleVisibility,
   type Module,
 } from './permissions'
 import type { UserRole } from '@/types/next-auth'
@@ -212,6 +213,7 @@ export async function requireCalibrateStock(): Promise<AuthSession | NextRespons
   }
   return result
 }
+
 /**
  * 🆕 ONDA 23 — Garante que o usuário pode gerir a tabela CONAB.
  * 🔒 Exclusivo do dev.
@@ -222,6 +224,22 @@ export async function requireManageTabelaConab(): Promise<AuthSession | NextResp
   if (!canManageTabelaConab(result.user.role)) {
     return NextResponse.json(
       { error: 'Apenas o perfil dev pode alterar a tabela de preços CONAB' },
+      { status: 403 },
+    )
+  }
+  return result
+}
+
+/**
+ * 🆕 ONDA 23.7e-3 — Garante que o usuário pode OCULTAR/REEXIBIR cadastros.
+ * 🔒 Exclusivo do dev. Usado por /api/{cadastro}/[id]/visibilidade.
+ */
+export async function requireToggleVisibility(): Promise<AuthSession | NextResponse> {
+  const result = await requireAuth()
+  if (result instanceof NextResponse) return result
+  if (!canToggleVisibility(result.user.role)) {
+    return NextResponse.json(
+      { error: 'Apenas o perfil dev pode ocultar ou reexibir cadastros' },
       { status: 403 },
     )
   }

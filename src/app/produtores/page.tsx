@@ -14,6 +14,9 @@ interface Producer {
   active: boolean
   atendePaa: boolean
   createdAt: string
+  // 🆕 23.7e-3 — só chega preenchido para o dev
+  hiddenAt?: string | null
+  hiddenNota?: string | null
   _count?: { harvests: number; entregasPaa: number }
 }
 
@@ -67,10 +70,10 @@ const CORES_TEXTO: Record<Cota['status'], string> = {
 
 export default function ProdutoresPage() {
   const { canEdit, role } = usePermissions()
-const podeEditar = canEdit('produtores')
+  const podeEditar = canEdit('produtores')
 
-const isDev = role === 'dev'
-const podeResetar = role === 'dev' || role === 'admin'
+  const isDev = role === 'dev'
+  const podeResetar = role === 'dev' || role === 'admin'
 
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
@@ -92,17 +95,36 @@ const podeResetar = role === 'dev' || role === 'admin'
   const [cotaNota, setCotaNota] = useState('')
   const [savingModal, setSavingModal] = useState(false)
 
+  // 👁️ 23.7e-3 — visibilidade (dev)
+  const [verOcultos, setVerOcultos] = useState(false)
+  const [modalOcultar, setModalOcultar] = useState<Producer | null>(null)
+  const [notaOcultar, setNotaOcultar] = useState('')
+
+  const [erroLista, setErroLista] = useState<string | null>(null)
+
   const fetchProducers = useCallback(async () => {
     try {
-      const res = await fetch('/api/produtores')
+      const qs = verOcultos ? '?ocultos=true' : ''
+      const res = await fetch(`/api/produtores${qs}`)
       const data = await res.json()
-      setProducers(Array.isArray(data) ? data : [])
+
+      if (!res.ok || !Array.isArray(data)) {
+        // ⚠️ falha de API NÃO é "lista vazia" — isso mascarou o bug do schema
+        setErroLista(data?.error || 'Falha ao carregar produtores')
+        setProducers([])
+        return
+      }
+
+      setErroLista(null)
+      setProducers(data)
     } catch (error) {
       console.error('Erro ao buscar produtores:', error)
+      setErroLista('Falha de conexão ao carregar produtores')
+      setProducers([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [verOcultos])
 
   // 💰 Cotas vêm da fonte única: /api/paa/cota
   const fetchCotas = useCallback(async () => {
@@ -210,7 +232,53 @@ const podeResetar = role === 'dev' || role === 'admin'
     }
   }
 
-  // ♻️ Reset de cota (admin/dev) — exige motivo
+  // 👁️ Ocultar / reexibir (dev)
+  const patchVisibilidade = async (
+    id: string,
+    ocultar: boolean,
+    nota: string | null,
+  ) => {
+    const res = await fetch(`/api/produtores/${id}/visibilidade`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ocultar, nota }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'Erro ao alterar visibilidade')
+    }
+  }
+
+  const confirmarOcultar = async () => {
+    if (!modalOcultar) return
+    if (notaOcultar.trim().length < 5) {
+      alert('Informe um motivo com pelo menos 5 caracteres.')
+      return
+    }
+    setSavingModal(true)
+    try {
+      await patchVisibilidade(modalOcultar.id, true, notaOcultar.trim())
+      setModalOcultar(null)
+      setNotaOcultar('')
+      recarregar()
+    } catch (e) {
+      alert((e as Error).message)
+    } finally {
+      setSavingModal(false)
+    }
+  }
+
+  const handleReexibir = async (producer: Producer) => {
+    if (!confirm(`Reexibir "${producer.name}" na listagem geral?`)) return
+    try {
+      await patchVisibilidade(producer.id, false, null)
+      recarregar()
+    } catch (e) {
+      alert((e as Error).message)
+    }
+  }
+
+  // ♻️ Reset de cota (admin/dev) — exige motivo, nada é apagado
   const confirmarReset = async () => {
     if (!modalReset) return
     if (motivoReset.trim().length < 5) {
@@ -222,7 +290,10 @@ const podeResetar = role === 'dev' || role === 'admin'
       const res = await fetch('/api/paa/cota/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ producerId: modalReset.id, motivo: motivoReset.trim() }),
+        body: JSON.stringify({
+          producerId: modalReset.id,
+          motivo: motivoReset.trim(),
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Erro ao resetar cota')
@@ -236,7 +307,7 @@ const podeResetar = role === 'dev' || role === 'admin'
     }
   }
 
-  // 🔒 Definir cota individual (dev)
+  // 🔒 Cota individual (dev) — pré-preenche só se já houver override
   const abrirModalCota = (producer: Producer) => {
     const c = cotas[producer.id]
     setCotaValor(c?.origemTeto === 'override' ? String(c.teto) : '')
@@ -249,8 +320,16 @@ const podeResetar = role === 'dev' || role === 'admin'
     setSavingModal(true)
     try {
       const body = limpar
-        ? { cotaOverride: null }
-        : { cotaOverride: Number(cotaValor.replace(',', '.')), cotaOverrideNota: cotaNota }
+        ? { cotaOverride: null, cotaOverrideNota: null }
+        : {
+            cotaOverride: Number(cotaValor.replace(/\./g, '').replace(',', '.')),
+            cotaOverrideNota: cotaNota.trim(),
+          }
+
+      if (!limpar && !Number.isFinite(body.cotaOverride as number)) {
+        throw new Error('Valor de cota inválido.')
+      }
+
       await patchProducer(modalCota.id, body, 'Erro ao definir cota')
       setModalCota(null)
       recarregar()
@@ -262,6 +341,7 @@ const podeResetar = role === 'dev' || role === 'admin'
   }
 
   const totalPaa = producers.filter(p => p.atendePaa).length
+  const totalOcultos = producers.filter(p => p.hiddenAt).length
 
   const filtered = producers.filter(p => {
     if (filter === 'paa' && !p.atendePaa) return false
@@ -284,16 +364,35 @@ const podeResetar = role === 'dev' || role === 'admin'
           <p className="text-gray-500 text-sm mt-0.5">
             {producers.length} produtor(es) cadastrado(s) · {totalPaa} no PAA
             {cotaPadrao !== null && ` · cota padrão ${brl(cotaPadrao)}`}
+            {isDev && verOcultos && totalOcultos > 0 && (
+              <span className="text-gray-400"> · {totalOcultos} oculto(s)</span>
+            )}
           </p>
         </div>
-        {podeEditar && (
-          <button
-            onClick={() => { if (showForm) resetForm(); else { resetForm(); setShowForm(true) } }}
-            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
-          >
-            {showForm ? 'Cancelar' : '+ Novo Produtor'}
-          </button>
-        )}
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {/* 👁️ 23.7e-3 — exclusivo do dev */}
+          {isDev && (
+            <button
+              onClick={() => { setLoading(true); setVerOcultos(v => !v) }}
+              className={`px-4 py-2.5 rounded-lg font-medium text-sm border transition w-full sm:w-auto ${
+                verOcultos
+                  ? 'bg-purple-600 border-purple-600 text-white hover:bg-purple-700'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Mostrar também cadastros ocultos (só dev)"
+            >
+              {verOcultos ? '🙈 Ocultando ocultos' : '👁️ Ver ocultos'}
+            </button>
+          )}
+          {podeEditar && (
+            <button
+              onClick={() => { if (showForm) resetForm(); else { resetForm(); setShowForm(true) } }}
+              className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto text-center"
+            >
+              {showForm ? 'Cancelar' : '+ Novo Produtor'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Formulário */}
@@ -385,6 +484,13 @@ const podeResetar = role === 'dev' || role === 'admin'
         </div>
       )}
 
+      {/* ⚠️ Erro de carregamento — nunca mascarar como lista vazia */}
+      {erroLista && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm mb-4">
+          ⚠️ {erroLista}
+        </div>
+      )}
+
       {/* Busca + filtro */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <input
@@ -445,13 +551,14 @@ const podeResetar = role === 'dev' || role === 'admin'
             const cota = cotas[producer.id]
             const barra = cota ? Math.min(cota.percentual, 100) : 0
             const excedente = cota ? Math.max(cota.usado - cota.teto, 0) : 0
+            const oculto = Boolean(producer.hiddenAt)
 
             return (
               <div
                 key={producer.id}
                 className={`bg-white rounded-xl shadow-sm border p-4 flex flex-col ${
                   !producer.active ? 'opacity-60' : ''
-                }`}
+                } ${oculto ? 'border-dashed border-purple-300 bg-purple-50/40' : ''}`}
               >
                 {/* Topo */}
                 <div className="flex items-start justify-between gap-2">
@@ -476,8 +583,19 @@ const podeResetar = role === 'dev' || role === 'admin'
                         🌾 PAA
                       </span>
                     )}
+                    {oculto && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800">
+                        🙈 Oculto
+                      </span>
+                    )}
                   </div>
                 </div>
+
+                {oculto && producer.hiddenNota && (
+                  <p className="text-xs text-purple-800 bg-purple-100 rounded-lg px-2 py-1.5 mt-2">
+                    Motivo: {producer.hiddenNota}
+                  </p>
+                )}
 
                 {/* Informações */}
                 <div className="space-y-1.5 text-sm text-gray-600 mt-3">
@@ -527,6 +645,12 @@ const podeResetar = role === 'dev' || role === 'admin'
                       <span className="text-gray-400"> de {brl(cota.teto)}</span>
                     </p>
 
+                    {cota.origemTeto === 'override' && (
+                      <p className="text-xs text-purple-700 mt-1">
+                        🔒 Cota individual
+                        {cota.overrideNota && ` — ${cota.overrideNota}`}
+                      </p>
+                    )}
                     {excedente > 0 && (
                       <p className="text-xs text-red-700 font-semibold mt-1">
                         ⚠️ Estourou em {brl(excedente)}
@@ -585,6 +709,20 @@ const podeResetar = role === 'dev' || role === 'admin'
                     >
                       {producer.active ? '⛔ Desativar' : '✅ Reativar'}
                     </button>
+                    {/* 👁️ Exclusivo do dev */}
+                    {isDev && (
+                      <button
+                        onClick={() =>
+                          oculto
+                            ? handleReexibir(producer)
+                            : (setNotaOcultar(''), setModalOcultar(producer))
+                        }
+                        className="shrink-0 px-2.5 text-center text-purple-700 hover:bg-purple-50 py-2 rounded-lg text-xs font-medium transition"
+                        title={oculto ? 'Reexibir na listagem' : 'Ocultar da listagem (só dev)'}
+                      >
+                        {oculto ? '👁️' : '🙈'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -616,23 +754,70 @@ const podeResetar = role === 'dev' || role === 'admin'
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent"
               placeholder="Ex.: início de novo ciclo do plano operacional 2027"
             />
-           <div className="flex gap-2 mt-4">
-  <button
-  onClick={confirmarReset}
-  disabled={savingModal || motivoReset.trim().length < 5}
-  style={{ backgroundColor: '#016630', color: '#fff' }}
-  className="flex-1 py-2.5 rounded-lg text-sm font-medium"
->
-  {savingModal ? 'Resetando...' : 'Confirmar reset'}
-</button>
-  <button
-    onClick={() => setModalReset(null)}
-    disabled={savingModal}
-    className="flex-1 bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 py-2.5 rounded-lg text-sm font-medium transition"
-  >
-    Cancelar
-  </button>
-</div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={confirmarReset}
+                disabled={savingModal || motivoReset.trim().length < 5}
+                style={{ backgroundColor: '#016630', color: '#fff' }}
+                className="flex-1 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {savingModal ? 'Resetando...' : 'Confirmar reset'}
+              </button>
+              <button
+                onClick={() => setModalReset(null)}
+                disabled={savingModal}
+                className="flex-1 bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 py-2.5 rounded-lg text-sm font-medium transition"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🙈 Modal de ocultar (dev) */}
+      {modalOcultar && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-5">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">🙈 Ocultar produtor</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Produtor: <strong>{modalOcultar.name}</strong>
+            </p>
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs text-purple-900 mb-3">
+              🔒 Ação exclusiva do desenvolvedor. <strong>Nada é apagado.</strong> O
+              cadastro sai da listagem geral, mas colheitas, entregas PAA e todo o
+              histórico permanecem intactos. Reversível a qualquer momento.
+            </div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Motivo * <span className="text-gray-400 text-xs">(mín. 5 caracteres)</span>
+            </label>
+            <textarea
+              value={notaOcultar}
+              onChange={e => setNotaOcultar(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              placeholder="Ex.: cadastro duplicado de teste da migração inicial"
+            />
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={confirmarOcultar}
+                disabled={savingModal || notaOcultar.trim().length < 5}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${
+                  savingModal || notaOcultar.trim().length < 5
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-purple-600 hover:bg-purple-700 text-white'
+                }`}
+              >
+                {savingModal ? 'Ocultando...' : 'Confirmar'}
+              </button>
+              <button
+                onClick={() => setModalOcultar(null)}
+                disabled={savingModal}
+                className="flex-1 bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 py-2.5 rounded-lg text-sm font-medium transition"
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -673,16 +858,16 @@ const podeResetar = role === 'dev' || role === 'admin'
 
             <div className="flex gap-2 mt-4">
               <button
-  onClick={() => salvarCota(false)}
-  disabled={savingModal || !cotaValor.trim() || cotaNota.trim().length < 5}
-  className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${
-    savingModal || !cotaValor.trim() || cotaNota.trim().length < 5
-      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-      : 'bg-purple-600 hover:bg-purple-700 text-white'
-  }`}
->
-  {savingModal ? 'Salvando...' : 'Salvar cota'}
-</button>
+                onClick={() => salvarCota(false)}
+                disabled={savingModal || !cotaValor.trim() || cotaNota.trim().length < 5}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${
+                  savingModal || !cotaValor.trim() || cotaNota.trim().length < 5
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-purple-600 hover:bg-purple-700 text-white'
+                }`}
+              >
+                {savingModal ? 'Salvando...' : 'Salvar cota'}
+              </button>
               <button
                 onClick={() => salvarCota(true)}
                 disabled={savingModal || cotas[modalCota.id]?.origemTeto !== 'override'}
