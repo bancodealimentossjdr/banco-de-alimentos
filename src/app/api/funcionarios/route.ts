@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { canToggleVisibility } from '@/lib/permissions'
 import { maskFuncionarioList } from '@/lib/mask-by-role'
 
 const COUNT_SELECT = {
@@ -20,16 +22,13 @@ type ContagemFuncionario = Record<keyof typeof COUNT_SELECT, number>
 /**
  * 🐛 ONDA 22 (22-g) — o `_count` do Prisma devolve 9 chaves separadas
  * (employee1/2/3 de doação, distribuição e colheita). Nenhuma delas
- * representa "quantas vezes este funcionário foi usado", o que fazia
- * o consumidor ler um campo inexistente.
+ * representa "quantas vezes este funcionário foi usado".
  *
- * Aqui consolidamos no servidor:
+ * Consolidação no servidor:
  *   - totalUsos          → soma das 9 contagens (bloqueia exclusão)
  *   - usos.doacoes       → soma dos 3 slots de doação
  *   - usos.distribuicoes → soma dos 3 slots de distribuição
  *   - usos.colheitas     → soma dos 3 slots de colheita
- *
- * `_count` continua no payload para não quebrar consumidores existentes.
  */
 function derivarUsos(count: ContagemFuncionario) {
   const doacoes =
@@ -59,21 +58,48 @@ export async function GET(request: Request) {
   if (authResult instanceof NextResponse) return authResult
 
   const role = authResult.user.role
+  const podeVerOcultos = canToggleVisibility(role)
 
   try {
     const { searchParams } = new URL(request.url)
     const apenasAtivos = searchParams.get('apenasAtivos') === '1'
     const incluir = searchParams.get('incluir')
+    const ocultos = searchParams.get('ocultos') // 'todos' | 'apenas' | null
 
-    const employees = await prisma.employee.findMany({
-      where: apenasAtivos
-        ? incluir
-          ? { OR: [{ active: true }, { id: incluir }] }
-          : { active: true }
-        : undefined,
-      orderBy: { name: 'asc' },
-      include: { _count: { select: COUNT_SELECT } },
-    })
+    // 👁️ ONDA 23.7e-3 — visibilidade
+    // Dropdown (apenasAtivos) NUNCA vê oculto, nem o dev: selecionar um
+    // registro oculto criaria vínculo ilegível para os outros usuários.
+    const filtroVisibilidade: Prisma.EmployeeWhereInput = (() => {
+      if (apenasAtivos || !podeVerOcultos) return { hiddenAt: null }
+      if (ocultos === 'apenas') return { hiddenAt: { not: null } }
+      if (ocultos === 'todos') return {}
+      return { hiddenAt: null }
+    })()
+
+    const filtroAtivo: Prisma.EmployeeWhereInput = apenasAtivos
+      ? { active: true }
+      : {}
+
+    // `incluir` fura os filtros por id — permite editar registro antigo
+    // vinculado a funcionário inativo/oculto sem perder a referência.
+    const where: Prisma.EmployeeWhereInput = incluir
+      ? { OR: [{ AND: [filtroVisibilidade, filtroAtivo] }, { id: incluir }] }
+      : { AND: [filtroVisibilidade, filtroAtivo] }
+
+    const [employees, contadores] = await Promise.all([
+      prisma.employee.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        include: { _count: { select: COUNT_SELECT } },
+      }),
+      // 🔢 contadores das abas — só o dev precisa deles
+      podeVerOcultos
+        ? Promise.all([
+            prisma.employee.count({ where: { hiddenAt: null } }),
+            prisma.employee.count({ where: { hiddenAt: { not: null } } }),
+          ])
+        : Promise.resolve(null),
+    ])
 
     const comUsos = employees.map((e) => ({
       ...e,
@@ -81,7 +107,15 @@ export async function GET(request: Request) {
     }))
 
     const masked = maskFuncionarioList(comUsos, role)
-    return NextResponse.json(masked)
+
+    // Payload continua sendo array puro (compatibilidade).
+    // Contadores viajam em header para não quebrar consumidores.
+    const res = NextResponse.json(masked)
+    if (contadores) {
+      res.headers.set('X-Visiveis', String(contadores[0]))
+      res.headers.set('X-Ocultos', String(contadores[1]))
+    }
+    return res
   } catch (error) {
     console.error('Erro GET funcionários:', error)
     return NextResponse.json({ error: 'Erro ao buscar funcionários' }, { status: 500 })
@@ -95,7 +129,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
 
-    // ✅ ONDA 22 — validação mínima: nome é obrigatório e não pode ser vazio
+    // ✅ ONDA 22 — nome é obrigatório e não pode ser vazio
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (name.length === 0) {
       return NextResponse.json(

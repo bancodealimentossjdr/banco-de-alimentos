@@ -1,26 +1,63 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
-import { auth } from '@/lib/auth'
+import { canToggleVisibility } from '@/lib/permissions'
 import { maskBeneficiarioList } from '@/lib/mask-by-role'
 
-export async function GET() {
+export async function GET(request: Request) {
+  // 🔐 requireView já resolveu a sessão — não chamar auth() de novo.
   const authResult = await requireView('beneficiarios')
   if (authResult instanceof NextResponse) return authResult
 
-  try {
-    const session = await auth()
-    const role = session?.user?.role
+  const role = authResult.user.role
+  const podeVerOcultos = canToggleVisibility(role)
 
-    const beneficiaries = await prisma.beneficiary.findMany({
-      orderBy: { name: 'asc' },
-      include: {
-        _count: { select: { distributions: true } },
-      },
-    })
+  try {
+    const { searchParams } = new URL(request.url)
+    // ⚠️ Beneficiary usa `status: 'ativo'`, não `active: boolean`.
+    const apenasAtivos = searchParams.get('apenasAtivos') === '1'
+    const incluir = searchParams.get('incluir')
+    const ocultos = searchParams.get('ocultos')
+
+    // 👁️ ONDA 23.7e-3 — visibilidade
+    const filtroVisibilidade: Prisma.BeneficiaryWhereInput = (() => {
+      if (apenasAtivos || !podeVerOcultos) return { hiddenAt: null }
+      if (ocultos === 'apenas') return { hiddenAt: { not: null } }
+      if (ocultos === 'todos') return {}
+      return { hiddenAt: null }
+    })()
+
+    const filtroAtivo: Prisma.BeneficiaryWhereInput = apenasAtivos
+      ? { status: 'ativo' }
+      : {}
+
+    const where: Prisma.BeneficiaryWhereInput = incluir
+      ? { OR: [{ AND: [filtroVisibilidade, filtroAtivo] }, { id: incluir }] }
+      : { AND: [filtroVisibilidade, filtroAtivo] }
+
+    const [beneficiaries, contadores] = await Promise.all([
+      prisma.beneficiary.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        include: { _count: { select: { distributions: true } } },
+      }),
+      podeVerOcultos
+        ? Promise.all([
+            prisma.beneficiary.count({ where: { hiddenAt: null } }),
+            prisma.beneficiary.count({ where: { hiddenAt: { not: null } } }),
+          ])
+        : Promise.resolve(null),
+    ])
 
     const masked = maskBeneficiarioList(beneficiaries, role)
-    return NextResponse.json(masked)
+
+    const res = NextResponse.json(masked)
+    if (contadores) {
+      res.headers.set('X-Visiveis', String(contadores[0]))
+      res.headers.set('X-Ocultos', String(contadores[1]))
+    }
+    return res
   } catch (error) {
     console.error('Erro GET beneficiários:', error)
     return NextResponse.json({ error: 'Erro ao buscar instituições' }, { status: 500 })
@@ -33,9 +70,18 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
+
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (name.length === 0) {
+      return NextResponse.json(
+        { error: 'O nome da instituição é obrigatório' },
+        { status: 400 },
+      )
+    }
+
     const beneficiary = await prisma.beneficiary.create({
       data: {
-        name: body.name,
+        name,
         type: body.type,
         address: body.address || null,
         phone: body.phone || null,
