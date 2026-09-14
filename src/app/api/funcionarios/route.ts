@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { canSeeHidden } from '@/lib/permissions'
+import { canLookup } from '@/lib/rbac-lookup'
 import { filtroLista, lerModoOcultos } from '@/lib/visibilidade'
 import { maskFuncionarioList } from '@/lib/mask-by-role'
 
@@ -41,7 +42,73 @@ function derivarUsos(count: ContagemFuncionario) {
   }
 }
 
+/**
+ * 🧹 ONDA 23.7e-4 — `?incluir=` vazio virava `{ id: '' }` dentro do OR.
+ * Não quebrava a query, mas sujava o where e mascarava depuração.
+ */
+function lerIncluir(searchParams: URLSearchParams): string | null {
+  const raw = searchParams.get('incluir')
+  if (!raw) return null
+  const id = raw.trim()
+  return id.length > 0 ? id : null
+}
+
 export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+
+  // ─────────────────────────────────────────────────────────────
+  // 🆕 ONDA 23.7e-4 — MODO LOOKUP
+  //
+  // Contrato separado para preencher <select> de formulário.
+  // Payload: SÓ id + name + active. Sem _count (9 agregações), sem máscara.
+  //
+  // 🔐 Por que requireView('dashboard') e não auth() direto:
+  //    'dashboard' está em VIEW_PERMISSIONS de TODAS as roles, então este
+  //    gate significa apenas "está autenticado" — e reaproveita o helper
+  //    que já trata sessão ausente e devolve 401 padronizado.
+  //    O gate REAL de autorização é o canLookup() logo abaixo.
+  //
+  // ⚠️ O select é LITERAL e FECHADO. Se um campo sensível (cpf, phone,
+  // salário, endereço) entrar aqui, o gate frouxo vira vazamento de dado
+  // pessoal. Nunca troque por `include` nem por spread do registro.
+  // ─────────────────────────────────────────────────────────────
+  if (searchParams.get('lookup') === '1') {
+    const authResult = await requireView('dashboard')
+    if (authResult instanceof NextResponse) return authResult
+
+    const role = authResult.user.role
+
+    if (!canLookup(role, 'funcionarios')) {
+      return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
+    }
+
+    try {
+      const incluir = lerIncluir(searchParams)
+
+      // Lookup NUNCA mostra oculto — nem para o dev. Selecionar registro
+      // oculto criaria vínculo ilegível para todas as outras roles.
+      const base: Prisma.EmployeeWhereInput = { hiddenAt: null, active: true }
+      const where: Prisma.EmployeeWhereInput = incluir
+        ? { OR: [base, { id: incluir }] }
+        : base
+
+      const employees = await prisma.employee.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, active: true },
+      })
+
+      return NextResponse.json(employees)
+    } catch (error) {
+      console.error('Erro GET funcionários (lookup):', error)
+      return NextResponse.json({ error: 'Erro ao buscar funcionários' }, { status: 500 })
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // MODO NORMAL — gestão do cadastro
+  // ─────────────────────────────────────────────────────────────
+
   // 🔐 requireView já resolveu a sessão — NÃO chamar auth() de novo.
   const authResult = await requireView('funcionarios')
   if (authResult instanceof NextResponse) return authResult
@@ -50,9 +117,8 @@ export async function GET(request: Request) {
   const podeVerOcultos = canSeeHidden(role)
 
   try {
-    const { searchParams } = new URL(request.url)
     const apenasAtivos = searchParams.get('apenasAtivos') === '1'
-    const incluir = searchParams.get('incluir')
+    const incluir = lerIncluir(searchParams)
     const modo = lerModoOcultos(searchParams)
 
     // 👁️ ONDA 23.7e-3 — filtro centralizado em lib/visibilidade

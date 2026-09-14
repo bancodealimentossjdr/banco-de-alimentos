@@ -45,8 +45,9 @@ export default function DoacoesPage() {
 
   // 🚀 Cache global de cadastros — `*Todos` inclui inativos (para edição)
   const { produtos: products, produtosTodos: productsAll } = useProdutos()
-  const { doadores: donors, doadoresTodos: donorsAll } = useDoadores()
-  const { funcionarios: employees, funcionariosTodos: employeesAll } = useFuncionarios()
+  const { doadores: donors, doadoresTodos: donorsAll } = useDoadores({ lookup: true })
+  const { funcionarios: employees, funcionariosTodos: employeesAll } =
+    useFuncionarios({ lookup: true })
 
   // 📋 Lista de doações — cache local, revalida quando muda
   const {
@@ -183,7 +184,10 @@ export default function DoacoesPage() {
           invalidate('/api/estoque/resumo')
         }
         else { const data = await res.json(); alert(data.error || 'Erro ao salvar') }
-      } catch (error) { console.error('Erro ao salvar:', error) }
+      } catch (error) {
+          console.error('Erro ao salvar:', error)
+          alert('Erro de conexão. A doação NÃO foi salva. Tente novamente.')
+        }
     })
   }
 

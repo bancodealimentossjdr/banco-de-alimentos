@@ -28,9 +28,29 @@ const CADASTRO_CONFIG = {
  *                   Use para evitar 403 quando o usuário não tem permissão
  *                   de leitura no recurso (ex.: Visualizador).
  *                   Default: true.
+ *
+ * @property lookup  🆕 ONDA 23.7e-4 — pede o contrato ENXUTO da API
+ *                   (`?lookup=1`): só `id` + `name`, sem `_count` nem
+ *                   máscara, e liberado por canLookup() em vez de canView().
+ *
+ *                   Use em PÁGINAS DE LANÇAMENTO (doação, distribuição,
+ *                   colheita, PAA). NÃO use em páginas de cadastro — elas
+ *                   precisam do payload completo.
+ *
+ *                   ⚠️ `lookup` gera uma KEY SWR DIFERENTE. Isso é
+ *                   intencional: o cache do lookup não pode se misturar com
+ *                   o da tela de gestão, senão a página de cadastro herdaria
+ *                   um payload sem os campos que ela renderiza.
  */
 interface CadastroOptions {
   enabled?: boolean
+  lookup?: boolean
+}
+
+/** Monta a URL do cadastro respeitando o modo lookup. */
+function urlCadastro(base: string, { enabled = true, lookup = false }: CadastroOptions) {
+  if (!enabled) return null
+  return lookup ? `${base}?lookup=1` : base
 }
 
 /**
@@ -54,6 +74,9 @@ function filtrarAtivos<T extends { active?: boolean }>(list: T[]): T[] {
 
 /**
  * 🛒 Lista de produtos cadastrados
+ *
+ * ⚠️ `produtos` NÃO tem modo lookup: não há dado sensível no cadastro de
+ * produto e o payload já é enxuto. Aceita `lookup` só por simetria de API.
  */
 export function useProdutos({ enabled = true }: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Product[]>(
@@ -77,9 +100,9 @@ export function useProdutos({ enabled = true }: CadastroOptions = {}) {
 /**
  * 🏪 Lista de doadores
  */
-export function useDoadores({ enabled = true }: CadastroOptions = {}) {
+export function useDoadores(opts: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Donor[]>(
-    enabled ? '/api/doadores' : null,
+    urlCadastro('/api/doadores', opts),
     CADASTRO_CONFIG
   )
   const todos = data ?? []
@@ -100,10 +123,13 @@ export function useDoadores({ enabled = true }: CadastroOptions = {}) {
  * ⚠️ ATENÇÃO: o model Beneficiary NÃO tem `active: boolean`.
  * Ele usa `status: string` com valor 'ativo' (ver /api/beneficiarios).
  * Por isso o filtro aqui é diferente dos demais.
+ *
+ * ⚠️ No modo lookup a API já devolve só os ativos — o filtro client-side
+ * abaixo continua rodando e é inofensivo (idempotente).
  */
-export function useBeneficiarios({ enabled = true }: CadastroOptions = {}) {
+export function useBeneficiarios(opts: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Beneficiary[]>(
-    enabled ? '/api/beneficiarios' : null,
+    urlCadastro('/api/beneficiarios', opts),
     CADASTRO_CONFIG
   )
   const todos = data ?? []
@@ -124,10 +150,13 @@ export function useBeneficiarios({ enabled = true }: CadastroOptions = {}) {
 
 /**
  * 🧑 Lista de funcionários
+ *
+ * 🆕 Em páginas de lançamento use `useFuncionarios({ lookup: true })`:
+ * economiza 9 agregações `_count` por carga e dispensa canView('funcionarios').
  */
-export function useFuncionarios({ enabled = true }: CadastroOptions = {}) {
+export function useFuncionarios(opts: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Employee[]>(
-    enabled ? '/api/funcionarios' : null,
+    urlCadastro('/api/funcionarios', opts),
     CADASTRO_CONFIG
   )
   const todos = data ?? []
@@ -145,9 +174,9 @@ export function useFuncionarios({ enabled = true }: CadastroOptions = {}) {
 /**
  * 🌾 Lista de produtores rurais
  */
-export function useProdutores({ enabled = true }: CadastroOptions = {}) {
+export function useProdutores(opts: CadastroOptions = {}) {
   const { data, error, isLoading, mutate } = useApi<Producer[]>(
-    enabled ? '/api/produtores' : null,
+    urlCadastro('/api/produtores', opts),
     CADASTRO_CONFIG
   )
   const todos = data ?? []
