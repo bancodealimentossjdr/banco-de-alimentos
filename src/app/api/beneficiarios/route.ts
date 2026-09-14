@@ -3,11 +3,49 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { canSeeHidden } from '@/lib/permissions'
+import { canLookup } from '@/lib/rbac-lookup'
 import { filtroLista, lerModoOcultos } from '@/lib/visibilidade'
 import { maskBeneficiarioList } from '@/lib/mask-by-role'
 
+function lerIncluir(sp: URLSearchParams): string | null {
+  const v = sp.get('incluir')?.trim()
+  return v && v.length > 0 ? v : null
+}
+
 export async function GET(request: Request) {
-  // 🔐 requireView já resolveu a sessão — não chamar auth() de novo.
+  const { searchParams } = new URL(request.url)
+
+  // 🔎 23.7e-4 — modo lookup para o form de Distribuições
+  if (searchParams.get('lookup') === '1') {
+    const auth = await requireView('dashboard')
+    if (auth instanceof NextResponse) return auth
+
+    const role = auth.user.role
+    if (!canLookup(role, 'beneficiarios')) {
+      return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
+    }
+
+    try {
+      const incluir = lerIncluir(searchParams)
+      // ⚠️ Beneficiary usa status: 'ativo', não active: boolean.
+      const base: Prisma.BeneficiaryWhereInput = { hiddenAt: null, status: 'ativo' }
+      const where: Prisma.BeneficiaryWhereInput = incluir
+        ? { OR: [base, { id: incluir }] }
+        : base
+
+      const beneficiaries = await prisma.beneficiary.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, type: true, status: true },
+      })
+      return NextResponse.json(beneficiaries)
+    } catch (error) {
+      console.error('Erro GET beneficiários (lookup):', error)
+      return NextResponse.json({ error: 'Erro ao buscar instituições' }, { status: 500 })
+    }
+  }
+
+  // 🔐 fluxo padrão
   const authResult = await requireView('beneficiarios')
   if (authResult instanceof NextResponse) return authResult
 
@@ -15,13 +53,10 @@ export async function GET(request: Request) {
   const podeVerOcultos = canSeeHidden(role)
 
   try {
-    const { searchParams } = new URL(request.url)
-    // ⚠️ Beneficiary usa `status: 'ativo'`, não `active: boolean`.
     const apenasAtivos = searchParams.get('apenasAtivos') === '1'
-    const incluir = searchParams.get('incluir')
+    const incluir = lerIncluir(searchParams)
     const modo = lerModoOcultos(searchParams)
 
-    // 👁️ ONDA 23.7e-3 — visibilidade
     const visibilidade = filtroLista(role, modo, apenasAtivos) as Prisma.BeneficiaryWhereInput
     const filtroAtivo: Prisma.BeneficiaryWhereInput = apenasAtivos ? { status: 'ativo' } : {}
 
