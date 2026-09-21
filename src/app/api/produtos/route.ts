@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
 import { buildPaaData, checkCodigoColisao } from '@/lib/paa'
+import { canManageTabelaConab } from '@/lib/permissions'
+import { conabFieldsChanged, conabDeniedMessage } from '@/lib/paa-conab-gate'
 
 // Nome do produto que deve sempre aparecer primeiro nas listagens
 const PRIORITY_PRODUCT = 'hortifruti'
@@ -53,6 +55,13 @@ export async function POST(request: Request) {
 
     const paa = buildPaaData(body)
     if ('error' in paa) return NextResponse.json({ error: paa.error }, { status: 400 })
+
+    // 🔒 ONDA 23.8 — débito #5: tabela CONAB é dev-only.
+    // Criação de produto PAA implica definir preço normativo → exige dev.
+    const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, null)
+    if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
+      return NextResponse.json({ error: conabDeniedMessage(conabAlterado) }, { status: 403 })
+    }
 
     const colisao = await checkCodigoColisao(prisma, paa.data)
     if (colisao) return NextResponse.json({ error: colisao }, { status: 409 })

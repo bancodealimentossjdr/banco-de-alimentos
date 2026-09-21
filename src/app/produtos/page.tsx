@@ -100,8 +100,12 @@ const brl = (v: string | null) =>
   v === null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export default function ProdutosPage() {
-  const { canEdit } = usePermissions()
+  const { canEdit, isDev } = usePermissions()
   const podeEditar = canEdit('produtos')
+
+  // 🔒 ONDA 23.8 — o bloco PAA é a tabela CONAB normativa: dev-only.
+  // Defesa em profundidade: a UI trava e a API rejeita com 403.
+  const podeGerirConab = isDev
 
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
@@ -311,22 +315,36 @@ export default function ProdutosPage() {
             </div>
           </div>
 
-          {/* ====== BLOCO PAA ====== */}
+          {/* ====== BLOCO PAA (🔒 dev-only — tabela CONAB) ====== */}
           <div className="mt-5 pt-5 border-t">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
+            <label
+              className={`flex items-center gap-2 select-none ${
+                podeGerirConab ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+              }`}
+            >
               <input
                 type="checkbox"
                 checked={form.isPaa}
+                disabled={!podeGerirConab}
                 onChange={e => setForm({ ...form, isPaa: e.target.checked })}
-                className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 disabled:opacity-50"
               />
               <span className="text-sm font-semibold text-gray-800">
                 🌾 Produto do PAA (Programa de Aquisição de Alimentos)
               </span>
             </label>
 
+            {!podeGerirConab && (
+              <p className="text-xs text-amber-600 mt-1.5">
+                🔒 Preços e códigos da tabela CONAB são normativos — alteração exclusiva do perfil dev.
+              </p>
+            )}
+
             {form.isPaa && (
-              <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
+              <fieldset
+                disabled={!podeGerirConab}
+                className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 disabled:opacity-60"
+              >
                 <p className="text-xs text-green-800 mb-4">
                   Preços conforme <strong>Tabela CONAB</strong> vigente — Plano Operacional 05063-2025-3162500.
                 </p>
@@ -383,12 +401,16 @@ export default function ProdutosPage() {
 
                 {/* Sub-bloco orgânico */}
                 <div className="mt-4 pt-4 border-t border-green-200">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <label
+                    className={`flex items-center gap-2 select-none ${
+                      podeGerirConab ? 'cursor-pointer' : 'cursor-not-allowed'
+                    }`}
+                  >
                     <input
                       type="checkbox"
                       checked={form.temOrganico}
                       onChange={e => setForm({ ...form, temOrganico: e.target.checked })}
-                      className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                      className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 disabled:opacity-50"
                     />
                     <span className="text-sm font-medium text-gray-800">🍃 Tem versão orgânica</span>
                   </label>
@@ -428,7 +450,7 @@ export default function ProdutosPage() {
                     </div>
                   )}
                 </div>
-              </div>
+              </fieldset>
             )}
           </div>
 

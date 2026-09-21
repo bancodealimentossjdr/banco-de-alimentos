@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireEdit } from '@/lib/auth-helpers'
 import { buildPaaData, checkCodigoColisao } from '@/lib/paa'
+import { canManageTabelaConab } from '@/lib/permissions'
+import { conabFieldsChanged, conabDeniedMessage } from '@/lib/paa-conab-gate'
 
 export async function PUT(
   request: Request,
@@ -25,6 +27,14 @@ export async function PUT(
 
     const paa = buildPaaData(body)
     if ('error' in paa) return NextResponse.json({ error: paa.error }, { status: 400 })
+
+    // 🔒 ONDA 23.8 — débito #5: só o dev muda a tabela CONAB.
+    // Diff contra o banco: reenviar o mesmo valor não é alteração, então
+    // admin segue editando nome/categoria/unidade de um produto PAA.
+    const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, product)
+    if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
+      return NextResponse.json({ error: conabDeniedMessage(conabAlterado) }, { status: 403 })
+    }
 
     // Bloqueia despromoção de produto com entregas PAA registradas
     if (product.isPaa && !paa.data.isPaa) {
