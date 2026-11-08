@@ -11,10 +11,12 @@ import {
   shouldMaskPersonalData,
 } from '@/lib/mask-by-role'
 
+// 🛡️ 23.9a — minimização: só os campos que a tela usa.
+// Nunca `producer: true` (traria cpf, dapCaf, cotaOverride, hiddenNota).
 const INCLUDE = {
-  producer: true,
-  employee: true,
-  employee2: true,
+  producer: { select: { id: true, name: true } },
+  employee: { select: { id: true, name: true } },
+  employee2: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   itens: {
     include: { product: { select: { id: true, name: true, paaUnidade: true, unit: true } } },
@@ -65,7 +67,6 @@ export async function GET(request: NextRequest) {
     if (shouldMaskPersonalData(role)) {
       seguras = seguras.map((e) => ({
         ...e,
-        numeroNota: e.numeroNota ? '***' : null,
         producer: e.producer ? maskProdutor(e.producer, role) : e.producer,
         employee: e.employee ? maskFuncionario(e.employee, role) : e.employee,
         employee2: e.employee2 ? maskFuncionario(e.employee2, role) : e.employee2,
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { producerId, dataEntrega, numeroNota, observacoes, employeeId, employee2Id, itens } = body
+    const { producerId, dataEntrega, observacoes, employeeId, employee2Id, itens } = body
 
     if (!producerId) {
       return NextResponse.json({ error: 'Produtor é obrigatório' }, { status: 400 })
@@ -132,7 +133,6 @@ export async function POST(request: NextRequest) {
         data: {
           producerId,
           dataEntrega: new Date(dataEntrega + 'T12:00:00'),
-          numeroNota: numeroNota?.trim() || null,
           observacoes: observacoes?.trim() || null,
           employeeId: employeeId || null,
           employee2Id: employee2Id || null,

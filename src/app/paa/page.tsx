@@ -40,7 +40,6 @@ interface EntregaItem {
 interface Entrega {
   id: string
   dataEntrega: string
-  numeroNota: string | null
   observacoes: string | null
   valorTotal: number | null
   pesoTotalKg: number
@@ -90,7 +89,6 @@ const aceitaCalculadora = (p: ProdutoPaa | undefined): boolean =>
 const formInicial = () => ({
   producerId: '',
   dataEntrega: hoje(),
-  numeroNota: '',
   observacoes: '',
   employeeId: '',
   employee2Id: '',
@@ -213,7 +211,6 @@ export default function PaaPage() {
     setForm({
       producerId: e.producer.id,
       dataEntrega: e.dataEntrega.split('T')[0],
-      numeroNota: e.numeroNota || '',
       observacoes: e.observacoes || '',
       employeeId: e.employee?.id || '',
       employee2Id: e.employee2?.id || '',
@@ -379,7 +376,7 @@ export default function PaaPage() {
               )}
             </div>
 
-            <div>
+            <div className="lg:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Data *</label>
               <input
                 type="date"
@@ -387,19 +384,6 @@ export default function PaaPage() {
                 onChange={(e) => setForm({ ...form, dataEntrega: e.target.value })}
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
                 required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nº da Nota <span className="text-gray-400 text-xs">(opcional)</span>
-              </label>
-              <input
-                type="text"
-                value={form.numeroNota}
-                onChange={(e) => setForm({ ...form, numeroNota: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                placeholder="Ex: 001234"
               />
             </div>
 
@@ -753,11 +737,6 @@ export default function PaaPage() {
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                         🌾 PAA
                       </span>
-                      {e.numeroNota && (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                          NF {e.numeroNota}
-                        </span>
-                      )}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {new Date(e.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}

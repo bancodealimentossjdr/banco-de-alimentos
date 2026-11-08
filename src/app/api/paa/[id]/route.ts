@@ -11,10 +11,11 @@ import {
   shouldMaskPersonalData,
 } from '@/lib/mask-by-role'
 
+// 🛡️ 23.9a — minimização: só os campos que a tela usa.
 const INCLUDE = {
-  producer: true,
-  employee: true,
-  employee2: true,
+  producer: { select: { id: true, name: true } },
+  employee: { select: { id: true, name: true } },
+  employee2: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   itens: {
     include: { product: { select: { id: true, name: true, paaUnidade: true, unit: true } } },
@@ -49,7 +50,6 @@ export async function GET(
     if (shouldMaskPersonalData(role)) {
       segura = {
         ...segura,
-        numeroNota: segura.numeroNota ? '***' : null,
         producer: segura.producer ? maskProdutor(segura.producer, role) : segura.producer,
         employee: segura.employee ? maskFuncionario(segura.employee, role) : segura.employee,
         employee2: segura.employee2 ? maskFuncionario(segura.employee2, role) : segura.employee2,
@@ -84,7 +84,7 @@ export async function PUT(
     if (authResult instanceof NextResponse) return authResult
 
     const body = await request.json()
-    const { producerId, dataEntrega, numeroNota, observacoes, employeeId, employee2Id, itens } = body
+    const { producerId, dataEntrega, observacoes, employeeId, employee2Id, itens } = body
 
     if (!producerId) {
       return NextResponse.json({ error: 'Produtor é obrigatório' }, { status: 400 })
@@ -113,7 +113,7 @@ export async function PUT(
     }
 
     // ♻️ Recalcula com os preços VIGENTES. Se a tabela CONAB mudou de safra,
-    // reeditar a entrega recongelamento os preços atuais — comportamento
+    // reeditar a entrega recongela os preços atuais — comportamento
     // intencional: quem edita assume o preço do momento da edição.
     const calc = await calcularItensPaa(prisma, itens, { exigirAtivo: false })
     if ('error' in calc) {
@@ -127,7 +127,6 @@ export async function PUT(
         data: {
           producerId,
           dataEntrega: dataEntrega ? new Date(dataEntrega + 'T12:00:00') : undefined,
-          numeroNota: numeroNota?.trim() || null,
           observacoes: observacoes?.trim() || null,
           employeeId: employeeId || null,
           employee2Id: employee2Id || null,
