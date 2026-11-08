@@ -20,6 +20,17 @@ export function shouldMaskPersonalData(role: UserRole | undefined | null): boole
   return role !== 'dev' && role !== 'admin' && role !== 'operador'
 }
 
+/**
+ * 🛡️ 23.9a — CAF/DAP: mantém só os 4 últimos caracteres.
+ * "SDW0123456789" → "****6789"
+ */
+export function maskDapCaf(v: string | null | undefined): string | null {
+  if (!v) return null
+  const limpo = v.trim()
+  if (limpo.length <= 4) return '****'
+  return `****${limpo.slice(-4)}`
+}
+
 // ---------- DOADOR ----------
 type DoadorLike = {
   contact?: string | null
@@ -85,6 +96,7 @@ type ProdutorLike = {
   address?: string | null
   contact?: string | null
   cpf?: string | null
+  dapCaf?: string | null
   [key: string]: unknown
 }
 
@@ -92,17 +104,16 @@ type ProdutorLike = {
  * Mascara dados do produtor rural para perfil visualizador.
  *
  * 🎭 Política:
- * - name    → mascarado via maskContactName (ex: "F*** B*** V***")
+ * - name    → mascarado via maskContactName
  * - contact → mascarado via maskContactName
  * - phone   → mascarado via maskPhone
  * - email   → mascarado via maskEmail
  * - address → mascarado via maskAddress
  * - cpf     → mascarado via maskCPF
+ * - dapCaf  → mascarado via maskDapCaf (23.9a)
  *
- * 🛡️ Motivo: na colheita solidária, o nome do produtor revela quem
- * entregou, quando e em que volume — informação sensível que o
- * visualizador não deve acessar de forma identificável. Política
- * consistente em todos os endpoints que usam este helper.
+ * 🛡️ Só mascara campos que EXISTEM no objeto: se o endpoint usa
+ * `select` sem cpf/dapCaf, eles não são criados como "—".
  */
 export function maskProdutor<T extends ProdutorLike>(
   p: T,
@@ -117,6 +128,7 @@ export function maskProdutor<T extends ProdutorLike>(
     address: maskAddress(p.address ?? null),
     contact: maskContactName(p.contact ?? null),
     cpf: maskCPF(p.cpf ?? null),
+    ...('dapCaf' in p ? { dapCaf: maskDapCaf(p.dapCaf) } : {}),
   }
 }
 
@@ -137,15 +149,7 @@ type FuncionarioLike = {
 
 /**
  * Mascara dados do funcionário para perfil visualizador.
- *
- * 🎭 Política:
- * - name  → mascarado via maskContactName (ex: "J*** S***")
- * - phone → mascarado via maskPhone
- * - role/cargo → permanece visível (informação operacional pública)
- * - active → permanece visível
- *
- * 🛡️ Motivo: o ranking de funcionários não deve ser exposto ao visualizador,
- * portanto mesmo o nome é considerado dado sensível neste contexto.
+ * - name/phone mascarados; role/cargo e active permanecem visíveis.
  */
 export function maskFuncionario<T extends FuncionarioLike>(
   f: T,
@@ -169,14 +173,7 @@ export function maskFuncionarioList<T extends FuncionarioLike>(
 
 // ---------- Helpers por módulo (notes em somente-leitura) ----------
 
-/**
- * Retorna true se o role é "somente leitura" no módulo.
- * Usado para mascarar campos de texto livre (ex: notes) em módulos
- * operacionais (doações, distribuições, colheita) onde o visualizador
- * tem acesso de leitura mas não deve ver detalhes sensíveis.
- *
- * 🛡️ Fail-secure: sem role = somente leitura.
- */
+/** 🛡️ Fail-secure: sem role = somente leitura. */
 export function isReadOnlyInModule(
   role: UserRole | undefined | null,
   module: Module
@@ -185,9 +182,6 @@ export function isReadOnlyInModule(
   return !canEdit(role, module)
 }
 
-/**
- * Mascara o campo `notes` se o role for somente leitura no módulo.
- */
 export function maskNotesIfReadOnly<T extends { notes?: string | null }>(
   item: T,
   role: UserRole | undefined | null,
@@ -206,6 +200,7 @@ export function maskNotesListIfReadOnly<T extends { notes?: string | null }>(
   if (!isReadOnlyInModule(role, module)) return list
   return list.map((item) => maskNotesIfReadOnly(item, role, module))
 }
+
 // ---------- ONDA 23 — ENTREGA PAA ----------
 type EntregaPaaLike = {
   valorTotal?: unknown
@@ -214,13 +209,8 @@ type EntregaPaaLike = {
 }
 
 /**
- * 🎭 Mascara valores financeiros individualizados da entrega PAA.
- *
- * Política (decidida na 23.3):
- * - Preço de tabela CONAB no CADASTRO de produto → público (não mascarado)
- * - valorTotal / subtotal / precoUnitario da ENTREGA → financeiro individualizado
- *   do produtor → mascarado para visualizador
- * - pesoKg / pesoTotalKg / quantidade → permanecem VISÍVEIS (dado operacional)
+ * 🎭 Valores financeiros individualizados da entrega PAA → mascarados
+ * para visualizador. Peso/quantidade permanecem visíveis.
  */
 export function maskEntregaPaa<T extends EntregaPaaLike>(
   e: T,
