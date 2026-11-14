@@ -333,6 +333,7 @@ model Producer {
   cotaResets  PaaCotaReset[]
 
   @@index([hiddenAt])
+  @@index([atendePaa])
 }
 
 // ==========================================
@@ -446,7 +447,7 @@ model PaaConfig {
   /// % do teto que dispara o aviso de proximidade.
   alertaPercentual Int @default(80)
 
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
   updatedBy String?
 
   @@map("paa_config")
