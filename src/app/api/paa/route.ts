@@ -18,10 +18,18 @@ const INCLUDE = {
   employee: { select: { id: true, name: true } },
   employee2: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
+  assinaturaPor: { select: { id: true, name: true } },
   itens: {
     include: { product: { select: { id: true, name: true, paaUnidade: true, unit: true } } },
     orderBy: { id: 'asc' as const },
   },
+}
+
+/** 🔏 G1-8c — imagem e hash da assinatura NUNCA saem na listagem. */
+function semAssinatura(e: any) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { assinaturaData, assinaturaHash, ...resto } = e
+  return { ...resto, assinada: e.status !== 'RASCUNHO' }
 }
 
 export async function GET(request: NextRequest) {
@@ -51,7 +59,7 @@ export async function GET(request: NextRequest) {
     const session = await auth()
     const role = session?.user?.role
 
-    let seguras: any[] = entregas.map(serializeEntregaPaa)
+    let seguras: any[] = entregas.map((e) => serializeEntregaPaa(semAssinatura(e)))
 
     // `observacoes` é texto livre → trata como `notes` nos demais módulos
     seguras = maskNotesListIfReadOnly(
@@ -70,6 +78,7 @@ export async function GET(request: NextRequest) {
         producer: e.producer ? maskProdutor(e.producer, role) : e.producer,
         employee: e.employee ? maskFuncionario(e.employee, role) : e.employee,
         employee2: e.employee2 ? maskFuncionario(e.employee2, role) : e.employee2,
+        assinaturaPor: e.assinaturaPor ? maskFuncionario(e.assinaturaPor, role) : e.assinaturaPor,
       }))
     }
 
@@ -128,24 +137,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: calc.error }, { status: 400 })
     }
 
-    const entrega = await prisma.$transaction(async (tx) => {
-      return tx.entregaPaa.create({
-        data: {
-          producerId,
-          dataEntrega: new Date(dataEntrega + 'T12:00:00'),
-          observacoes: observacoes?.trim() || null,
-          employeeId: employeeId || null,
-          employee2Id: employee2Id || null,
-          valorTotal: calc.valorTotal,
-          pesoTotalKg: calc.pesoTotalKg,
-          createdById: authResult.user.id,
-          itens: { create: calc.itens },
-        },
-        include: INCLUDE,
-      })
+    const entrega = await prisma.entregaPaa.create({
+      data: {
+        producerId,
+        dataEntrega: new Date(dataEntrega + 'T12:00:00'),
+        observacoes: observacoes?.trim() || null,
+        employeeId: employeeId || null,
+        employee2Id: employee2Id || null,
+        valorTotal: calc.valorTotal,
+        pesoTotalKg: calc.pesoTotalKg,
+        createdById: authResult.user.id,
+        itens: { create: calc.itens },
+      },
+      include: INCLUDE,
     })
 
-    return NextResponse.json(serializeEntregaPaa(entrega), { status: 201 })
+    return NextResponse.json(serializeEntregaPaa(semAssinatura(entrega)), { status: 201 })
   } catch (error) {
     console.error('Erro POST entrega PAA:', error)
     return NextResponse.json({ error: 'Erro ao registrar entrega do PAA' }, { status: 500 })

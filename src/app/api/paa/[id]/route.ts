@@ -17,10 +17,19 @@ const INCLUDE = {
   employee: { select: { id: true, name: true } },
   employee2: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
+  assinaturaPor: { select: { id: true, name: true } },
   itens: {
     include: { product: { select: { id: true, name: true, paaUnidade: true, unit: true } } },
     orderBy: { id: 'asc' as const },
   },
+}
+
+const MSG_TRAVADA = 'Entrega assinada. Retire a assinatura antes de alterar.'
+
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+  }
 }
 
 export async function GET(
@@ -40,7 +49,12 @@ export async function GET(
     const session = await auth()
     const role = session?.user?.role
 
-    let segura: any = serializeEntregaPaa(entrega)
+    // 🛡️ G1-8c — imagem e hash da assinatura NUNCA saem por aqui
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { assinaturaData, assinaturaHash, ...semAssinatura } = entrega
+
+    let segura: any = serializeEntregaPaa(semAssinatura as any)
+    segura = { ...segura, assinada: entrega.status !== 'RASCUNHO' }
 
     const comNotes = maskNotesIfReadOnly({ ...segura, notes: segura.observacoes }, role, 'paa')
     segura = { ...segura, observacoes: comNotes.notes }
@@ -70,11 +84,10 @@ export async function PUT(
   try {
     const { id } = await params
 
-    // 🔒 Trava temporal pela DATA DA ENTREGA (não createdAt) — mesmo critério
-    // da colheita solidária: entrega retroativa fica bloqueada para operador.
+    // 🔒 Trava temporal pela DATA DA ENTREGA (não createdAt).
     const existing = await prisma.entregaPaa.findUnique({
       where: { id },
-      select: { dataEntrega: true },
+      select: { dataEntrega: true, status: true },
     })
     if (!existing) {
       return NextResponse.json({ error: 'Entrega não encontrada' }, { status: 404 })
@@ -82,6 +95,11 @@ export async function PUT(
 
     const authResult = await requireEditRecord('paa', existing.dataEntrega)
     if (authResult instanceof NextResponse) return authResult
+
+    // 🔏 G1-8c — assinada/finalizada é imutável (pré-checagem; a definitiva é na transação)
+    if (existing.status !== 'RASCUNHO') {
+      return NextResponse.json({ error: MSG_TRAVADA }, { status: 409 })
+    }
 
     const body = await request.json()
     const { producerId, dataEntrega, observacoes, employeeId, employee2Id, itens } = body
@@ -112,15 +130,18 @@ export async function PUT(
       )
     }
 
-    // ♻️ Recalcula com os preços VIGENTES. Se a tabela CONAB mudou de safra,
-    // reeditar a entrega recongela os preços atuais — comportamento
-    // intencional: quem edita assume o preço do momento da edição.
+    // ♻️ Recalcula com os preços VIGENTES (comportamento intencional).
     const calc = await calcularItensPaa(prisma, itens, { exigirAtivo: false })
     if ('error' in calc) {
       return NextResponse.json({ error: calc.error }, { status: 400 })
     }
 
     const entrega = await prisma.$transaction(async (tx) => {
+      // 🛡️ Checagem definitiva dentro da transação (corrida com /assinar)
+      const atual = await tx.entregaPaa.findUnique({ where: { id }, select: { status: true } })
+      if (!atual) throw new HttpError(404, 'Entrega não encontrada')
+      if (atual.status !== 'RASCUNHO') throw new HttpError(409, MSG_TRAVADA)
+
       await tx.entregaPaaItem.deleteMany({ where: { entregaPaaId: id } })
       return tx.entregaPaa.update({
         where: { id },
@@ -138,8 +159,13 @@ export async function PUT(
       })
     })
 
-    return NextResponse.json(serializeEntregaPaa(entrega))
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { assinaturaData, assinaturaHash, ...semAssinatura } = entrega
+    return NextResponse.json(serializeEntregaPaa(semAssinatura as any))
   } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Erro PUT entrega PAA:', error)
     return NextResponse.json({ error: 'Erro ao atualizar entrega' }, { status: 500 })
   }
@@ -164,7 +190,12 @@ export async function DELETE(
     const authResult = await requireDeleteRecord('paa')
     if (authResult instanceof NextResponse) return authResult
 
-    await prisma.entregaPaa.delete({ where: { id } })
+    // 🔏 G1-8c — exclusão atômica condicionada ao RASCUNHO
+    const del = await prisma.entregaPaa.deleteMany({ where: { id, status: 'RASCUNHO' } })
+    if (del.count === 0) {
+      return NextResponse.json({ error: MSG_TRAVADA }, { status: 409 })
+    }
+
     return NextResponse.json({ message: 'Entrega excluída com sucesso' })
   } catch (error) {
     console.error('Erro DELETE entrega PAA:', error)
