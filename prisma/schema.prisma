@@ -469,6 +469,7 @@ model EntregaPaaItem {
 model TermoPaa {
   id          String   @id @default(cuid())
   /// Transcrito do SISPAA. Formato ^\d+/\d{4}\.\d+$
+  /// @unique global agora; vira @@unique([organizationId, numeroTermo]) na Onda 27.
   numeroTermo String   @unique
   /// Data de geração no SISPAA = "Data da Aquisição" de todas as linhas
   dataTermo   DateTime @db.Date
@@ -917,3 +918,15 @@ model ModuleFlag {
 
   @@map("module_flags")
 }
+
+// ============================================
+// G1-4 — RATE LIMIT (contadores compartilhados entre instâncias)
+// ============================================
+// /// key = SHA-256 de "escopo:valor". Nunca guarda e-mail/IP em claro.
+// model RateLimit {
+//   key         String   @id
+//   count       Int      @default(0)
+//   windowStart DateTime @default(now())
+//
+//   @@map("rate_limits")
+// }
