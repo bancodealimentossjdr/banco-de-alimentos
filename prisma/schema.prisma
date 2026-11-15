@@ -922,11 +922,10 @@ model ModuleFlag {
 // ============================================
 // G1-4 — RATE LIMIT (contadores compartilhados entre instâncias)
 // ============================================
-// /// key = SHA-256 de "escopo:valor". Nunca guarda e-mail/IP em claro.
-// model RateLimit {
-//   key         String   @id
-//   count       Int      @default(0)
-//   windowStart DateTime @default(now())
-//
-//   @@map("rate_limits")
-// }
+model RateLimit {
+  key         String   @id
+  count       Int      @default(1)
+  windowStart DateTime @default(now())
+
+  @@map("rate_limits")
+}
