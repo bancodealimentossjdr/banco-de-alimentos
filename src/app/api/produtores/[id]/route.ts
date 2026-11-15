@@ -12,7 +12,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const authResult = await requireView('produtores')
   if (authResult instanceof NextResponse) return authResult
 
-  // 🔐 requireView já resolveu a sessão — não chamar auth() de novo.
   const role = authResult.user.role
 
   try {
@@ -30,8 +29,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     })
 
     if (!produtor) return NAO_ENCONTRADO()
-
-    // 👁️ oculto = inexistente para não-dev (404, nunca 403)
     if (!podeVerRegistro(role, produtor)) return NAO_ENCONTRADO()
 
     const masked = maskProdutor(produtor, role)
@@ -40,11 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (shouldMaskPersonalData(role)) {
       return NextResponse.json({
         ...masked,
-        harvests: produtor.harvests.map((h) => ({
-          ...h,
-          indemnityValue: null,
-          notes: null,
-        })),
+        harvests: produtor.harvests.map((h) => ({ ...h, indemnityValue: null, notes: null })),
       })
     }
 
@@ -75,7 +68,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!existing) return NAO_ENCONTRADO()
     if (!podeVerRegistro(role, existing)) return NAO_ENCONTRADO()
 
-    // 🌾 Bloqueia remoção da flag PAA se houver entregas vinculadas
     if (existing.atendePaa && atendePaa === false) {
       const usos = await prisma.entregaPaa.count({ where: { producerId: id } })
       if (usos > 0) {
@@ -93,16 +85,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         phone: phone || null,
         address: address || null,
         property: property || null,
-        // ⚠️ preserva o valor atual quando o campo não vem no payload
         active: active === undefined ? existing.active : Boolean(active),
         atendePaa: atendePaa === undefined ? existing.atendePaa : Boolean(atendePaa),
       },
-      include: {
-        _count: { select: { harvests: true, entregasPaa: true } },
-      },
+      include: { _count: { select: { harvests: true, entregasPaa: true } } },
     })
 
-    return NextResponse.json(produtor)
+    // 🛡️ #18 — operador nunca recebe CPF/CAF crus, nem na resposta da edição
+    return NextResponse.json(maskProdutor(produtor, role))
   } catch (error) {
     console.error('Erro ao atualizar produtor:', error)
     return NextResponse.json({ error: 'Erro ao atualizar produtor' }, { status: 500 })
@@ -151,16 +141,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }
 
       if (body.cotaOverride === null || body.cotaOverride === '') {
-        // ↩️ Volta para a cota padrão global
         data.cotaOverride = null
         data.cotaOverrideNota = null
       } else {
         const v = Number(body.cotaOverride)
         if (!Number.isFinite(v) || v <= 0) {
-          return NextResponse.json(
-            { error: 'cotaOverride deve ser um número positivo.' },
-            { status: 400 },
-          )
+          return NextResponse.json({ error: 'cotaOverride deve ser um número positivo.' }, { status: 400 })
         }
         const nota = String(body.cotaOverrideNota ?? '').trim()
         if (nota.length < 5) {
@@ -182,12 +168,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const produtor = await prisma.producer.update({
       where: { id },
       data,
-      include: {
-        _count: { select: { harvests: true, entregasPaa: true } },
-      },
+      include: { _count: { select: { harvests: true, entregasPaa: true } } },
     })
 
-    return NextResponse.json(produtor)
+    // 🛡️ #18 — operador nunca recebe CPF/CAF crus
+    return NextResponse.json(maskProdutor(produtor, role))
   } catch (error) {
     console.error('Erro ao atualizar produtor (PATCH):', error)
     return NextResponse.json({ error: 'Erro ao atualizar produtor' }, { status: 500 })
