@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireEditRecord, requireDeleteRecord } from '@/lib/auth-helpers'
 import { hashEntregaPaa } from '@/lib/paa-hash'
+import { HttpError, recalcularTotaisTermo, agoraBR, dateParaCivil } from '@/lib/paa/termo'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,7 @@ export const dynamic = 'force-dynamic'
 // DELETE → retira assinatura (operador: 403 via requireDeleteRecord)
 //   - admin: motivo obrigatório; FINALIZADA → 409 (tirar do Termo antes)
 //   - dev: qualquer status, motivo opcional; FINALIZADA desvincula do Termo
+//     e RECALCULA os totais do Termo na mesma transação (G1-8d, decisão b)
 //   - SEMPRE registra linha de auditoria em observacoes
 // ============================================
 
@@ -35,18 +37,12 @@ const DesassinarSchema = z.object({
   motivo: z.string().trim().max(500, 'Motivo muito longo').optional().nullable(),
 })
 
-class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message)
-  }
-}
-
-const agoraBR = () =>
-  new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date())
+/**
+ * 🕛 dataEntrega é @db.Date (meia-noite UTC). Em America/Sao_Paulo isso vira
+ * 21h do dia ANTERIOR e a trava temporal bloqueava o operador no próprio dia.
+ * Meio-dia de Brasília cai no mesmo dia civil em qualquer comparação.
+ */
+const dataCivilParaTrava = (d: Date) => new Date(`${dateParaCivil(d)}T12:00:00-03:00`)
 
 // ---------- POST: assinar ----------
 export async function POST(
@@ -65,7 +61,7 @@ export async function POST(
     }
 
     // 🔒 Operador: só no dia; admin/dev: liberado
-    const authResult = await requireEditRecord('paa', existing.dataEntrega)
+    const authResult = await requireEditRecord('paa', dataCivilParaTrava(existing.dataEntrega))
     if (authResult instanceof NextResponse) return authResult
     const auth = authResult
 
@@ -157,6 +153,7 @@ export async function DELETE(
           status: true,
           observacoes: true,
           updatedAt: true,
+          termoPaaId: true,
           termoPaa: { select: { numeroTermo: true } },
         },
       })
@@ -188,6 +185,9 @@ export async function DELETE(
       if (upd.count === 0) {
         throw new HttpError(409, 'A entrega foi alterada simultaneamente. Recarregue e tente de novo.')
       }
+
+      // 🧮 Decisão b: Termo recalculado na mesma transação
+      if (e.termoPaaId) await recalcularTotaisTermo(tx, e.termoPaaId)
 
       return { id, status: 'RASCUNHO' as const, desvinculadaDoTermo: e.termoPaa?.numeroTermo ?? null }
     })
