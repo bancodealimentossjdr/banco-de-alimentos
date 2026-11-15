@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEdit } from '@/lib/auth-helpers'
-import { maskProdutor } from '@/lib/mask-by-role'
+import { maskProdutor, shouldMaskPersonalData } from '@/lib/mask-by-role'
 import { podeVerRegistro } from '@/lib/visibilidade'
 
 const NAO_ENCONTRADO = () =>
@@ -35,6 +35,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!podeVerRegistro(role, produtor)) return NAO_ENCONTRADO()
 
     const masked = maskProdutor(produtor, role)
+
+    // 🔴 G1-5 — colheitas aninhadas: R$ e notes nunca chegam ao visualizador
+    if (shouldMaskPersonalData(role)) {
+      return NextResponse.json({
+        ...masked,
+        harvests: produtor.harvests.map((h) => ({
+          ...h,
+          indemnityValue: null,
+          notes: null,
+        })),
+      })
+    }
+
     return NextResponse.json(masked)
   } catch (error) {
     console.error('Erro ao buscar produtor:', error)
