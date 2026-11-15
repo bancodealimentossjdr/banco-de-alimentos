@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useFuncionarios } from '@/hooks/useCadastros'
 import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
+import AssinaturaCanvas, { type AssinaturaCanvasRef } from '@/components/AssinaturaCanvas'
 
 interface ProdutoPaa {
   id: string
@@ -37,6 +38,8 @@ interface EntregaItem {
   product: { id: string; name: string; paaUnidade: string | null; unit: string }
 }
 
+type StatusEntrega = 'RASCUNHO' | 'ASSINADA' | 'FINALIZADA'
+
 interface Entrega {
   id: string
   dataEntrega: string
@@ -44,6 +47,10 @@ interface Entrega {
   valorTotal: number | null
   pesoTotalKg: number
   isMasked?: boolean
+  status?: StatusEntrega
+  assinada?: boolean
+  assinaturaEm?: string | null
+  assinaturaPor?: { id: string; name: string } | null
   producer: { id: string; name: string }
   employee: { id: string; name: string } | null
   employee2: { id: string; name: string } | null
@@ -80,11 +87,19 @@ const abrevUnidade = (u: string | null | undefined): string => {
 /**
  * 🧮 A calculadora devolve PESO LÍQUIDO em kg.
  * Só pode alimentar `quantidade` quando a unidade de negociação é o próprio kg.
- * Ovos (Dúzia) e Iogurte (Litro) são pagos por unidade de volume/contagem —
- * aplicar kg ali corromperia peso E valor.
  */
 const aceitaCalculadora = (p: ProdutoPaa | undefined): boolean =>
   !!p && abrevUnidade(p.paaUnidade) === 'Kg'
+
+/** 🔏 G1-8c — status com fallback para respostas antigas */
+const statusDe = (e: Entrega): StatusEntrega =>
+  e.status ?? (e.assinada ? 'ASSINADA' : 'RASCUNHO')
+
+const BADGE: Record<StatusEntrega, { label: string; cls: string }> = {
+  RASCUNHO: { label: '📝 Rascunho', cls: 'bg-gray-100 text-gray-700 border-gray-200' },
+  ASSINADA: { label: '✍️ Assinada', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  FINALIZADA: { label: '📄 Finalizada', cls: 'bg-amber-50 text-amber-800 border-amber-200' },
+}
 
 const formInicial = () => ({
   producerId: '',
@@ -99,10 +114,11 @@ export default function PaaPage() {
   const { canEdit, canEditRecord, canDelete } = usePermissions()
   const podeEditar = canEdit('paa')
   const podeExcluir = canDelete('paa')
+  const podeAssinar = podeEditar // dev · admin · operador
+  const podeRetirar = podeExcluir // dev · admin
 
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 🌾 Cadastros filtrados pelo PAA — só carrega para quem edita
   const { data: produtosData } = useApi<ProdutoPaa[]>(
     podeEditar ? '/api/produtos?paa=true' : null
   )
@@ -128,11 +144,16 @@ export default function PaaPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(formInicial())
-
-  // 🧮 Índice do item com a calculadora aberta (null = nenhuma)
   const [calcAberta, setCalcAberta] = useState<number | null>(null)
 
-  // 🔍 Filtros
+  // 🔏 G1-8c — modais de assinatura e retirada
+  const sigRef = useRef<AssinaturaCanvasRef>(null)
+  const [assinando, setAssinando] = useState<Entrega | null>(null)
+  const [sigVazia, setSigVazia] = useState(true)
+  const [retirando, setRetirando] = useState<Entrega | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [enviandoAssinatura, setEnviandoAssinatura] = useState(false)
+
   const [filtroProducerId, setFiltroProducerId] = useState('')
   const [filtroDe, setFiltroDe] = useState('')
   const [filtroAte, setFiltroAte] = useState('')
@@ -149,7 +170,6 @@ export default function PaaPage() {
     })
   }, [entregas, filtroProducerId, filtroDe, filtroAte])
 
-  // Produtores do filtro — fallback derivado das entregas (visualizador não carrega cadastro)
   const produtoresFiltro = useMemo(() => {
     if (produtores.length > 0) return produtores
     const map = new Map<string, ProdutorPaa>()
@@ -163,8 +183,6 @@ export default function PaaPage() {
 
   const findProduto = (id: string) => produtos.find((p) => p.id === id)
 
-  // 💡 Espelha o cálculo do servidor apenas para PREVIEW.
-  //    A verdade é sempre o que o backend devolve.
   const calcLinha = (item: FormItem) => {
     const p = findProduto(item.productId)
     if (!p) return { preco: 0, fator: 1, pesoKg: 0, subtotal: 0, unidade: '', erro: '' }
@@ -238,7 +256,6 @@ export default function PaaPage() {
   const removeItem = (index: number) => {
     if (form.itens.length <= 1) return
     setForm({ ...form, itens: form.itens.filter((_, i) => i !== index) })
-    // 🧮 Reindexa a calculadora aberta para não vazar para a linha errada
     setCalcAberta((atual) => {
       if (atual === null) return null
       if (atual === index) return null
@@ -252,15 +269,12 @@ export default function PaaPage() {
 
     if (field === 'productId') {
       const p = findProduto(String(value))
-      // Produto sem orgânico → força convencional
       if (p && !p.temOrganico) itens[index].tipoCultivo = 'CONVENCIONAL'
-      // 🧮 Trocar para produto em L/Dz fecha a calculadora
       if (calcAberta === index && !aceitaCalculadora(p)) setCalcAberta(null)
     }
     setForm({ ...form, itens })
   }
 
-  /** 🧮 Peso líquido em kg vira a quantidade — válido só em produtos por Kg */
   const aplicarPeso = (index: number, pesoLiquido: number) => {
     updateItem(index, 'quantidade', parseFloat(pesoLiquido.toFixed(3)))
     setCalcAberta(null)
@@ -321,6 +335,83 @@ export default function PaaPage() {
     } catch (err) {
       console.error('Erro ao excluir entrega PAA:', err)
       alert('Erro ao excluir entrega')
+    }
+  }
+
+  // ✍️ Assinar
+  const abrirAssinatura = (e: Entrega) => {
+    setSigVazia(true)
+    setAssinando(e)
+  }
+
+  const confirmarAssinatura = async () => {
+    if (!assinando || enviandoAssinatura) return
+    const data = sigRef.current?.toDataURL()
+    if (!data) {
+      alert('O produtor precisa assinar antes de confirmar.')
+      return
+    }
+    setEnviandoAssinatura(true)
+    try {
+      const res = await fetch(`/api/paa/${assinando.id}/assinar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assinaturaData: data }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setAssinando(null)
+        mutateEntregas()
+      } else {
+        alert(body.error || 'Erro ao assinar')
+        if (res.status === 409) {
+          setAssinando(null)
+          mutateEntregas()
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao assinar entrega PAA:', err)
+      alert('Erro ao assinar entrega')
+    } finally {
+      setEnviandoAssinatura(false)
+    }
+  }
+
+  // ↩️ Retirar assinatura
+  const abrirRetirada = (e: Entrega) => {
+    setMotivo('')
+    setRetirando(e)
+  }
+
+  const confirmarRetirada = async () => {
+    if (!retirando || enviandoAssinatura) return
+    if (motivo.trim().length < 5) {
+      alert('Informe o motivo (mínimo de 5 caracteres).')
+      return
+    }
+    setEnviandoAssinatura(true)
+    try {
+      const res = await fetch(`/api/paa/${retirando.id}/assinar`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motivo: motivo.trim() }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setRetirando(null)
+        mutateEntregas()
+      } else {
+        alert(body.error || 'Erro ao retirar assinatura')
+        if (res.status === 409) {
+          setRetirando(null)
+          mutateEntregas()
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao retirar assinatura PAA:', err)
+      alert('Erro ao retirar assinatura')
+    } finally {
+      setEnviandoAssinatura(false)
     }
   }
 
@@ -504,7 +595,6 @@ export default function PaaPage() {
                         </select>
                       </div>
 
-                      {/* Quantidade + 🧮 */}
                       <div className="lg:w-32">
                         <label className="block text-xs text-gray-500 mb-1 lg:hidden">
                           Quantidade * {c.unidade && `(${c.unidade})`}
@@ -532,9 +622,7 @@ export default function PaaPage() {
                           {podeCalcular && (
                             <button
                               type="button"
-                              onClick={() =>
-                                setCalcAberta(calcAberta === index ? null : index)
-                              }
+                              onClick={() => setCalcAberta(calcAberta === index ? null : index)}
                               title="Calculadora de caixas (peso líquido)"
                               aria-label="Abrir calculadora de peso"
                               className={`shrink-0 px-2.5 rounded-lg border text-sm transition ${
@@ -579,12 +667,9 @@ export default function PaaPage() {
                         )}
                       </div>
 
-                      {c.erro && (
-                        <p className="text-xs text-red-600 lg:hidden">⚠️ {c.erro}</p>
-                      )}
+                      {c.erro && <p className="text-xs text-red-600 lg:hidden">⚠️ {c.erro}</p>}
                     </div>
 
-                    {/* 🧮 Calculadora — mesmo componente de Doações/Distribuições/Colheita */}
                     {calcAberta === index && podeCalcular && (
                       <CalculadoraPeso
                         onApply={(pesoLiquido) => aplicarPeso(index, pesoLiquido)}
@@ -597,14 +682,11 @@ export default function PaaPage() {
             </div>
           </div>
 
-          {/* TOTAIS */}
           {(totais.pesoKg > 0 || totais.valor > 0) && (
             <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between gap-3">
               <div>
                 <p className="text-xs text-green-600 font-medium">PESO TOTAL</p>
-                <p className="text-2xl font-bold text-green-700">
-                  {totais.pesoKg.toFixed(3)} kg
-                </p>
+                <p className="text-2xl font-bold text-green-700">{totais.pesoKg.toFixed(3)} kg</p>
               </div>
               <div className="sm:text-right">
                 <p className="text-xs text-amber-600 font-medium">VALOR TOTAL REPASSADO</p>
@@ -722,11 +804,17 @@ export default function PaaPage() {
         <div className="space-y-4">
           {entregasFiltradas.map((e) => {
             const masked = e.isMasked === true
-            const podeEditarEsta = canEditRecord('paa', e.dataEntrega)
+            const status = statusDe(e)
+            const rascunho = status === 'RASCUNHO'
+            const podeEditarEsta = rascunho && canEditRecord('paa', e.dataEntrega)
+            const podeExcluirEsta = rascunho && podeExcluir
+            const mostraAssinar = rascunho && podeAssinar
+            const mostraRetirar = !rascunho && podeRetirar
             const funcionarios = [e.employee, e.employee2].filter(Boolean) as {
               id: string
               name: string
             }[]
+            const badge = BADGE[status]
 
             return (
               <div key={e.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
@@ -737,10 +825,26 @@ export default function PaaPage() {
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                         🌾 PAA
                       </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}
+                      >
+                        {badge.label}
+                      </span>
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {new Date(e.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
                     </p>
+                    {!rascunho && (e.assinaturaPor || e.assinaturaEm) && (
+                      <p className="text-xs text-blue-700 mt-1">
+                        ✍️ Assinatura registrada
+                        {e.assinaturaPor ? ` por ${e.assinaturaPor.name}` : ''}
+                        {e.assinaturaEm
+                          ? ` em ${new Date(e.assinaturaEm).toLocaleString('pt-BR', {
+                              timeZone: 'America/Sao_Paulo',
+                            })}`
+                          : ''}
+                      </p>
+                    )}
                     {funcionarios.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {funcionarios.map((f) => (
@@ -755,8 +859,16 @@ export default function PaaPage() {
                     )}
                   </div>
 
-                  {(podeEditarEsta || podeExcluir) && (
-                    <div className="flex items-center gap-2 shrink-0">
+                  {(podeEditarEsta || podeExcluirEsta || mostraAssinar || mostraRetirar) && (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {mostraAssinar && (
+                        <button
+                          onClick={() => abrirAssinatura(e)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition"
+                        >
+                          ✍️ Assinar
+                        </button>
+                      )}
                       {podeEditarEsta && (
                         <button
                           onClick={() => startEdit(e)}
@@ -765,12 +877,20 @@ export default function PaaPage() {
                           Editar
                         </button>
                       )}
-                      {podeExcluir && (
+                      {podeExcluirEsta && (
                         <button
                           onClick={() => handleDelete(e.id)}
                           className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
                         >
                           Excluir
+                        </button>
+                      )}
+                      {mostraRetirar && (
+                        <button
+                          onClick={() => abrirRetirada(e)}
+                          className="text-red-600 hover:text-red-800 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                        >
+                          ↩️ Retirar assinatura
                         </button>
                       )}
                     </div>
@@ -823,11 +943,110 @@ export default function PaaPage() {
                 </div>
 
                 {e.observacoes && (
-                  <p className="text-sm text-gray-400 mt-2 italic">📝 {e.observacoes}</p>
+                  <p className="text-sm text-gray-400 mt-2 italic whitespace-pre-line">
+                    📝 {e.observacoes}
+                  </p>
                 )}
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* ✍️ MODAL: ASSINAR */}
+      {assinando && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+          <div className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl p-4 md:p-6 max-h-[95vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-gray-900">✍️ Assinatura do produtor</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>{assinando.producer.name}</strong> ·{' '}
+              {new Date(assinando.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })} ·{' '}
+              {assinando.pesoTotalKg.toFixed(3)} kg
+            </p>
+            <ul className="mt-3 text-sm text-gray-700 space-y-0.5">
+              {assinando.itens.map((i) => (
+                <li key={i.id}>
+                  • {i.product.name}
+                  {i.tipoCultivo === 'ORGANICO' ? ' (orgânico)' : ''}: {i.quantidade}{' '}
+                  {abrevUnidade(i.product.paaUnidade)}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-3">
+              ⚠️ Depois de assinada, a entrega não pode ser editada nem excluída.
+            </p>
+            <div className="mt-4">
+              <AssinaturaCanvas ref={sigRef} onChange={setSigVazia} />
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setAssinando(null)}
+                disabled={enviandoAssinatura}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarAssinatura}
+                disabled={sigVazia || enviandoAssinatura}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                {enviandoAssinatura ? 'Salvando...' : 'Confirmar assinatura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ↩️ MODAL: RETIRAR ASSINATURA */}
+      {retirando && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+          <div className="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl p-4 md:p-6">
+            <h3 className="text-lg font-bold text-gray-900">↩️ Retirar assinatura</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>{retirando.producer.name}</strong> ·{' '}
+              {new Date(retirando.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+            </p>
+            <p className="text-sm text-gray-700 mt-3">
+              A entrega volta para <strong>Rascunho</strong> e o produtor precisará assinar de novo.
+              A retirada fica registrada nas observações.
+            </p>
+            {statusDe(retirando) === 'FINALIZADA' && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mt-3">
+                🔴 <strong>Esta entrega já está em um Termo.</strong> Ela será desvinculada e o Termo
+                ficará desatualizado: será preciso <strong>reemitir o Termo no SISPAA</strong>.
+              </p>
+            )}
+            <label className="block text-sm font-medium text-gray-700 mt-4 mb-1">Motivo *</label>
+            <textarea
+              value={motivo}
+              onChange={(ev) => setMotivo(ev.target.value)}
+              maxLength={500}
+              rows={3}
+              className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+              placeholder="Ex.: quantidade lançada errada"
+            />
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setRetirando(null)}
+                disabled={enviandoAssinatura}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarRetirada}
+                disabled={motivo.trim().length < 5 || enviandoAssinatura}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                {enviandoAssinatura ? 'Retirando...' : 'Retirar assinatura'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
