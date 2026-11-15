@@ -36,7 +36,7 @@ export async function GET(
     const role = session?.user?.role
 
     // 1) Mascara notes se for somente leitura no módulo
-    let harvestSegura = maskNotesIfReadOnly(harvest, role, 'colheita-solidaria')
+    let harvestSegura: any = maskNotesIfReadOnly(harvest, role, 'colheita-solidaria')
 
     // 2) Visualizador: dados pessoais mascarados + R$ removido (igual à lista)
     if (shouldMaskPersonalData(role)) {
