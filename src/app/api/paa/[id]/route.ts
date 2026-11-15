@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEditRecord, requireDeleteRecord } from '@/lib/auth-helpers'
-import { auth } from '@/lib/auth'
+import { dataCivilParaTrava } from '@/lib/permissions'
 import { calcularItensPaa, serializeEntregaPaa } from '@/lib/paa-calc'
 import {
   maskEntregaPaa,
@@ -38,6 +38,8 @@ export async function GET(
 ) {
   const authResult = await requireView('paa')
   if (authResult instanceof NextResponse) return authResult
+  // 🛡️ Princípio 1: role vem do gate, não de auth() cru
+  const role = authResult.user.role
 
   try {
     const { id } = await params
@@ -45,9 +47,6 @@ export async function GET(
     if (!entrega) {
       return NextResponse.json({ error: 'Entrega não encontrada' }, { status: 404 })
     }
-
-    const session = await auth()
-    const role = session?.user?.role
 
     // 🛡️ G1-8c — imagem e hash da assinatura NUNCA saem por aqui
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -93,7 +92,8 @@ export async function PUT(
       return NextResponse.json({ error: 'Entrega não encontrada' }, { status: 404 })
     }
 
-    const authResult = await requireEditRecord('paa', existing.dataEntrega)
+    // 🕛 @db.Date → meio-dia BRT (senão o operador trava no próprio dia)
+    const authResult = await requireEditRecord('paa', dataCivilParaTrava(existing.dataEntrega))
     if (authResult instanceof NextResponse) return authResult
 
     // 🔏 G1-8c — assinada/finalizada é imutável (pré-checagem; a definitiva é na transação)
