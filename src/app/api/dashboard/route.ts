@@ -69,14 +69,15 @@ export async function GET() {
     const totalStock = totalInColdRoom
     const totalApproved = totalInColdRoom + totalDistributedKg
 
-    // 🔐 LGPD — mascara nomes das listas recentes p/ visualizador (fail-secure)
+    // 🔐 LGPD — visualizador (fail-secure): nomes mascarados,
+    //    notes e valores financeiros removidos NO SERVIDOR.
     const session = await auth()
-    const role = session?.user?.role
-    const mask = shouldMaskPersonalData(role)
+    const mask = shouldMaskPersonalData(session?.user?.role)
 
     const safeRecentDonations = mask
       ? recentDonations.map((d) => ({
           ...d,
+          notes: null,
           donor: d.donor ? { name: maskContactName(d.donor.name) } : d.donor,
         }))
       : recentDonations
@@ -84,6 +85,7 @@ export async function GET() {
     const safeRecentDistributions = mask
       ? recentDistributions.map((d) => ({
           ...d,
+          notes: null,
           beneficiary: d.beneficiary
             ? { name: maskContactName(d.beneficiary.name) }
             : d.beneficiary,
@@ -93,6 +95,8 @@ export async function GET() {
     const safeRecentHarvests = mask
       ? recentHarvests.map((h) => ({
           ...h,
+          notes: null,
+          indemnityValue: null, // 🔴 R$ nunca chega ao visualizador
           producer: h.producer ? { name: maskContactName(h.producer.name) } : h.producer,
         }))
       : recentHarvests
