@@ -5,7 +5,7 @@ import { useDraft } from '@/hooks/useDraft'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useProdutos, useDoadores, useFuncionarios } from '@/hooks/useCadastros'
 import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
 import DraftBanner from '@/components/DraftBanner'
 import DraftSavedIndicator from '@/components/DraftSavedIndicator'
@@ -43,7 +43,7 @@ export default function DoacoesPage() {
   // 🔒 Trava de duplo clique
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 🚀 Cache global de cadastros — `*Todos` inclui inativos (para edição)
+  // 🚀 Cache global de cadastros — `*Todos` inclui inativos (para edição e filtros)
   const { produtos: products, produtosTodos: productsAll } = useProdutos()
   const { doadores: donors, doadoresTodos: donorsAll } = useDoadores({ lookup: true })
   const { funcionarios: employees, funcionariosTodos: employeesAll } =
@@ -64,6 +64,11 @@ export default function DoacoesPage() {
 
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+
+  // 🆕 FILTRO — doador ('' = todos) + intervalo de datas (yyyy-mm-dd)
+  const [filtroDonorId, setFiltroDonorId] = useState('')
+  const [filtroDataDe, setFiltroDataDe] = useState('')
+  const [filtroDataAte, setFiltroDataAte] = useState('')
 
   const [form, setForm] = useState<DoacaoForm>({
     donorId: '',
@@ -95,6 +100,19 @@ export default function DoacoesPage() {
     },
     disabled: editingId !== null,
   })
+
+  // 🆕 FILTRO — lista filtrada (doador + data)
+  const donationsFiltradas = useMemo(() => {
+    return donations.filter(d => {
+      if (filtroDonorId && d.donor?.id !== filtroDonorId) return false
+      const dataDoacao = d.date.includes('T') ? d.date.split('T')[0] : d.date
+      if (filtroDataDe && dataDoacao < filtroDataDe) return false
+      if (filtroDataAte && dataDoacao > filtroDataAte) return false
+      return true
+    })
+  }, [donations, filtroDonorId, filtroDataDe, filtroDataAte])
+
+  const temFiltroAtivo = !!(filtroDonorId || filtroDataDe || filtroDataAte)
 
   const resetForm = () => {
     setForm({
@@ -456,22 +474,89 @@ export default function DoacoesPage() {
         </form>
       )}
 
+      {/* 🆕 FILTRO — painel de busca */}
+      {!showForm && donations.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-medium text-gray-700">🔍 Filtros</label>
+            {temFiltroAtivo && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFiltroDonorId('')
+                  setFiltroDataDe('')
+                  setFiltroDataAte('')
+                }}
+                className="text-sm text-green-600 hover:text-green-700 font-medium px-3 py-1 rounded-lg hover:bg-green-50 transition"
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Doador</label>
+              <select
+                value={filtroDonorId}
+                onChange={e => setFiltroDonorId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              >
+                <option value="">Todos</option>
+                {/* ⚠️ Todos (inclui inativos): filtrar histórico antigo deve continuar possível */}
+                {donorsAll.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}{sufixoInativo(d)}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">De</label>
+              <input
+                type="date"
+                value={filtroDataDe}
+                onChange={e => setFiltroDataDe(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Até</label>
+              <input
+                type="date"
+                value={filtroDataAte}
+                onChange={e => setFiltroDataAte(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+              />
+            </div>
+          </div>
+
+          {temFiltroAtivo && (
+            <p className="text-xs text-gray-500 mt-3">
+              {donationsFiltradas.length} doaç{donationsFiltradas.length !== 1 ? 'ões' : 'ão'} encontrada{donationsFiltradas.length !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Lista de doações */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
         </div>
-      ) : donations.length === 0 ? (
+      ) : donationsFiltradas.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p className="text-6xl mb-4">📥</p>
-          <p className="text-xl">Nenhuma doação registrada</p>
-          {podeCriar && (
+          <p className="text-xl">
+            {temFiltroAtivo ? 'Nenhuma doação encontrada com esses filtros' : 'Nenhuma doação registrada'}
+          </p>
+          {podeCriar && !temFiltroAtivo && (
             <p className="text-sm mt-2">Clique em &quot;+ Nova Doação&quot; para começar</p>
           )}
         </div>
       ) : (
         <div className="space-y-4">
-          {donations.map(donation => {
+          {donationsFiltradas.map(donation => {
             const totalBoxes = donation.items.reduce((sum, i) => sum + (i.boxes || 0), 0)
             const donationEmployees = getDonationEmployees(donation)
             const podeEditarEsse = canEditRecord('doacoes', donation.date)

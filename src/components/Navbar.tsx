@@ -18,6 +18,17 @@ const pageTitles: Record<string, string> = {
   '/estoque': 'Estoque',
   '/indicadores': 'Indicadores',
   '/usuarios': 'Usuários',
+  '/eventos': 'Eventos',
+  '/paa': 'PAA',
+}
+
+// Título exato; senão, o da rota-pai mais longa (ex.: /eventos/[id]/campo → Eventos)
+function getTitle(pathname: string): string {
+  if (pageTitles[pathname]) return pageTitles[pathname]
+  const pai = Object.keys(pageTitles)
+    .filter(k => k !== '/' && pathname.startsWith(k + '/'))
+    .sort((a, b) => b.length - a.length)[0]
+  return pai ? pageTitles[pai] : 'Banco de Alimentos'
 }
 
 const roleLabels: Record<string, { label: string; icon: React.ElementType; color: string }> = {
@@ -38,10 +49,10 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  const title = pageTitles[pathname] || 'Banco de Alimentos'
+  const title = getTitle(pathname)
   const userName = session?.user?.name || 'Usuário'
   const userRole = session?.user?.role || 'visualizador'
-const roleInfo = roleLabels[userRole] || roleLabels.visualizador
+  const roleInfo = roleLabels[userRole] || roleLabels.visualizador
   const RoleIcon = roleInfo.icon
 
   // Fecha dropdown ao clicar fora
