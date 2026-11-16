@@ -46,8 +46,10 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   }
 
   return (
-    // 🔧 overflow-x-hidden na raiz = trava de segurança contra qualquer estouro horizontal
-    <div className="flex min-h-screen overflow-x-hidden">
+    // 🔧 C1 (16/11): overflow-x-clip em vez de overflow-x-hidden.
+    // "hidden" transformava esta div em container de rolagem e quebrava o
+    // sticky da Navbar. "clip" corta o estouro horizontal sem criar rolagem.
+    <div className="flex min-h-screen overflow-x-clip">
       <Sidebar
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
@@ -62,7 +64,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
         }`}
       >
         <Navbar onMenuClick={() => setSidebarOpen(true)} />
-        {/* 🔧 min-w-0 + overflow-x-hidden no main também */}
+        {/* 🔧 min-w-0 + overflow-x-hidden no main (não afeta o sticky: a Navbar está fora do main) */}
         <main className="min-w-0 overflow-x-hidden p-4 md:p-6">{children}</main>
       </div>
     </div>
