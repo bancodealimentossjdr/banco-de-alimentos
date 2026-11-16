@@ -56,11 +56,15 @@ export async function POST(request: Request) {
     const paa = buildPaaData(body)
     if ('error' in paa) return NextResponse.json({ error: paa.error }, { status: 400 })
 
-    // 🔒 ONDA 23.8 — débito #5: tabela CONAB é dev-only.
-    // Criação de produto PAA implica definir preço normativo → exige dev.
-    const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, null)
-    if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
-      return NextResponse.json({ error: conabDeniedMessage(conabAlterado) }, { status: 403 })
+    // 🔒 ONDA 23.8 — tabela CONAB é dev-only.
+    // 🐛 B1 (16/11): só produto PAA define preço normativo. Produto comum
+    // (isPaa=false) recebe os campos PAA zerados pelo buildPaaData, e o diff
+    // contra `null` os contava como "alteração" → admin levava 403 em tudo.
+    if (paa.data.isPaa === true) {
+      const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, null)
+      if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
+        return NextResponse.json({ error: conabDeniedMessage(conabAlterado) }, { status: 403 })
+      }
     }
 
     const colisao = await checkCodigoColisao(prisma, paa.data)

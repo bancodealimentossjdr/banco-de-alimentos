@@ -92,7 +92,7 @@ export default function ColheitaSolidariaPage() {
       const d = new Date()
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     })(),
-    status: 'agendada',
+    status: 'realizada',
     notes: '',
     indemnityValue: 1.5,
     items: [{ productId: '', quantity: 0 }],
@@ -155,7 +155,7 @@ export default function ColheitaSolidariaPage() {
         const d = new Date()
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       })(),
-      status: 'agendada',
+      status: 'realizada',
       notes: '',
       indemnityValue: 1.5,
       items: [{ productId: '', quantity: 0 }],
