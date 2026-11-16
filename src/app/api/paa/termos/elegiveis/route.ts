@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireEdit } from '@/lib/auth-helpers'
+import { requireAdminOrDev } from '@/lib/auth-helpers'
 import { serializeTermo } from '@/lib/paa/termo'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/paa/termos/elegiveis?producerId=
- * Entregas ASSINADAS e sem Termo do produtor. Quem pode criar Termo (requireEdit) pode ver.
- * Nunca retorna assinaturaData/assinaturaHash (princípio 20).
+ * Entregas ASSINADAS e sem Termo do produtor. Termos são exclusivos de admin/dev.
+ * Nunca retorna assinaturaData/assinaturaHash.
  */
 export async function GET(req: NextRequest) {
-  const authResult = await requireEdit('paa')
+  const authResult = await requireAdminOrDev()
   if (authResult instanceof NextResponse) return authResult
 
   const producerId = req.nextUrl.searchParams.get('producerId')
@@ -43,7 +43,6 @@ export async function GET(req: NextRequest) {
         },
       },
     })
-    // reaproveita a serialização das entregas do Termo
     return NextResponse.json(serializeTermo({ entregas }).entregas)
   } catch (error) {
     console.error('[GET /api/paa/termos/elegiveis] erro:', error)

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireView, requireAdminOrDev } from '@/lib/auth-helpers'
+import { requireAdminOrDev } from '@/lib/auth-helpers'
 import { atualizarTermoAdminSchema } from '@/lib/validations/termo-paa'
 import {
   calcularLinhasTermo,
@@ -59,7 +59,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authResult = await requireView('paa')
+  const authResult = await requireAdminOrDev()
   if (authResult instanceof NextResponse) return authResult
   const role = authResult.user.role
 

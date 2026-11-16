@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireView, requireEdit } from '@/lib/auth-helpers'
+import { requireAdminOrDev } from '@/lib/auth-helpers'
 import { criarTermoSchema } from '@/lib/validations/termo-paa'
 import {
   HttpError,
@@ -15,9 +15,9 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-// ---------- GET: lista de Termos (?producerId=) ----------
+// ---------- GET: lista de Termos (?producerId=) — admin/dev ----------
 export async function GET(req: NextRequest) {
-  const authResult = await requireView('paa')
+  const authResult = await requireAdminOrDev()
   if (authResult instanceof NextResponse) return authResult
   const role = authResult.user.role
 
@@ -51,9 +51,9 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ---------- POST: cria Termo com 1..100 entregas ASSINADAS do mesmo produtor ----------
+// ---------- POST: cria Termo com 1..100 entregas ASSINADAS do mesmo produtor — admin/dev ----------
 export async function POST(req: NextRequest) {
-  const authResult = await requireEdit('paa')
+  const authResult = await requireAdminOrDev()
   if (authResult instanceof NextResponse) return authResult
   const auth = authResult
 
@@ -93,24 +93,19 @@ export async function POST(req: NextRequest) {
       if (entregas.length !== entregaIds.length) {
         throw new HttpError(404, 'Uma ou mais entregas não foram encontradas.')
       }
-
-      const outroProdutor = entregas.filter((e) => e.producerId !== producerId)
-      if (outroProdutor.length) {
+      if (entregas.some((e) => e.producerId !== producerId)) {
         throw new HttpError(400, 'Todas as entregas precisam ser do mesmo produtor do Termo.')
       }
 
       const indisponiveis = entregas.filter((e) => e.status !== 'ASSINADA' || e.termoPaaId !== null)
       if (indisponiveis.length) {
-        const datas = indisponiveis
-          .map((e) => civilParaBR(dateParaCivil(e.dataEntrega)!))
-          .join(', ')
+        const datas = indisponiveis.map((e) => civilParaBR(dateParaCivil(e.dataEntrega)!)).join(', ')
         throw new HttpError(
           409,
           `Entregas não disponíveis (sem assinatura ou já em outro Termo): ${datas}. Recarregue a lista.`,
         )
       }
 
-      // Decisão a: dataTermo não pode ser anterior à entrega mais recente
       const maisRecente = entregas.map((e) => dateParaCivil(e.dataEntrega)!).sort().at(-1)!
       if (dataTermo < maisRecente) {
         throw new HttpError(
@@ -136,7 +131,6 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       })
 
-      // 🛡️ Anti-corrida: só vincula se continuam ASSINADAS e livres
       const upd = await tx.entregaPaa.updateMany({
         where: { id: { in: entregaIds }, producerId, status: 'ASSINADA', termoPaaId: null },
         data: { status: 'FINALIZADA', termoPaaId: criado.id },

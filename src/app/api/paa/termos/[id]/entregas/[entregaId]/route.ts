@@ -8,8 +8,8 @@ export const dynamic = 'force-dynamic'
 
 /**
  * DELETE /api/paa/termos/[id]/entregas/[entregaId]  { motivo? }
- * Retira a entrega do Termo: FINALIZADA → ASSINADA, recalcula os totais na mesma transação.
- * admin: motivo obrigatório (≥5) · dev: opcional · sempre registra auditoria em observacoes.
+ * Retira a entrega do Termo: FINALIZADA → ASSINADA, recalcula totais na mesma transação.
+ * admin: motivo obrigatório (≥5) · dev: opcional · sempre registra auditoria.
  * Termo vazio é mantido (número do SISPAA não se recicla).
  */
 const Schema = z.object({
@@ -45,16 +45,27 @@ export async function DELETE(
     const { id: termoId, entregaId } = await params
 
     const result = await prisma.$transaction(async (tx) => {
-      const e = await tx.entregaPaa.findFirst({
-        where: { id: entregaId, termoPaaId: termoId },
+      const e = await tx.entregaPaa.findUnique({
+        where: { id: entregaId },
         select: {
           id: true,
+          status: true,
+          termoPaaId: true,
           observacoes: true,
           updatedAt: true,
           termoPaa: { select: { numeroTermo: true } },
         },
       })
-      if (!e) throw new HttpError(404, 'Entrega não encontrada neste Termo.')
+      // 🔎 Mensagens específicas para diagnóstico
+      if (!e) throw new HttpError(404, `Entrega ${entregaId} não existe.`)
+      if (e.termoPaaId !== termoId) {
+        throw new HttpError(
+          409,
+          e.termoPaaId
+            ? `Esta entrega está no Termo ${e.termoPaa?.numeroTermo}, não neste. Recarregue a tela.`
+            : `Esta entrega já não está em nenhum Termo (status ${e.status}). Recarregue a tela.`,
+        )
+      }
 
       const autor = auth.user.name || auth.user.email || auth.user.id
       const partes = [`[${agoraBR()}] Retirada do Termo ${e.termoPaa?.numeroTermo} por ${autor}`]
