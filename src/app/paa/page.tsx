@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useFormSubmit } from '@/hooks/useFormSubmit'
 import { useApi, invalidate } from '@/hooks/useApi'
 import { useFuncionarios } from '@/hooks/useCadastros'
 import { comSelecionado, sufixoInativo } from '@/lib/select-utils'
 import CalculadoraPeso from '@/components/CalculadoraPeso'
+import AssinaturaCanvas, { type AssinaturaCanvasRef } from '@/components/AssinaturaCanvas'
+import TermosTab from '@/components/paa/TermosTab'
 
 interface ProdutoPaa {
   id: string
@@ -37,14 +39,19 @@ interface EntregaItem {
   product: { id: string; name: string; paaUnidade: string | null; unit: string }
 }
 
+type StatusEntrega = 'RASCUNHO' | 'ASSINADA' | 'FINALIZADA'
+
 interface Entrega {
   id: string
   dataEntrega: string
-  numeroNota: string | null
   observacoes: string | null
   valorTotal: number | null
   pesoTotalKg: number
   isMasked?: boolean
+  status?: StatusEntrega
+  assinada?: boolean
+  assinaturaEm?: string | null
+  assinaturaPor?: { id: string; name: string } | null
   producer: { id: string; name: string }
   employee: { id: string; name: string } | null
   employee2: { id: string; name: string } | null
@@ -56,6 +63,8 @@ interface FormItem {
   tipoCultivo: 'CONVENCIONAL' | 'ORGANICO'
   quantidade: number
 }
+
+type Aba = 'entregas' | 'termos'
 
 const hoje = () => {
   const d = new Date()
@@ -81,16 +90,23 @@ const abrevUnidade = (u: string | null | undefined): string => {
 /**
  * 🧮 A calculadora devolve PESO LÍQUIDO em kg.
  * Só pode alimentar `quantidade` quando a unidade de negociação é o próprio kg.
- * Ovos (Dúzia) e Iogurte (Litro) são pagos por unidade de volume/contagem —
- * aplicar kg ali corromperia peso E valor.
  */
 const aceitaCalculadora = (p: ProdutoPaa | undefined): boolean =>
   !!p && abrevUnidade(p.paaUnidade) === 'Kg'
 
+/** 🔏 G1-8c — status com fallback para respostas antigas */
+const statusDe = (e: Entrega): StatusEntrega =>
+  e.status ?? (e.assinada ? 'ASSINADA' : 'RASCUNHO')
+
+const BADGE: Record<StatusEntrega, { label: string; cls: string }> = {
+  RASCUNHO: { label: '📝 Rascunho', cls: 'bg-gray-100 text-gray-700 border-gray-200' },
+  ASSINADA: { label: '✍️ Assinada', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  FINALIZADA: { label: '📄 Finalizada', cls: 'bg-amber-50 text-amber-800 border-amber-200' },
+}
+
 const formInicial = () => ({
   producerId: '',
   dataEntrega: hoje(),
-  numeroNota: '',
   observacoes: '',
   employeeId: '',
   employee2Id: '',
@@ -98,13 +114,18 @@ const formInicial = () => ({
 })
 
 export default function PaaPage() {
-  const { canEdit, canEditRecord, canDelete } = usePermissions()
+  const { canEdit, canEditRecord, canDelete, isDev, isAdmin } = usePermissions()
+  const podeTermos = isAdmin || isDev // 📄 aba Termos: só admin/dev
   const podeEditar = canEdit('paa')
   const podeExcluir = canDelete('paa')
+  const podeAssinar = podeEditar // dev · admin · operador
+  const podeRetirar = podeExcluir // dev · admin
+
+  // 🗂️ G1-8d-2 — abas do módulo PAA (mesma rota /paa)
+  const [aba, setAba] = useState<Aba>('entregas')
 
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
-  // 🌾 Cadastros filtrados pelo PAA — só carrega para quem edita
   const { data: produtosData } = useApi<ProdutoPaa[]>(
     podeEditar ? '/api/produtos?paa=true' : null
   )
@@ -130,11 +151,16 @@ export default function PaaPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(formInicial())
-
-  // 🧮 Índice do item com a calculadora aberta (null = nenhuma)
   const [calcAberta, setCalcAberta] = useState<number | null>(null)
 
-  // 🔍 Filtros
+  // 🔏 G1-8c — modais de assinatura e retirada
+  const sigRef = useRef<AssinaturaCanvasRef>(null)
+  const [assinando, setAssinando] = useState<Entrega | null>(null)
+  const [sigVazia, setSigVazia] = useState(true)
+  const [retirando, setRetirando] = useState<Entrega | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [enviandoAssinatura, setEnviandoAssinatura] = useState(false)
+
   const [filtroProducerId, setFiltroProducerId] = useState('')
   const [filtroDe, setFiltroDe] = useState('')
   const [filtroAte, setFiltroAte] = useState('')
@@ -151,7 +177,6 @@ export default function PaaPage() {
     })
   }, [entregas, filtroProducerId, filtroDe, filtroAte])
 
-  // Produtores do filtro — fallback derivado das entregas (visualizador não carrega cadastro)
   const produtoresFiltro = useMemo(() => {
     if (produtores.length > 0) return produtores
     const map = new Map<string, ProdutorPaa>()
@@ -165,8 +190,6 @@ export default function PaaPage() {
 
   const findProduto = (id: string) => produtos.find((p) => p.id === id)
 
-  // 💡 Espelha o cálculo do servidor apenas para PREVIEW.
-  //    A verdade é sempre o que o backend devolve.
   const calcLinha = (item: FormItem) => {
     const p = findProduto(item.productId)
     if (!p) return { preco: 0, fator: 1, pesoKg: 0, subtotal: 0, unidade: '', erro: '' }
@@ -213,7 +236,6 @@ export default function PaaPage() {
     setForm({
       producerId: e.producer.id,
       dataEntrega: e.dataEntrega.split('T')[0],
-      numeroNota: e.numeroNota || '',
       observacoes: e.observacoes || '',
       employeeId: e.employee?.id || '',
       employee2Id: e.employee2?.id || '',
@@ -241,7 +263,6 @@ export default function PaaPage() {
   const removeItem = (index: number) => {
     if (form.itens.length <= 1) return
     setForm({ ...form, itens: form.itens.filter((_, i) => i !== index) })
-    // 🧮 Reindexa a calculadora aberta para não vazar para a linha errada
     setCalcAberta((atual) => {
       if (atual === null) return null
       if (atual === index) return null
@@ -255,15 +276,12 @@ export default function PaaPage() {
 
     if (field === 'productId') {
       const p = findProduto(String(value))
-      // Produto sem orgânico → força convencional
       if (p && !p.temOrganico) itens[index].tipoCultivo = 'CONVENCIONAL'
-      // 🧮 Trocar para produto em L/Dz fecha a calculadora
       if (calcAberta === index && !aceitaCalculadora(p)) setCalcAberta(null)
     }
     setForm({ ...form, itens })
   }
 
-  /** 🧮 Peso líquido em kg vira a quantidade — válido só em produtos por Kg */
   const aplicarPeso = (index: number, pesoLiquido: number) => {
     updateItem(index, 'quantidade', parseFloat(pesoLiquido.toFixed(3)))
     setCalcAberta(null)
@@ -327,528 +345,755 @@ export default function PaaPage() {
     }
   }
 
+  // ✍️ Assinar
+  const abrirAssinatura = (e: Entrega) => {
+    setSigVazia(true)
+    setAssinando(e)
+  }
+
+  const confirmarAssinatura = async () => {
+    if (!assinando || enviandoAssinatura) return
+    const data = sigRef.current?.toDataURL()
+    if (!data) {
+      alert('O produtor precisa assinar antes de confirmar.')
+      return
+    }
+    setEnviandoAssinatura(true)
+    try {
+      const res = await fetch(`/api/paa/${assinando.id}/assinar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assinaturaData: data }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setAssinando(null)
+        mutateEntregas()
+      } else {
+        alert(body.error || 'Erro ao assinar')
+        if (res.status === 409) {
+          setAssinando(null)
+          mutateEntregas()
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao assinar entrega PAA:', err)
+      alert('Erro ao assinar entrega')
+    } finally {
+      setEnviandoAssinatura(false)
+    }
+  }
+
+  // ↩️ Retirar assinatura
+  const abrirRetirada = (e: Entrega) => {
+    setMotivo('')
+    setRetirando(e)
+  }
+
+  const confirmarRetirada = async () => {
+    if (!retirando || enviandoAssinatura) return
+    if (motivo.trim().length < 5) {
+      alert('Informe o motivo (mínimo de 5 caracteres).')
+      return
+    }
+    setEnviandoAssinatura(true)
+    try {
+      const res = await fetch(`/api/paa/${retirando.id}/assinar`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motivo: motivo.trim() }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setRetirando(null)
+        mutateEntregas()
+        invalidate('/api/paa/termos')
+      } else {
+        alert(body.error || 'Erro ao retirar assinatura')
+        if (res.status === 409) {
+          setRetirando(null)
+          mutateEntregas()
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao retirar assinatura PAA:', err)
+      alert('Erro ao retirar assinatura')
+    } finally {
+      setEnviandoAssinatura(false)
+    }
+  }
+
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-gray-900">🌾 Entregas do PAA</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Programa de Aquisição de Alimentos · preços da tabela CONAB vigente
-          </p>
-        </div>
-        {podeEditar && (
+      {/* 🗂️ ABAS */}
+      <div className="flex gap-2 mb-6 border-b border-gray-200">
+        {(
+              [
+                { id: 'entregas', label: '🥬 Entregas' },
+                ...(podeTermos ? [{ id: 'termos', label: '📄 Termos' }] : []),
+              ] as { id: Aba; label: string }[]
+            ).map((t) => (
           <button
-            onClick={() => (showForm ? resetForm() : setShowForm(true))}
-            className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+            key={t.id}
+            onClick={() => setAba(t.id)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition ${
+              aba === t.id
+                ? 'border-green-500 text-green-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
           >
-            {showForm ? 'Cancelar' : '+ Nova Entrega'}
+            {t.label}
           </button>
-        )}
+        ))}
       </div>
 
-      {showForm && podeEditar && (
-        <form onSubmit={onSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">
-            {editingId ? '✏️ Editar Entrega' : 'Nova Entrega'}
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Produtor (PAA) *
-              </label>
-              <select
-                value={form.producerId}
-                onChange={(e) => setForm({ ...form, producerId: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                required
+      {aba === 'termos' && podeTermos ? (
+        <TermosTab />
+      ) : (
+        <>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900">🌾 Entregas do PAA</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Programa de Aquisição de Alimentos · preços da tabela CONAB vigente
+              </p>
+            </div>
+            {podeEditar && (
+              <button
+                onClick={() => (showForm ? resetForm() : setShowForm(true))}
+                className="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
               >
-                <option value="">Selecione um produtor</option>
-                {produtores.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {sufixoInativo(p)}
-                  </option>
-                ))}
-              </select>
-              {produtores.length === 0 && (
-                <p className="text-xs text-amber-600 mt-1">
-                  ⚠️ Nenhum produtor com &quot;Atende PAA&quot; marcado. Ajuste no cadastro de
-                  produtores.
+                {showForm ? 'Cancelar' : '+ Nova Entrega'}
+              </button>
+            )}
+          </div>
+
+          {showForm && podeEditar && (
+            <form onSubmit={onSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
+              <h2 className="text-lg font-bold text-gray-900 mb-4">
+                {editingId ? '✏️ Editar Entrega' : 'Nova Entrega'}
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="lg:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Produtor (PAA) *
+                  </label>
+                  <select
+                    value={form.producerId}
+                    onChange={(e) => setForm({ ...form, producerId: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                    required
+                  >
+                    <option value="">Selecione um produtor</option>
+                    {produtores.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                        {sufixoInativo(p)}
+                      </option>
+                    ))}
+                  </select>
+                  {produtores.length === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      ⚠️ Nenhum produtor com &quot;Atende PAA&quot; marcado. Ajuste no cadastro de
+                      produtores.
+                    </p>
+                  )}
+                </div>
+
+                <div className="lg:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Data *</label>
+                  <input
+                    type="date"
+                    value={form.dataEntrega}
+                    onChange={(e) => setForm({ ...form, dataEntrega: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Funcionário 1</label>
+                  <select
+                    value={form.employeeId}
+                    onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                  >
+                    <option value="">Selecione...</option>
+                    {comSelecionado(employees, employeesAll, form.employeeId)
+                      .filter((emp) => emp.id !== form.employee2Id)
+                      .map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name}
+                          {sufixoInativo(emp)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Funcionário 2 <span className="text-gray-400 text-xs">(opcional)</span>
+                  </label>
+                  <select
+                    value={form.employee2Id}
+                    onChange={(e) => setForm({ ...form, employee2Id: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                    disabled={!form.employeeId}
+                  >
+                    <option value="">Selecione...</option>
+                    {comSelecionado(employees, employeesAll, form.employee2Id)
+                      .filter((emp) => emp.id !== form.employeeId)
+                      .map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name}
+                          {sufixoInativo(emp)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+                  <textarea
+                    value={form.observacoes}
+                    onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                    rows={1}
+                  />
+                </div>
+              </div>
+
+              {/* ITENS */}
+              <div className="mt-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-md font-semibold text-gray-800">🥬 Itens da Entrega</h3>
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="text-green-600 hover:text-green-700 text-sm font-medium"
+                  >
+                    + Adicionar Item
+                  </button>
+                </div>
+
+                <div className="hidden lg:flex gap-3 items-end mb-1 px-1">
+                  <div className="flex-1"><span className="text-xs text-gray-500">Produto *</span></div>
+                  <div className="w-36"><span className="text-xs text-gray-500">Cultivo</span></div>
+                  <div className="w-32"><span className="text-xs text-gray-500">Quantidade *</span></div>
+                  <div className="w-24 text-right"><span className="text-xs text-gray-500">Preço</span></div>
+                  <div className="w-24 text-right"><span className="text-xs text-gray-500">Peso (kg)</span></div>
+                  <div className="w-28 text-right"><span className="text-xs text-gray-500">Subtotal</span></div>
+                  <div className="w-10"></div>
+                </div>
+
+                <div className="space-y-3">
+                  {form.itens.map((item, index) => {
+                    const c = calcLinha(item)
+                    const prod = findProduto(item.productId)
+                    const podeCalcular = aceitaCalculadora(prod)
+
+                    return (
+                      <div key={index}>
+                        <div
+                          className={`flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 rounded-lg lg:rounded-none ${
+                            c.erro ? 'bg-red-50 lg:bg-red-50/60' : 'bg-gray-50 lg:bg-transparent'
+                          }`}
+                        >
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
+                            <select
+                              value={item.productId}
+                              onChange={(e) => updateItem(index, 'productId', e.target.value)}
+                              className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                            >
+                              <option value="">Selecione um produto do PAA</option>
+                              {produtos.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} ({abrevUnidade(p.paaUnidade)})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="lg:w-36">
+                            <label className="block text-xs text-gray-500 mb-1 lg:hidden">Cultivo</label>
+                            <select
+                              value={item.tipoCultivo}
+                              onChange={(e) => updateItem(index, 'tipoCultivo', e.target.value)}
+                              className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                              disabled={!prod?.temOrganico}
+                            >
+                              <option value="CONVENCIONAL">Convencional</option>
+                              {prod?.temOrganico && <option value="ORGANICO">🍃 Orgânico</option>}
+                            </select>
+                          </div>
+
+                          <div className="lg:w-32">
+                            <label className="block text-xs text-gray-500 mb-1 lg:hidden">
+                              Quantidade * {c.unidade && `(${c.unidade})`}
+                            </label>
+                            <div className="flex gap-1.5">
+                              <div className="relative flex-1">
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  step="0.001"
+                                  min="0"
+                                  value={item.quantidade || ''}
+                                  onChange={(e) =>
+                                    updateItem(index, 'quantidade', parseFloat(e.target.value) || 0)
+                                  }
+                                  className="w-full border rounded-lg px-3 py-2.5 pr-9 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
+                                  placeholder="0"
+                                />
+                                {c.unidade && (
+                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
+                                    {c.unidade}
+                                  </span>
+                                )}
+                              </div>
+                              {podeCalcular && (
+                                <button
+                                  type="button"
+                                  onClick={() => setCalcAberta(calcAberta === index ? null : index)}
+                                  title="Calculadora de caixas (peso líquido)"
+                                  aria-label="Abrir calculadora de peso"
+                                  className={`shrink-0 px-2.5 rounded-lg border text-sm transition ${
+                                    calcAberta === index
+                                      ? 'bg-blue-500 border-blue-500 text-white'
+                                      : 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                                  }`}
+                                >
+                                  🧮
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between lg:justify-end gap-3">
+                            <div className="lg:w-24 text-right">
+                              <span className="block text-xs text-gray-500 lg:hidden">Preço</span>
+                              <span className="text-sm text-gray-600">
+                                {c.preco > 0 ? brl(c.preco) : '—'}
+                              </span>
+                            </div>
+                            <div className="lg:w-24 text-right">
+                              <span className="block text-xs text-gray-500 lg:hidden">Peso</span>
+                              <span className="text-sm font-medium text-green-700">
+                                {c.pesoKg > 0 ? `${c.pesoKg.toFixed(3)} kg` : '—'}
+                              </span>
+                            </div>
+                            <div className="lg:w-28 text-right">
+                              <span className="block text-xs text-gray-500 lg:hidden">Subtotal</span>
+                              <span className="text-sm font-semibold text-amber-700">
+                                {c.subtotal > 0 ? brl(c.subtotal) : '—'}
+                              </span>
+                            </div>
+                            {form.itens.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeItem(index)}
+                                className="shrink-0 p-2 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-sm"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
+                          {c.erro && <p className="text-xs text-red-600 lg:hidden">⚠️ {c.erro}</p>}
+                        </div>
+
+                        {calcAberta === index && podeCalcular && (
+                          <CalculadoraPeso
+                            onApply={(pesoLiquido) => aplicarPeso(index, pesoLiquido)}
+                            onClose={() => setCalcAberta(null)}
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {(totais.pesoKg > 0 || totais.valor > 0) && (
+                <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-green-600 font-medium">PESO TOTAL</p>
+                    <p className="text-2xl font-bold text-green-700">{totais.pesoKg.toFixed(3)} kg</p>
+                  </div>
+                  <div className="sm:text-right">
+                    <p className="text-xs text-amber-600 font-medium">VALOR TOTAL REPASSADO</p>
+                    <p className="text-2xl font-bold text-amber-700">{brl(totais.valor)}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      ⚠️ Valores recalculados no servidor pela tabela CONAB vigente
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3 mt-6">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="bg-green-500 hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+                >
+                  {isSubmitting ? 'Salvando...' : editingId ? 'Atualizar Entrega' : 'Salvar Entrega'}
+                </button>
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    disabled={isSubmitting}
+                    className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
+                  >
+                    Cancelar Edição
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+
+          {/* FILTROS */}
+          {!showForm && entregas.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="block text-sm font-medium text-gray-700">🔍 Filtros</label>
+                {temFiltroAtivo && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiltroProducerId('')
+                      setFiltroDe('')
+                      setFiltroAte('')
+                    }}
+                    className="text-sm text-green-600 hover:text-green-700 font-medium px-3 py-1 rounded-lg hover:bg-green-50 transition"
+                  >
+                    Limpar filtros
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Produtor</label>
+                  <select
+                    value={filtroProducerId}
+                    onChange={(e) => setFiltroProducerId(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2.5 text-sm"
+                  >
+                    <option value="">Todos</option>
+                    {produtoresFiltro.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">De</label>
+                  <input
+                    type="date"
+                    value={filtroDe}
+                    onChange={(e) => setFiltroDe(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Até</label>
+                  <input
+                    type="date"
+                    value={filtroAte}
+                    onChange={(e) => setFiltroAte(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2.5 text-sm"
+                  />
+                </div>
+              </div>
+              {temFiltroAtivo && (
+                <p className="text-xs text-gray-500 mt-3">
+                  {entregasFiltradas.length} entrega{entregasFiltradas.length !== 1 ? 's' : ''} encontrada
+                  {entregasFiltradas.length !== 1 ? 's' : ''}
                 </p>
               )}
             </div>
+          )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Data *</label>
-              <input
-                type="date"
-                value={form.dataEntrega}
-                onChange={(e) => setForm({ ...form, dataEntrega: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                required
-              />
+          {/* LISTAGEM */}
+          {loading ? (
+            <div className="flex justify-center items-center h-64">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nº da Nota <span className="text-gray-400 text-xs">(opcional)</span>
-              </label>
-              <input
-                type="text"
-                value={form.numeroNota}
-                onChange={(e) => setForm({ ...form, numeroNota: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                placeholder="Ex: 001234"
-              />
+          ) : entregasFiltradas.length === 0 ? (
+            <div className="text-center py-16 text-gray-500">
+              <p className="text-6xl mb-4">🌾</p>
+              <p className="text-xl">
+                {temFiltroAtivo
+                  ? 'Nenhuma entrega encontrada com esses filtros'
+                  : 'Nenhuma entrega do PAA registrada'}
+              </p>
+              {podeEditar && !temFiltroAtivo && (
+                <p className="text-sm mt-2">Clique em &quot;+ Nova Entrega&quot; para começar</p>
+              )}
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Funcionário 1</label>
-              <select
-                value={form.employeeId}
-                onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-              >
-                <option value="">Selecione...</option>
-                {comSelecionado(employees, employeesAll, form.employeeId)
-                  .filter((emp) => emp.id !== form.employee2Id)
-                  .map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name}
-                      {sufixoInativo(emp)}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Funcionário 2 <span className="text-gray-400 text-xs">(opcional)</span>
-              </label>
-              <select
-                value={form.employee2Id}
-                onChange={(e) => setForm({ ...form, employee2Id: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                disabled={!form.employeeId}
-              >
-                <option value="">Selecione...</option>
-                {comSelecionado(employees, employeesAll, form.employee2Id)
-                  .filter((emp) => emp.id !== form.employeeId)
-                  .map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name}
-                      {sufixoInativo(emp)}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
-              <textarea
-                value={form.observacoes}
-                onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                rows={1}
-              />
-            </div>
-          </div>
-
-          {/* ITENS */}
-          <div className="mt-6">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-md font-semibold text-gray-800">🥬 Itens da Entrega</h3>
-              <button
-                type="button"
-                onClick={addItem}
-                className="text-green-600 hover:text-green-700 text-sm font-medium"
-              >
-                + Adicionar Item
-              </button>
-            </div>
-
-            <div className="hidden lg:flex gap-3 items-end mb-1 px-1">
-              <div className="flex-1"><span className="text-xs text-gray-500">Produto *</span></div>
-              <div className="w-36"><span className="text-xs text-gray-500">Cultivo</span></div>
-              <div className="w-32"><span className="text-xs text-gray-500">Quantidade *</span></div>
-              <div className="w-24 text-right"><span className="text-xs text-gray-500">Preço</span></div>
-              <div className="w-24 text-right"><span className="text-xs text-gray-500">Peso (kg)</span></div>
-              <div className="w-28 text-right"><span className="text-xs text-gray-500">Subtotal</span></div>
-              <div className="w-10"></div>
-            </div>
-
-            <div className="space-y-3">
-              {form.itens.map((item, index) => {
-                const c = calcLinha(item)
-                const prod = findProduto(item.productId)
-                const podeCalcular = aceitaCalculadora(prod)
+          ) : (
+            <div className="space-y-4">
+              {entregasFiltradas.map((e) => {
+                const masked = e.isMasked === true
+                const status = statusDe(e)
+                const rascunho = status === 'RASCUNHO'
+                const finalizada = status === 'FINALIZADA'
+                const podeEditarEsta = rascunho && canEditRecord('paa', e.dataEntrega)
+                const podeExcluirEsta = rascunho && podeExcluir
+                const mostraAssinar = rascunho && podeAssinar
+                // 🔴 G1-8d-2 — admin não retira assinatura de entrega em Termo (servidor dá 409)
+                const mostraRetirar = !rascunho && podeRetirar && (!finalizada || isDev)
+                const mostraAvisoTermo = finalizada && podeRetirar && !isDev
+                const funcionarios = [e.employee, e.employee2].filter(Boolean) as {
+                  id: string
+                  name: string
+                }[]
+                const badge = BADGE[status]
 
                 return (
-                  <div key={index}>
-                    <div
-                      className={`flex flex-col lg:flex-row gap-2 lg:gap-3 lg:items-center p-3 lg:p-0 rounded-lg lg:rounded-none ${
-                        c.erro ? 'bg-red-50 lg:bg-red-50/60' : 'bg-gray-50 lg:bg-transparent'
-                      }`}
-                    >
-                      <div className="flex-1">
-                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">Produto *</label>
-                        <select
-                          value={item.productId}
-                          onChange={(e) => updateItem(index, 'productId', e.target.value)}
-                          className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                        >
-                          <option value="">Selecione um produto do PAA</option>
-                          {produtos.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({abrevUnidade(p.paaUnidade)})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="lg:w-36">
-                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">Cultivo</label>
-                        <select
-                          value={item.tipoCultivo}
-                          onChange={(e) => updateItem(index, 'tipoCultivo', e.target.value)}
-                          className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                          disabled={!prod?.temOrganico}
-                        >
-                          <option value="CONVENCIONAL">Convencional</option>
-                          {prod?.temOrganico && <option value="ORGANICO">🍃 Orgânico</option>}
-                        </select>
-                      </div>
-
-                      {/* Quantidade + 🧮 */}
-                      <div className="lg:w-32">
-                        <label className="block text-xs text-gray-500 mb-1 lg:hidden">
-                          Quantidade * {c.unidade && `(${c.unidade})`}
-                        </label>
-                        <div className="flex gap-1.5">
-                          <div className="relative flex-1">
-                            <input
-                              type="number"
-                              inputMode="decimal"
-                              step="0.001"
-                              min="0"
-                              value={item.quantidade || ''}
-                              onChange={(e) =>
-                                updateItem(index, 'quantidade', parseFloat(e.target.value) || 0)
-                              }
-                              className="w-full border rounded-lg px-3 py-2.5 pr-9 focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-                              placeholder="0"
-                            />
-                            {c.unidade && (
-                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
-                                {c.unidade}
-                              </span>
-                            )}
-                          </div>
-                          {podeCalcular && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCalcAberta(calcAberta === index ? null : index)
-                              }
-                              title="Calculadora de caixas (peso líquido)"
-                              aria-label="Abrir calculadora de peso"
-                              className={`shrink-0 px-2.5 rounded-lg border text-sm transition ${
-                                calcAberta === index
-                                  ? 'bg-blue-500 border-blue-500 text-white'
-                                  : 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
-                              }`}
-                            >
-                              🧮
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between lg:justify-end gap-3">
-                        <div className="lg:w-24 text-right">
-                          <span className="block text-xs text-gray-500 lg:hidden">Preço</span>
-                          <span className="text-sm text-gray-600">
-                            {c.preco > 0 ? brl(c.preco) : '—'}
+                  <div key={e.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-gray-900">{e.producer.name}</h3>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            🌾 PAA
                           </span>
-                        </div>
-                        <div className="lg:w-24 text-right">
-                          <span className="block text-xs text-gray-500 lg:hidden">Peso</span>
-                          <span className="text-sm font-medium text-green-700">
-                            {c.pesoKg > 0 ? `${c.pesoKg.toFixed(3)} kg` : '—'}
-                          </span>
-                        </div>
-                        <div className="lg:w-28 text-right">
-                          <span className="block text-xs text-gray-500 lg:hidden">Subtotal</span>
-                          <span className="text-sm font-semibold text-amber-700">
-                            {c.subtotal > 0 ? brl(c.subtotal) : '—'}
-                          </span>
-                        </div>
-                        {form.itens.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeItem(index)}
-                            className="shrink-0 p-2 rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 text-sm"
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}
                           >
-                            ✕
-                          </button>
+                            {badge.label}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-500 mt-0.5">
+                          {new Date(e.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                        </p>
+                        {!rascunho && (e.assinaturaPor || e.assinaturaEm) && (
+                          <p className="text-xs text-blue-700 mt-1">
+                            ✍️ Assinatura registrada
+                            {e.assinaturaPor ? ` por ${e.assinaturaPor.name}` : ''}
+                            {e.assinaturaEm
+                              ? ` em ${new Date(e.assinaturaEm).toLocaleString('pt-BR', {
+                                  timeZone: 'America/Sao_Paulo',
+                                })}`
+                              : ''}
+                          </p>
+                        )}
+                        {funcionarios.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {funcionarios.map((f) => (
+                              <span
+                                key={f.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-100"
+                              >
+                                👤 {f.name}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </div>
 
-                      {c.erro && (
-                        <p className="text-xs text-red-600 lg:hidden">⚠️ {c.erro}</p>
+                      {(podeEditarEsta || podeExcluirEsta || mostraAssinar || mostraRetirar || mostraAvisoTermo) && (
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          {mostraAssinar && (
+                            <button
+                              onClick={() => abrirAssinatura(e)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition"
+                            >
+                              ✍️ Assinar
+                            </button>
+                          )}
+                          {podeEditarEsta && (
+                            <button
+                              onClick={() => startEdit(e)}
+                              className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                            >
+                              Editar
+                            </button>
+                          )}
+                          {podeExcluirEsta && (
+                            <button
+                              onClick={() => handleDelete(e.id)}
+                              className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                            >
+                              Excluir
+                            </button>
+                          )}
+                          {mostraRetirar && (
+                            <button
+                              onClick={() => abrirRetirada(e)}
+                              className="text-red-600 hover:text-red-800 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                            >
+                              ↩️ Retirar assinatura
+                            </button>
+                          )}
+                          {mostraAvisoTermo && (
+                            <button
+                              onClick={() => setAba('termos')}
+                              className="text-amber-800 text-xs font-medium px-2 py-1 rounded bg-amber-50 border border-amber-200 hover:bg-amber-100 transition"
+                            >
+                              📄 Em Termo: retire pela aba Termos
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
 
-                    {/* 🧮 Calculadora — mesmo componente de Doações/Distribuições/Colheita */}
-                    {calcAberta === index && podeCalcular && (
-                      <CalculadoraPeso
-                        onApply={(pesoLiquido) => aplicarPeso(index, pesoLiquido)}
-                        onClose={() => setCalcAberta(null)}
-                      />
+                    <div className="space-y-1.5 mb-3">
+                      {e.itens.map((i) => (
+                        <div
+                          key={i.id}
+                          className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm gap-2"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-green-700 font-medium">{i.product.name}</span>
+                            {i.tipoCultivo === 'ORGANICO' && (
+                              <span className="ml-1 text-xs text-emerald-600">🍃 orgânico</span>
+                            )}
+                            <span className="text-gray-500 ml-1">
+                              {i.quantidade} {abrevUnidade(i.product.paaUnidade)} ·{' '}
+                              {i.pesoKg.toFixed(3)} kg
+                            </span>
+                          </div>
+                          {!masked && i.subtotal !== null && (
+                            <span className="text-amber-700 font-semibold shrink-0">
+                              {brl(i.subtotal)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-3 border-t border-gray-100 flex flex-wrap gap-4 items-center">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Peso Total:</span>
+                        <span className="text-sm font-bold text-gray-900">
+                          {e.pesoTotalKg.toFixed(3)} kg
+                        </span>
+                      </div>
+                      {!masked && e.valorTotal !== null && (
+                        <div className="flex items-center gap-2 ml-auto">
+                          <span className="text-xs text-gray-500">Valor Total:</span>
+                          <span className="text-lg font-bold text-amber-700">{brl(e.valorTotal)}</span>
+                        </div>
+                      )}
+                      {masked && (
+                        <span className="ml-auto text-xs text-gray-400 italic">
+                          🔒 valores financeiros restritos
+                        </span>
+                      )}
+                    </div>
+
+                    {e.observacoes && (
+                      <p className="text-sm text-gray-400 mt-2 italic whitespace-pre-line">
+                        📝 {e.observacoes}
+                      </p>
                     )}
                   </div>
                 )
               })}
             </div>
-          </div>
-
-          {/* TOTAIS */}
-          {(totais.pesoKg > 0 || totais.valor > 0) && (
-            <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between gap-3">
-              <div>
-                <p className="text-xs text-green-600 font-medium">PESO TOTAL</p>
-                <p className="text-2xl font-bold text-green-700">
-                  {totais.pesoKg.toFixed(3)} kg
-                </p>
-              </div>
-              <div className="sm:text-right">
-                <p className="text-xs text-amber-600 font-medium">VALOR TOTAL REPASSADO</p>
-                <p className="text-2xl font-bold text-amber-700">{brl(totais.valor)}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  ⚠️ Valores recalculados no servidor pela tabela CONAB vigente
-                </p>
-              </div>
-            </div>
           )}
-
-          <div className="flex flex-col sm:flex-row gap-3 mt-6">
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="bg-green-500 hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
-            >
-              {isSubmitting ? 'Salvando...' : editingId ? 'Atualizar Entrega' : 'Salvar Entrega'}
-            </button>
-            {editingId && (
-              <button
-                type="button"
-                onClick={resetForm}
-                disabled={isSubmitting}
-                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 px-6 py-2.5 rounded-lg font-medium transition w-full sm:w-auto"
-              >
-                Cancelar Edição
-              </button>
-            )}
-          </div>
-        </form>
+        </>
       )}
 
-      {/* FILTROS */}
-      {!showForm && entregas.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <label className="block text-sm font-medium text-gray-700">🔍 Filtros</label>
-            {temFiltroAtivo && (
-              <button
-                type="button"
-                onClick={() => {
-                  setFiltroProducerId('')
-                  setFiltroDe('')
-                  setFiltroAte('')
-                }}
-                className="text-sm text-green-600 hover:text-green-700 font-medium px-3 py-1 rounded-lg hover:bg-green-50 transition"
-              >
-                Limpar filtros
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Produtor</label>
-              <select
-                value={filtroProducerId}
-                onChange={(e) => setFiltroProducerId(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2.5 text-sm"
-              >
-                <option value="">Todos</option>
-                {produtoresFiltro.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">De</label>
-              <input
-                type="date"
-                value={filtroDe}
-                onChange={(e) => setFiltroDe(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2.5 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Até</label>
-              <input
-                type="date"
-                value={filtroAte}
-                onChange={(e) => setFiltroAte(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2.5 text-sm"
-              />
-            </div>
-          </div>
-          {temFiltroAtivo && (
-            <p className="text-xs text-gray-500 mt-3">
-              {entregasFiltradas.length} entrega{entregasFiltradas.length !== 1 ? 's' : ''} encontrada
-              {entregasFiltradas.length !== 1 ? 's' : ''}
+      {/* ✍️ MODAL: ASSINAR */}
+      {assinando && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+          <div className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl p-4 md:p-6 max-h-[95vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-gray-900">✍️ Assinatura do produtor</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>{assinando.producer.name}</strong> ·{' '}
+              {new Date(assinando.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })} ·{' '}
+              {assinando.pesoTotalKg.toFixed(3)} kg
             </p>
-          )}
+            <ul className="mt-3 text-sm text-gray-700 space-y-0.5">
+              {assinando.itens.map((i) => (
+                <li key={i.id}>
+                  • {i.product.name}
+                  {i.tipoCultivo === 'ORGANICO' ? ' (orgânico)' : ''}: {i.quantidade}{' '}
+                  {abrevUnidade(i.product.paaUnidade)}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-3">
+              ⚠️ Depois de assinada, a entrega não pode ser editada nem excluída.
+            </p>
+            <div className="mt-4">
+              <AssinaturaCanvas ref={sigRef} onChange={setSigVazia} />
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setAssinando(null)}
+                disabled={enviandoAssinatura}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarAssinatura}
+                disabled={sigVazia || enviandoAssinatura}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                {enviandoAssinatura ? 'Salvando...' : 'Confirmar assinatura'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* LISTAGEM */}
-      {loading ? (
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
-        </div>
-      ) : entregasFiltradas.length === 0 ? (
-        <div className="text-center py-16 text-gray-500">
-          <p className="text-6xl mb-4">🌾</p>
-          <p className="text-xl">
-            {temFiltroAtivo
-              ? 'Nenhuma entrega encontrada com esses filtros'
-              : 'Nenhuma entrega do PAA registrada'}
-          </p>
-          {podeEditar && !temFiltroAtivo && (
-            <p className="text-sm mt-2">Clique em &quot;+ Nova Entrega&quot; para começar</p>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {entregasFiltradas.map((e) => {
-            const masked = e.isMasked === true
-            const podeEditarEsta = canEditRecord('paa', e.dataEntrega)
-            const funcionarios = [e.employee, e.employee2].filter(Boolean) as {
-              id: string
-              name: string
-            }[]
-
-            return (
-              <div key={e.id} className="bg-white rounded-xl shadow-sm border p-4 md:p-6">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-bold text-gray-900">{e.producer.name}</h3>
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                        🌾 PAA
-                      </span>
-                      {e.numeroNota && (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                          NF {e.numeroNota}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      {new Date(e.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                    </p>
-                    {funcionarios.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {funcionarios.map((f) => (
-                          <span
-                            key={f.id}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-100"
-                          >
-                            👤 {f.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {(podeEditarEsta || podeExcluir) && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      {podeEditarEsta && (
-                        <button
-                          onClick={() => startEdit(e)}
-                          className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
-                        >
-                          Editar
-                        </button>
-                      )}
-                      {podeExcluir && (
-                        <button
-                          onClick={() => handleDelete(e.id)}
-                          className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50 transition"
-                        >
-                          Excluir
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-1.5 mb-3">
-                  {e.itens.map((i) => (
-                    <div
-                      key={i.id}
-                      className="flex items-center justify-between bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-sm gap-2"
-                    >
-                      <div className="min-w-0">
-                        <span className="text-green-700 font-medium">{i.product.name}</span>
-                        {i.tipoCultivo === 'ORGANICO' && (
-                          <span className="ml-1 text-xs text-emerald-600">🍃 orgânico</span>
-                        )}
-                        <span className="text-gray-500 ml-1">
-                          {i.quantidade} {abrevUnidade(i.product.paaUnidade)} ·{' '}
-                          {i.pesoKg.toFixed(3)} kg
-                        </span>
-                      </div>
-                      {!masked && i.subtotal !== null && (
-                        <span className="text-amber-700 font-semibold shrink-0">
-                          {brl(i.subtotal)}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="pt-3 border-t border-gray-100 flex flex-wrap gap-4 items-center">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Peso Total:</span>
-                    <span className="text-sm font-bold text-gray-900">
-                      {e.pesoTotalKg.toFixed(3)} kg
-                    </span>
-                  </div>
-                  {!masked && e.valorTotal !== null && (
-                    <div className="flex items-center gap-2 ml-auto">
-                      <span className="text-xs text-gray-500">Valor Total:</span>
-                      <span className="text-lg font-bold text-amber-700">{brl(e.valorTotal)}</span>
-                    </div>
-                  )}
-                  {masked && (
-                    <span className="ml-auto text-xs text-gray-400 italic">
-                      🔒 valores financeiros restritos
-                    </span>
-                  )}
-                </div>
-
-                {e.observacoes && (
-                  <p className="text-sm text-gray-400 mt-2 italic">📝 {e.observacoes}</p>
-                )}
-              </div>
-            )
-          })}
+      {/* ↩️ MODAL: RETIRAR ASSINATURA */}
+      {retirando && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+          <div className="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl p-4 md:p-6">
+            <h3 className="text-lg font-bold text-gray-900">↩️ Retirar assinatura</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>{retirando.producer.name}</strong> ·{' '}
+              {new Date(retirando.dataEntrega).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+            </p>
+            <p className="text-sm text-gray-700 mt-3">
+              A entrega volta para <strong>Rascunho</strong> e o produtor precisará assinar de novo.
+              A retirada fica registrada nas observações.
+            </p>
+            {statusDe(retirando) === 'FINALIZADA' && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mt-3">
+                🔴 <strong>Esta entrega já está em um Termo.</strong> Ela será desvinculada e o Termo
+                ficará desatualizado: será preciso <strong>reemitir o Termo no SISPAA</strong>.
+              </p>
+            )}
+            <label className="block text-sm font-medium text-gray-700 mt-4 mb-1">Motivo *</label>
+            <textarea
+              value={motivo}
+              onChange={(ev) => setMotivo(ev.target.value)}
+              maxLength={500}
+              rows={3}
+              className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+              placeholder="Ex.: quantidade lançada errada"
+            />
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setRetirando(null)}
+                disabled={enviandoAssinatura}
+                className="bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarRetirada}
+                disabled={motivo.trim().length < 5 || enviandoAssinatura}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium transition"
+              >
+                {enviandoAssinatura ? 'Retirando...' : 'Retirar assinatura'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

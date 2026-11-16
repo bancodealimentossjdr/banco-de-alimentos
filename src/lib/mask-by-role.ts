@@ -3,21 +3,46 @@ import { maskCPF, maskPhone, maskEmail, maskAddress, maskContactName } from './m
 import { canEdit, type Module } from './permissions'
 
 /**
- * Retorna true se o role deve ver dados mascarados.
+ * Retorna true se o role deve ver dados de CONTATO mascarados.
  *
- * Política atual:
- * - dev      → vê dados crus (superconjunto do admin)
- * - admin    → vê dados crus
- * - operador → vê dados crus
- * - visualizador → vê dados mascarados
+ * Política:
+ * - dev / admin / operador → veem dados crus
+ * - visualizador           → vê dados mascarados
  *
- * 🛡️ Princípio fail-secure: na ausência de role (sessão inválida,
- * token corrompido, etc.), trata como visualizador e MASCARA.
+ * 🛡️ Fail-secure: sem role (sessão inválida, token corrompido) → MASCARA.
  * É mais seguro vazar nada do que vazar tudo.
  */
 export function shouldMaskPersonalData(role: UserRole | undefined | null): boolean {
   if (!role) return true
   return role !== 'dev' && role !== 'admin' && role !== 'operador'
+}
+
+/**
+ * Retorna true se o role deve ver DOCUMENTOS (CPF, CAF/DAP) mascarados.
+ *
+ * Política (decisão travada 23.9a):
+ * - dev / admin            → veem documentos crus (emitem o Termo PAA)
+ * - operador / visualizador → mascarados
+ *
+ * 🛡️ Motivo: minimização de dados (LGPD art. 6º, III). O operador lança
+ * entregas e colhe assinaturas usando nome, telefone e endereço; CPF e
+ * CAF só são necessários no PDF do Termo, gerado por admin/dev.
+ * 🛡️ Fail-secure: sem role → MASCARA.
+ */
+export function shouldMaskDocumentos(role: UserRole | undefined | null): boolean {
+  if (!role) return true
+  return role !== 'dev' && role !== 'admin'
+}
+
+/**
+ * 🛡️ 23.9a — CAF/DAP: mantém só os 4 últimos caracteres.
+ * "SDW0123456789" → "****6789"
+ */
+export function maskDapCaf(v: string | null | undefined): string | null {
+  if (!v) return null
+  const limpo = v.trim()
+  if (limpo.length <= 4) return '****'
+  return `****${limpo.slice(-4)}`
 }
 
 // ---------- DOADOR ----------
@@ -85,38 +110,50 @@ type ProdutorLike = {
   address?: string | null
   contact?: string | null
   cpf?: string | null
+  dapCaf?: string | null
   [key: string]: unknown
 }
 
 /**
- * Mascara dados do produtor rural para perfil visualizador.
+ * Mascara dados do produtor rural em duas camadas independentes.
  *
  * 🎭 Política:
- * - name    → mascarado via maskContactName (ex: "F*** B*** V***")
- * - contact → mascarado via maskContactName
- * - phone   → mascarado via maskPhone
- * - email   → mascarado via maskEmail
- * - address → mascarado via maskAddress
- * - cpf     → mascarado via maskCPF
+ * | Campo                                  | Visualizador | Operador | Admin/Dev |
+ * |----------------------------------------|--------------|----------|-----------|
+ * | name, contact, phone, email, address   | mascarado    | visível  | visível   |
+ * | cpf, dapCaf                            | mascarado    | mascarado| visível   |
  *
- * 🛡️ Motivo: na colheita solidária, o nome do produtor revela quem
- * entregou, quando e em que volume — informação sensível que o
- * visualizador não deve acessar de forma identificável. Política
- * consistente em todos os endpoints que usam este helper.
+ * 🛡️ Motivo (contato): na colheita solidária, o nome do produtor revela
+ * quem entregou, quando e em que volume. O visualizador não deve acessar
+ * isso de forma identificável. O operador precisa de telefone e endereço
+ * na operação diária.
+ * 🛡️ Motivo (documentos): ver shouldMaskDocumentos.
+ * 🛡️ Só mascara documentos que EXISTEM no objeto: se o endpoint usa
+ * `select` sem cpf/dapCaf, eles não são criados.
+ * ⚠️ Não percorre include aninhado: cada rota deve chamar
+ * maskProdutor(entrega.producer, role) explicitamente.
  */
 export function maskProdutor<T extends ProdutorLike>(
   p: T,
   role: UserRole | undefined | null
 ): T {
-  if (!shouldMaskPersonalData(role)) return p
+  const maskContato = shouldMaskPersonalData(role)
+  const maskDocs = shouldMaskDocumentos(role)
+  if (!maskContato && !maskDocs) return p
+
   return {
     ...p,
-    name: maskContactName(p.name ?? null),
-    phone: maskPhone(p.phone ?? null),
-    email: maskEmail(p.email ?? null),
-    address: maskAddress(p.address ?? null),
-    contact: maskContactName(p.contact ?? null),
-    cpf: maskCPF(p.cpf ?? null),
+    ...(maskContato
+      ? {
+          name: maskContactName(p.name ?? null),
+          phone: maskPhone(p.phone ?? null),
+          email: maskEmail(p.email ?? null),
+          address: maskAddress(p.address ?? null),
+          contact: maskContactName(p.contact ?? null),
+        }
+      : {}),
+    ...(maskDocs && 'cpf' in p ? { cpf: maskCPF(p.cpf ?? null) } : {}),
+    ...(maskDocs && 'dapCaf' in p ? { dapCaf: maskDapCaf(p.dapCaf) } : {}),
   }
 }
 
@@ -124,7 +161,7 @@ export function maskProdutorList<T extends ProdutorLike>(
   list: T[],
   role: UserRole | undefined | null
 ): T[] {
-  if (!shouldMaskPersonalData(role)) return list
+  if (!shouldMaskPersonalData(role) && !shouldMaskDocumentos(role)) return list
   return list.map((p) => maskProdutor(p, role))
 }
 
@@ -137,15 +174,11 @@ type FuncionarioLike = {
 
 /**
  * Mascara dados do funcionário para perfil visualizador.
+ * - name/phone mascarados; role/cargo e active permanecem visíveis
+ *   (informação operacional pública).
  *
- * 🎭 Política:
- * - name  → mascarado via maskContactName (ex: "J*** S***")
- * - phone → mascarado via maskPhone
- * - role/cargo → permanece visível (informação operacional pública)
- * - active → permanece visível
- *
- * 🛡️ Motivo: o ranking de funcionários não deve ser exposto ao visualizador,
- * portanto mesmo o nome é considerado dado sensível neste contexto.
+ * 🛡️ Motivo: o ranking de funcionários não deve ser exposto ao
+ * visualizador, portanto até o nome é dado sensível neste contexto.
  */
 export function maskFuncionario<T extends FuncionarioLike>(
   f: T,
@@ -171,9 +204,9 @@ export function maskFuncionarioList<T extends FuncionarioLike>(
 
 /**
  * Retorna true se o role é "somente leitura" no módulo.
- * Usado para mascarar campos de texto livre (ex: notes) em módulos
- * operacionais (doações, distribuições, colheita) onde o visualizador
- * tem acesso de leitura mas não deve ver detalhes sensíveis.
+ * Usado para mascarar texto livre (notes) em módulos operacionais
+ * (doações, distribuições, colheita), onde o visualizador lê mas não
+ * deve ver detalhes sensíveis.
  *
  * 🛡️ Fail-secure: sem role = somente leitura.
  */
@@ -185,9 +218,7 @@ export function isReadOnlyInModule(
   return !canEdit(role, module)
 }
 
-/**
- * Mascara o campo `notes` se o role for somente leitura no módulo.
- */
+/** Mascara o campo `notes` se o role for somente leitura no módulo. */
 export function maskNotesIfReadOnly<T extends { notes?: string | null }>(
   item: T,
   role: UserRole | undefined | null,
@@ -206,6 +237,7 @@ export function maskNotesListIfReadOnly<T extends { notes?: string | null }>(
   if (!isReadOnlyInModule(role, module)) return list
   return list.map((item) => maskNotesIfReadOnly(item, role, module))
 }
+
 // ---------- ONDA 23 — ENTREGA PAA ----------
 type EntregaPaaLike = {
   valorTotal?: unknown
@@ -217,10 +249,10 @@ type EntregaPaaLike = {
  * 🎭 Mascara valores financeiros individualizados da entrega PAA.
  *
  * Política (decidida na 23.3):
- * - Preço de tabela CONAB no CADASTRO de produto → público (não mascarado)
- * - valorTotal / subtotal / precoUnitario da ENTREGA → financeiro individualizado
- *   do produtor → mascarado para visualizador
- * - pesoKg / pesoTotalKg / quantidade → permanecem VISÍVEIS (dado operacional)
+ * - Preço de tabela CONAB no CADASTRO de produto → público
+ * - valorTotal / subtotal / precoUnitario da ENTREGA → financeiro
+ *   individualizado do produtor → mascarado para visualizador
+ * - pesoKg / pesoTotalKg / quantidade → VISÍVEIS (dado operacional)
  */
 export function maskEntregaPaa<T extends EntregaPaaLike>(
   e: T,

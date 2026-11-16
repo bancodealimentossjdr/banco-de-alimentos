@@ -227,21 +227,37 @@ export function podeRegistrarNoEvento(
 }
 
 /**
- * Extrai a string YYYY-MM-DD de uma data, lidando com fuso horário.
+ * 🕛 G1-8d — Fuso fixo da trava temporal (princípio 7).
+ * Antes usava getFullYear(): dependia do fuso do SERVIDOR
+ * (PC = BRT, Vercel = UTC) e travava o operador no próprio dia.
+ */
+const FMT_DIA_BR = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+/**
+ * Extrai YYYY-MM-DD de uma data no calendário de America/Sao_Paulo.
  */
 function getDateString(value: Date | string): string {
   if (typeof value === 'string') {
     return value.slice(0, 10)
   }
-  const year = value.getFullYear()
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return FMT_DIA_BR.format(value) // en-CA → "YYYY-MM-DD"
 }
 
 /**
- * Verifica se dois timestamps representam o mesmo dia do calendário.
- * Tolerante a fuso horário (vide getDateString).
+ * 🕛 Coluna @db.Date chega como meia-noite UTC (= 21h do dia anterior em BRT).
+ * Converte para meio-dia BRT do mesmo dia civil antes de passar à trava.
+ */
+export function dataCivilParaTrava(d: Date): Date {
+  return new Date(`${d.toISOString().slice(0, 10)}T12:00:00-03:00`)
+}
+
+/**
+ * Verifica se dois timestamps representam o mesmo dia do calendário em BRT.
  */
 export function isSameDay(a: Date | string, b: Date | string): boolean {
   return getDateString(a) === getDateString(b)

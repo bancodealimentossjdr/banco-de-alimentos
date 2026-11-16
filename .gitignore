@@ -65,3 +65,5 @@ public/workbox-*.js
 /data/ingressos/
 backup-schema-pre-onda23.prisma
 relatorio-*.html
+
+scripts/criar-usuarios-dev.mjs

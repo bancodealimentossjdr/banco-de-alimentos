@@ -32,14 +32,13 @@ export async function GET(
       return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
     }
 
-    // 🔐 Aplica máscaras conforme o role
     const session = await auth()
     const role = session?.user?.role
 
     // 1) Mascara notes se for somente leitura no módulo
-    let harvestSegura = maskNotesIfReadOnly(harvest, role, 'colheita-solidaria')
+    let harvestSegura: any = maskNotesIfReadOnly(harvest, role, 'colheita-solidaria')
 
-    // 2) Mascara dados pessoais se for visualizador
+    // 2) Visualizador: dados pessoais mascarados + R$ removido (igual à lista)
     if (shouldMaskPersonalData(role)) {
       harvestSegura = {
         ...harvestSegura,
@@ -55,6 +54,8 @@ export async function GET(
         employee3: harvestSegura.employee3
           ? maskFuncionario(harvestSegura.employee3, role)
           : harvestSegura.employee3,
+        indemnityValue: null, // 🔴 R$ nunca chega ao visualizador
+        isMasked: true,
       }
     }
 
@@ -72,9 +73,7 @@ export async function PUT(
   try {
     const { id } = await params
 
-    // 🔒 Busca o registro ANTES — pega o `date` (dia da colheita) pra checar trava temporal.
-    // IMPORTANTE: usamos `date`, NÃO `createdAt`. Operador só pode editar se a data
-    // da colheita for hoje. Colheitas retroativas ficam bloqueadas mesmo recém-criadas.
+    // 🔒 Trava temporal usa `date` (dia da colheita), NÃO `createdAt`.
     const existing = await prisma.solidarityHarvest.findUnique({
       where: { id },
       select: { date: true },
@@ -99,46 +98,49 @@ export async function PUT(
       items,
     } = body
 
-    // 🔍 Validação: funcionários não podem se repetir
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json({ error: 'Adicione pelo menos um item' }, { status: 400 })
+    }
+
     const employeeIds = [employeeId, employee2Id, employee3Id].filter(Boolean)
-    const uniqueIds = new Set(employeeIds)
-    if (employeeIds.length !== uniqueIds.size) {
+    if (employeeIds.length !== new Set(employeeIds).size) {
       return NextResponse.json(
         { error: 'Não é possível selecionar o mesmo funcionário mais de uma vez' },
         { status: 400 }
       )
     }
 
-    await prisma.harvestItem.deleteMany({
-      where: { harvestId: id },
-    })
+    // 🧱 Atômico: ou troca os itens E atualiza, ou não faz nada.
+    const harvest = await prisma.$transaction(async (tx) => {
+      await tx.harvestItem.deleteMany({ where: { harvestId: id } })
 
-    const harvest = await prisma.solidarityHarvest.update({
-      where: { id },
-      data: {
-        producerId,
-        employeeId: employeeId || null,
-        employee2Id: employee2Id || null,
-        employee3Id: employee3Id || null,
-        date: date ? new Date(date + 'T12:00:00') : undefined,
-        status: status || 'agendada',
-        notes: notes || null,
-        indemnityValue: indemnityValue ? parseFloat(String(indemnityValue)) : null,
-        items: {
-          create: items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            boxes: item.boxes ?? null,
-          })),
+      return tx.solidarityHarvest.update({
+        where: { id },
+        data: {
+          producerId,
+          employeeId: employeeId || null,
+          employee2Id: employee2Id || null,
+          employee3Id: employee3Id || null,
+          date: date ? new Date(date + 'T12:00:00') : undefined,
+          status: status || 'agendada',
+          notes: notes || null,
+          indemnityValue: indemnityValue ? parseFloat(String(indemnityValue)) : null,
+          items: {
+            create: items.map((item: { productId: string; quantity: number; boxes?: number }) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              boxes: item.boxes ?? null,
+            })),
+          },
         },
-      },
-      include: {
-        producer: true,
-        employee: true,
-        employee2: true,
-        employee3: true,
-        items: { include: { product: true } },
-      },
+        include: {
+          producer: true,
+          employee: true,
+          employee2: true,
+          employee3: true,
+          items: { include: { product: true } },
+        },
+      })
     })
 
     return NextResponse.json(harvest)
@@ -155,8 +157,6 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    // 🔒 Confirma que o registro existe (mesmo que só admin possa excluir,
-    // mantemos a checagem pra retornar 404 correto).
     const existing = await prisma.solidarityHarvest.findUnique({
       where: { id },
       select: { id: true },
@@ -165,13 +165,11 @@ export async function DELETE(
       return NextResponse.json({ error: 'Colheita não encontrada' }, { status: 404 })
     }
 
-    // 🚫 Apenas admin pode excluir (módulo time-locked). Operador é bloqueado.
+    // 🚫 Apenas admin pode excluir (módulo time-locked).
     const authResult = await requireDeleteRecord('colheita-solidaria')
     if (authResult instanceof NextResponse) return authResult
 
-    await prisma.solidarityHarvest.delete({
-      where: { id },
-    })
+    await prisma.solidarityHarvest.delete({ where: { id } })
     return NextResponse.json({ message: 'Colheita excluída com sucesso' })
   } catch (error) {
     console.error('Erro DELETE colheita:', error)
