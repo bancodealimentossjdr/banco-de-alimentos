@@ -1,38 +1,59 @@
 ﻿import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView } from '@/lib/auth-helpers'
-import { auth } from '@/lib/auth'
+import { canView } from '@/lib/permissions'
 import { shouldMaskPersonalData, maskContactName } from '@/lib/mask-by-role'
+
+type Fonte = 'legado' | 'app' | 'misto' | 'vazio'
+interface Mes {
+  mes: number
+  doacaoKg: number
+  colheitaKg: number
+  distribuicaoKg: number
+  fonte: Fonte
+  parcial: boolean
+}
+
+const TZ = 'America/Sao_Paulo'
+
+function anoMesAtual() {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' })
+    .formatToParts(new Date())
+  return {
+    ano: Number(p.find((x) => x.type === 'year')!.value),
+    mes: Number(p.find((x) => x.type === 'month')!.value),
+  }
+}
 
 export async function GET() {
   const authResult = await requireView('dashboard')
   if (authResult instanceof NextResponse) return authResult
 
+  const role = authResult.user.role
+  const mask = shouldMaskPersonalData(role)
+  const isGestor = role === 'admin' || role === 'dev'
+  const vePaa = canView(role, 'paa')
+
+  const { ano, mes: mesAtual } = anoMesAtual()
+  const inicioAno = new Date(`${ano}-01-01T03:00:00.000Z`)
+  const inicioProx = new Date(`${ano + 1}-01-01T03:00:00.000Z`)
+
   try {
     const [
-      totalProducts,
-      totalDonors,
-      totalBeneficiaries,
-      totalEmployees,
-      totalDonations,
-      totalDistributions,
-      totalProducers,
-      totalHarvests,
       recentDonations,
       recentDistributions,
       recentHarvests,
-      approvedAgg,
-      distributedAgg,
+      legado,
+      appDoacao,
+      appColheita,
+      appDistribuicao,
+      distPendentesCount,
+      distPendentes,
+      colheitasAgendadasCount,
+      colheitasAgendadas,
+      paaRascunhoCount,
+      termosSemNfCount,
     ] = await Promise.all([
-      prisma.product.count({ where: { active: true } }),
-      prisma.donor.count({ where: { active: true } }),
-      prisma.beneficiary.count({ where: { status: 'ativo' } }),
-      prisma.employee.count({ where: { active: true } }),
-      prisma.donation.count(),
-      prisma.distribution.count(),
-      prisma.producer.count({ where: { active: true } }),
-      prisma.solidarityHarvest.count(),
-
       prisma.donation.findMany({
         take: 5,
         orderBy: { date: 'desc' },
@@ -58,65 +79,131 @@ export async function GET() {
         },
       }),
 
-      // ✅ Novo cálculo de estoque (global)
-      prisma.dailyApproval.aggregate({ _sum: { approvedQty: true } }),
-      prisma.distributionItem.aggregate({ _sum: { quantity: true } }),
+      // 📜 Legado (planilhas) — isolado, só leitura
+      prisma.historicoMensal.groupBy({
+        by: ['mes', 'tipo'],
+        where: { ano, tipo: { in: ['DOACAO', 'COLHEITA', 'DISTRIBUICAO'] } },
+        _sum: { kg: true },
+      }),
+
+      // 📊 App — por mês civil em São Paulo
+      prisma.$queryRaw<{ mes: number; kg: number }[]>`
+        SELECT EXTRACT(MONTH FROM d."date" AT TIME ZONE 'UTC' AT TIME ZONE ${TZ})::int AS mes,
+               COALESCE(SUM(i."quantity"), 0)::float AS kg
+        FROM "DonationItem" i JOIN "Donation" d ON d."id" = i."donationId"
+        WHERE d."date" >= ${inicioAno} AND d."date" < ${inicioProx}
+        GROUP BY 1`,
+      prisma.$queryRaw<{ mes: number; kg: number }[]>`
+        SELECT EXTRACT(MONTH FROM h."date" AT TIME ZONE 'UTC' AT TIME ZONE ${TZ})::int AS mes,
+               COALESCE(SUM(i."quantity"), 0)::float AS kg
+        FROM "HarvestItem" i JOIN "SolidarityHarvest" h ON h."id" = i."harvestId"
+        WHERE h."status" = 'realizada' AND h."date" >= ${inicioAno} AND h."date" < ${inicioProx}
+        GROUP BY 1`,
+      prisma.$queryRaw<{ mes: number; kg: number }[]>`
+        SELECT EXTRACT(MONTH FROM d."date" AT TIME ZONE 'UTC' AT TIME ZONE ${TZ})::int AS mes,
+               COALESCE(SUM(i."quantity"), 0)::float AS kg
+        FROM "DistributionItem" i JOIN "Distribution" d ON d."id" = i."distributionId"
+        WHERE d."legacy" = false AND d."date" >= ${inicioAno} AND d."date" < ${inicioProx}
+        GROUP BY 1`,
+
+      // ⏳ Pendências
+      prisma.distribution.count({ where: { status: 'PENDENTE', legacy: false } }),
+      prisma.distribution.findMany({
+        where: { status: 'PENDENTE', legacy: false },
+        take: 5,
+        orderBy: { date: 'asc' },
+        select: { id: true, date: true, beneficiary: { select: { name: true } } },
+      }),
+      prisma.solidarityHarvest.count({ where: { status: 'agendada' } }),
+      prisma.solidarityHarvest.findMany({
+        where: { status: 'agendada' },
+        take: 5,
+        orderBy: { date: 'asc' },
+        select: { id: true, date: true, producer: { select: { name: true } } },
+      }),
+      vePaa ? prisma.entregaPaa.count({ where: { status: 'RASCUNHO' } }) : Promise.resolve(null),
+      isGestor ? prisma.termoPaa.count({ where: { notaFiscal: null } }) : Promise.resolve(null),
     ])
 
-    const totalInColdRoom = approvedAgg._sum.approvedQty || 0
-    const totalDistributedKg = distributedAgg._sum.quantity || 0
+    // 🧮 Monta a série jan → mês atual
+    const somaApp = (rows: { mes: number; kg: number }[], m: number) =>
+      Number(rows.find((r) => Number(r.mes) === m)?.kg ?? 0)
+    const somaLeg = (tipo: string, m: number) =>
+      Number(legado.find((r) => r.mes === m && r.tipo === tipo)?._sum.kg ?? 0)
 
-    const totalStock = totalInColdRoom
-    const totalApproved = totalInColdRoom + totalDistributedKg
+    const historico: Mes[] = []
+    for (let m = 1; m <= mesAtual; m++) {
+      const leg = {
+        d: somaLeg('DOACAO', m),
+        c: somaLeg('COLHEITA', m),
+        x: somaLeg('DISTRIBUICAO', m),
+      }
+      const app = {
+        d: somaApp(appDoacao, m),
+        c: somaApp(appColheita, m),
+        x: somaApp(appDistribuicao, m),
+      }
+      const temLeg = leg.d + leg.c + leg.x > 0
+      const temApp = app.d + app.c + app.x > 0
+      historico.push({
+        mes: m,
+        doacaoKg: Math.round((leg.d + app.d) * 100) / 100,
+        colheitaKg: Math.round((leg.c + app.c) * 100) / 100,
+        distribuicaoKg: Math.round((leg.x + app.x) * 100) / 100,
+        fonte: temLeg && temApp ? 'misto' : temLeg ? 'legado' : temApp ? 'app' : 'vazio',
+        parcial: m === mesAtual,
+      })
+    }
 
-    // 🔐 LGPD — visualizador (fail-secure): nomes mascarados,
-    //    notes e valores financeiros removidos NO SERVIDOR.
-    const session = await auth()
-    const mask = shouldMaskPersonalData(session?.user?.role)
+    // 🔐 LGPD — mascaramento no servidor
+    const nome = (n: string) => (mask ? maskContactName(n) : n)
 
-    const safeRecentDonations = mask
-      ? recentDonations.map((d) => ({
-          ...d,
-          notes: null,
-          donor: d.donor ? { name: maskContactName(d.donor.name) } : d.donor,
-        }))
-      : recentDonations
-
-    const safeRecentDistributions = mask
-      ? recentDistributions.map((d) => ({
-          ...d,
-          notes: null,
-          beneficiary: d.beneficiary
-            ? { name: maskContactName(d.beneficiary.name) }
-            : d.beneficiary,
-        }))
-      : recentDistributions
-
-    const safeRecentHarvests = mask
-      ? recentHarvests.map((h) => ({
-          ...h,
-          notes: null,
-          indemnityValue: null, // 🔴 R$ nunca chega ao visualizador
-          producer: h.producer ? { name: maskContactName(h.producer.name) } : h.producer,
-        }))
-      : recentHarvests
+    const safeRecentDonations = recentDonations.map((d) => ({
+      ...d,
+      notes: mask ? null : d.notes,
+      donor: { name: nome(d.donor.name) },
+    }))
+    const safeRecentDistributions = recentDistributions.map((d) => ({
+      ...d,
+      notes: mask ? null : d.notes,
+      beneficiary: { name: nome(d.beneficiary.name) },
+    }))
+    const safeRecentHarvests = recentHarvests.map((h) => ({
+      ...h,
+      notes: mask ? null : h.notes,
+      indemnityValue: mask ? null : h.indemnityValue,
+      producer: { name: nome(h.producer.name) },
+    }))
 
     return NextResponse.json({
-      totalProducts,
-      totalDonors,
-      totalBeneficiaries,
-      totalEmployees,
-      totalDonations,
-      totalDistributions,
-      totalProducers,
-      totalHarvests,
-      totalStock,
-      totalApproved,
       stockItems: [],
       notifications: [],
       recentDonations: safeRecentDonations,
       recentDistributions: safeRecentDistributions,
       recentHarvests: safeRecentHarvests,
+
+      ano,
+      historico,
+      pendencias: {
+        distribuicoes: {
+          total: distPendentesCount,
+          itens: distPendentes.map((d) => ({
+            id: d.id,
+            date: d.date,
+            nome: nome(d.beneficiary.name),
+          })),
+        },
+        paaRascunho: paaRascunhoCount,
+        termosSemNf: termosSemNfCount,
+      },
+      colheitasAgendadas: {
+        total: colheitasAgendadasCount,
+        itens: colheitasAgendadas.map((h) => ({
+          id: h.id,
+          date: h.date,
+          nome: nome(h.producer.name),
+        })),
+      },
     })
   } catch (error) {
     console.error('Erro GET dashboard:', error)
