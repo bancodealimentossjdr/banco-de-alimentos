@@ -13,6 +13,11 @@ interface Mes {
   fonte: Fonte
   parcial: boolean
 }
+interface LinhaLegado {
+  mes: number
+  tipo: string
+  kg: number
+}
 
 const TZ = 'America/Sao_Paulo'
 
@@ -22,6 +27,25 @@ function anoMesAtual() {
   return {
     ano: Number(p.find((x) => x.type === 'year')!.value),
     mes: Number(p.find((x) => x.type === 'month')!.value),
+  }
+}
+
+// 📜 Legado isolado: se a tabela faltar ou falhar, o painel segue sem ele
+async function buscarLegado(ano: number): Promise<LinhaLegado[]> {
+  try {
+    const rows = await prisma.historicoMensal.groupBy({
+      by: ['mes', 'tipo'],
+      where: { ano, tipo: { in: ['DOACAO', 'COLHEITA', 'DISTRIBUICAO'] } },
+      _sum: { kg: true },
+    })
+    return rows.map((r) => ({
+      mes: Number(r.mes),
+      tipo: String(r.tipo),
+      kg: Number(r._sum.kg ?? 0),
+    }))
+  } catch (error) {
+    console.error('Dashboard: historico_mensal indisponível, seguindo sem legado:', error)
+    return []
   }
 }
 
@@ -79,12 +103,7 @@ export async function GET() {
         },
       }),
 
-      // 📜 Legado (planilhas) — isolado, só leitura
-      prisma.historicoMensal.groupBy({
-        by: ['mes', 'tipo'],
-        where: { ano, tipo: { in: ['DOACAO', 'COLHEITA', 'DISTRIBUICAO'] } },
-        _sum: { kg: true },
-      }),
+      buscarLegado(ano),
 
       // 📊 App — por mês civil em São Paulo
       prisma.$queryRaw<{ mes: number; kg: number }[]>`
@@ -129,7 +148,7 @@ export async function GET() {
     const somaApp = (rows: { mes: number; kg: number }[], m: number) =>
       Number(rows.find((r) => Number(r.mes) === m)?.kg ?? 0)
     const somaLeg = (tipo: string, m: number) =>
-      Number(legado.find((r) => r.mes === m && r.tipo === tipo)?._sum.kg ?? 0)
+      legado.find((r) => r.mes === m && r.tipo === tipo)?.kg ?? 0
 
     const historico: Mes[] = []
     for (let m = 1; m <= mesAtual; m++) {
