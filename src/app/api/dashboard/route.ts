@@ -49,6 +49,13 @@ async function buscarLegado(ano: number): Promise<LinhaLegado[]> {
   }
 }
 
+// ⚖️ Regra B: por mês e tipo, a planilha (legado) prevalece; sem legado, usa o app. Nunca soma.
+function escolher(leg: number, app: number) {
+  if (leg > 0) return { kg: leg, origem: 'legado' as const }
+  if (app > 0) return { kg: app, origem: 'app' as const }
+  return { kg: 0, origem: null }
+}
+
 export async function GET() {
   const authResult = await requireView('dashboard')
   if (authResult instanceof NextResponse) return authResult
@@ -149,27 +156,23 @@ export async function GET() {
       Number(rows.find((r) => Number(r.mes) === m)?.kg ?? 0)
     const somaLeg = (tipo: string, m: number) =>
       legado.find((r) => r.mes === m && r.tipo === tipo)?.kg ?? 0
+    const r2 = (n: number) => Math.round(n * 100) / 100
 
     const historico: Mes[] = []
     for (let m = 1; m <= mesAtual; m++) {
-      const leg = {
-        d: somaLeg('DOACAO', m),
-        c: somaLeg('COLHEITA', m),
-        x: somaLeg('DISTRIBUICAO', m),
-      }
-      const app = {
-        d: somaApp(appDoacao, m),
-        c: somaApp(appColheita, m),
-        x: somaApp(appDistribuicao, m),
-      }
-      const temLeg = leg.d + leg.c + leg.x > 0
-      const temApp = app.d + app.c + app.x > 0
+      const d = escolher(somaLeg('DOACAO', m), somaApp(appDoacao, m))
+      const c = escolher(somaLeg('COLHEITA', m), somaApp(appColheita, m))
+      const x = escolher(somaLeg('DISTRIBUICAO', m), somaApp(appDistribuicao, m))
+      const origens = new Set([d.origem, c.origem, x.origem].filter(Boolean))
       historico.push({
         mes: m,
-        doacaoKg: Math.round((leg.d + app.d) * 100) / 100,
-        colheitaKg: Math.round((leg.c + app.c) * 100) / 100,
-        distribuicaoKg: Math.round((leg.x + app.x) * 100) / 100,
-        fonte: temLeg && temApp ? 'misto' : temLeg ? 'legado' : temApp ? 'app' : 'vazio',
+        doacaoKg: r2(d.kg),
+        colheitaKg: r2(c.kg),
+        distribuicaoKg: r2(x.kg),
+        fonte:
+          origens.size === 0 ? 'vazio'
+          : origens.size > 1 ? 'misto'
+          : origens.has('legado') ? 'legado' : 'app',
         parcial: m === mesAtual,
       })
     }

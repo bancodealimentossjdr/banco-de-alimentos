@@ -16,14 +16,12 @@ export async function GET(req: NextRequest) {
   const erro = validatePeriodo(q)
   if (erro) return NextResponse.json({ error: erro }, { status: 400 })
 
-  // 📅 Bordas já em horário de Brasília (day-boundaries).
-  // Removido o setUTCHours local — divergia de /aproveitamento.
   const from = q.from ?? new Date('1970-01-01T00:00:00.000Z')
   const to = q.to ?? new Date()
 
   try {
-    // 🧮 Fonte ÚNICA das fórmulas (Onda 16.5), agora com os 4 filtros.
-    const { volumes, utilization } = await calculateUtilization({
+    // 🧮 Fonte ÚNICA das fórmulas + 📜 planilha (Regra B, mês tocado)
+    const { volumes, utilization, mesesPlanilha } = await calculateUtilization({
       from,
       to,
       donorIds: q.doadorIds,
@@ -31,10 +29,6 @@ export async function GET(req: NextRequest) {
       beneficiaryIds: q.beneficiarioIds,
       employeeIds: q.funcionarioIds,
     })
-
-    // 📦 emEstoque REMOVIDO (23.7c): saldo instantâneo não é indicador
-    //    de período. Vive em /estoque, sua fonte de verdade.
-    //    Bônus: uma query a menos por carga.
 
     const beneficiariosUnicos = await prisma.distribution.findMany({
       where: {
@@ -52,6 +46,7 @@ export async function GET(req: NextRequest) {
       totalColheita: volumes.harvestKg,
       percentualAproveitamento: utilization?.utilizationPct ?? 0,
       beneficiariosAtendidos: beneficiariosUnicos.length,
+      mesesPlanilha,
       calculatedAt: new Date(),
     })
   } catch (error) {

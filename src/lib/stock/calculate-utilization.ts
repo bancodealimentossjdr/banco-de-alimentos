@@ -1,6 +1,15 @@
 import { prisma } from '@/lib/prisma'
 import { calculateStock } from '@/lib/stock/calculate-stock'
 import { startOfDayBrasilia } from '@/lib/date/day-boundaries'
+import {
+  mesesTocados,
+  buscarLegadoPorMes,
+  escolher,
+  mesTemPlanilha,
+  mesSemTaxa,
+  chaveMesDateTime,
+  chaveMesDateOnly,
+} from '@/lib/serie-mensal'
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -17,71 +26,50 @@ export type UtilizationFilters = {
 
 export type UtilizationSnapshot = {
   period: { from: Date; to: Date }
-
-  // true se QUALQUER filtro de entidade estiver ativo
-  // (doador / produtor / instituição / funcionário)
   hasEntityFilter: boolean
-
   volumes: {
-    donationsKg: number // doações no período + filtros
-    harvestKg: number // colheitas "realizada" no período + filtros
-    distributedKg: number // distribuições no período + filtros
+    donationsKg: number
+    harvestKg: number
+    distributedKg: number
   }
-
-  // ⚠️ null quando hasEntityFilter = true (vira hífen na tela)
   utilization: {
-    approvedKg: number | null // DailyApproval (não inclui colheita)
-    utilizationPct: number | null // taxa de aproveitamento
-    destinationPct: number | null // taxa de destinação
-    lossKg: number | null // perda derivada (só sobre doação bruta)
+    approvedKg: number | null
+    utilizationPct: number | null
+    destinationPct: number | null
+    lossKg: number | null
     currentStockKg: number | null
   }
-
+  // 📜 meses "YYYY-MM" em que a planilha entrou (inteiros — opção b)
+  mesesPlanilha: string[]
   calculatedAt: Date
 }
-
-/* ------------------------------------------------------------------ */
-/* Tipos da SÉRIE TEMPORAL (Onda 16.5.B)                               */
-/* ------------------------------------------------------------------ */
 
 export type SeriesGranularity = 'day' | 'week' | 'month'
 
 export type UtilizationSeriesPoint = {
-  // chave do bucket (YYYY-MM-DD = início do bucket em horário de Brasília)
   bucket: string
-  // label amigável pré-formatado pro eixo X (pt-BR)
   label: string
-  donationsKg: number // doação bruta no bucket
-  harvestKg: number // colheita "realizada" no bucket
-  approvedKg: number // DailyApproval no bucket
-  // 🌾 aproveitado TOTAL = approved + colheita (decisão: colheita 100%)
+  donationsKg: number
+  harvestKg: number
+  approvedKg: number
   approvedTotalKg: number
-  distributedKg: number // distribuição no bucket
-  lossKg: number // perda = max(0, doação - approved)
-  // 🌾 23.7e-1: entregas PAA no bucket (kg). NÃO entra em approvedTotalKg
-  //    nem em lossKg — PAA é compra institucional, não doação triada.
-  //    Alterar isso mudaria a taxa de aproveitamento histórica.
+  distributedKg: number
+  lossKg: number
   paaKg: number
+  // 📜 true = algum volume deste mês veio da planilha
+  planilha: boolean
 }
 
 export type UtilizationSeries = {
   period: { from: Date; to: Date }
   granularity: SeriesGranularity
-  // ⚠️ true quando há filtro de entidade → série vazia (taxas não atribuíveis)
   hasEntityFilter: boolean
   points: UtilizationSeriesPoint[]
+  mesesPlanilha: string[]
   calculatedAt: Date
 }
 
-/* ------------------------------------------------------------------ */
-/* Constantes                                                          */
-/* ------------------------------------------------------------------ */
-
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-
-/* ------------------------------------------------------------------ */
-/* Snapshot / Série vazios (defesa)                                    */
-/* ------------------------------------------------------------------ */
 
 const EMPTY_SNAPSHOT = (
   from: Date,
@@ -98,6 +86,7 @@ const EMPTY_SNAPSHOT = (
     lossKg: hasEntityFilter ? null : 0,
     currentStockKg: hasEntityFilter ? null : 0,
   },
+  mesesPlanilha: [],
   calculatedAt: new Date(),
 })
 
@@ -111,11 +100,12 @@ const EMPTY_SERIES = (
   granularity,
   hasEntityFilter,
   points: [],
+  mesesPlanilha: [],
   calculatedAt: new Date(),
 })
 
 /* ------------------------------------------------------------------ */
-/* Função principal — SNAPSHOT (inalterada)                            */
+/* SNAPSHOT                                                            */
 /* ------------------------------------------------------------------ */
 
 export async function calculateUtilization(
@@ -123,7 +113,6 @@ export async function calculateUtilization(
 ): Promise<UtilizationSnapshot> {
   const { from, to } = filters
 
-  // normaliza arrays vazios -> undefined (filtro inativo)
   const donorIds = nonEmpty(filters.donorIds)
   const producerIds = nonEmpty(filters.producerIds)
   const beneficiaryIds = nonEmpty(filters.beneficiaryIds)
@@ -133,8 +122,6 @@ export async function calculateUtilization(
     donorIds || producerIds || beneficiaryIds || employeeIds,
   )
 
-  // 🛡️ Defesa: se o client ainda não conhece os models (cache velho),
-  // retorna snapshot vazio em vez de quebrar a página.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!(prisma as any).donationItem || !(prisma as any).dailyApproval) {
     console.warn(
@@ -145,9 +132,6 @@ export async function calculateUtilization(
   }
 
   try {
-    // ----------------------------------------------------------------
-    // Filtro de funcionário: o nome pode estar em 3 slots distintos.
-    // ----------------------------------------------------------------
     const employeeOR = employeeIds
       ? {
           OR: [
@@ -177,38 +161,33 @@ export async function calculateUtilization(
       ...employeeOR,
     }
 
-    // ----------------------------------------------------------------
-    // VOLUMES — sempre calculados, com todos os filtros ativos
-    // ----------------------------------------------------------------
     const [donationItems, harvestItems, distributionItems] = await Promise.all([
       prisma.donationItem.findMany({
         where: { donation: donationWhere },
-        select: { quantity: true },
+        select: { quantity: true, donation: { select: { date: true } } },
       }),
       prisma.harvestItem.findMany({
         where: { harvest: harvestWhere },
-        select: { quantity: true },
+        select: { quantity: true, harvest: { select: { date: true } } },
       }),
       prisma.distributionItem.findMany({
         where: { distribution: distributionWhere },
-        select: { quantity: true },
+        select: { quantity: true, distribution: { select: { date: true } } },
       }),
     ])
 
-    const donationsKg = round3(sumQty(donationItems))
-    const harvestKg = round3(sumQty(harvestItems))
-    const distributedKg = round3(sumQty(distributionItems))
-
-    const volumes = { donationsKg, harvestKg, distributedKg }
-
     // ----------------------------------------------------------------
-    // UTILIZATION — só faz sentido na VISÃO GERAL.
+    // 🔍 Filtro por entidade: planilha NÃO entra (não tem doador etc.)
     // ----------------------------------------------------------------
     if (hasEntityFilter) {
       return {
         period: { from, to },
         hasEntityFilter: true,
-        volumes,
+        volumes: {
+          donationsKg: round3(sumQty(donationItems)),
+          harvestKg: round3(sumQty(harvestItems)),
+          distributedKg: round3(sumQty(distributionItems)),
+        },
         utilization: {
           approvedKg: null,
           utilizationPct: null,
@@ -216,42 +195,74 @@ export async function calculateUtilization(
           lossKg: null,
           currentStockKg: null,
         },
+        mesesPlanilha: [],
         calculatedAt: new Date(),
       }
     }
 
-    // ---- Visão geral: aproveitamento agregado (DailyApproval) ----
-    const approvalAgg = await prisma.dailyApproval.aggregate({
-      where: { date: { gte: from, lte: to } },
-      _sum: { approvedQty: true },
-    })
+    // ---- Visão geral ----
+    const [approvalRows, legado] = await Promise.all([
+      prisma.dailyApproval.findMany({
+        where: { date: { gte: from, lte: to } },
+        select: { date: true, approvedQty: true },
+      }),
+      buscarLegadoPorMes(mesesTocados(from, to)),
+    ])
 
-    const approvedKg = round3(approvalAgg._sum.approvedQty ?? 0)
+    const appDoa = agruparMes(donationItems, (i) => chaveMesDateTime(i.donation.date))
+    const appHar = agruparMes(harvestItems, (i) => chaveMesDateTime(i.harvest.date))
+    const appDis = agruparMes(distributionItems, (i) => chaveMesDateTime(i.distribution.date))
+    const appApr = new Map<string, number>()
+    for (const a of approvalRows) {
+      const k = chaveMesDateOnly(a.date)
+      appApr.set(k, (appApr.get(k) ?? 0) + a.approvedQty)
+    }
 
-    // ----------------------------------------------------------------
-    // 🧮 FÓRMULAS OFICIAIS (Onda 16.5) — intocadas na 23.7e.
-    // ----------------------------------------------------------------
-    const entradasKg = round3(donationsKg + harvestKg)
-    const aproveitadoTotalKg = round3(approvedKg + harvestKg)
+    const meses = mesesTocados(from, to)
+    const mesesPlanilha = meses.filter((k) => mesTemPlanilha(legado.get(k)))
+
+    // 📊 Volumes (Regra B por mês) + bases "limpas" para as taxas
+    let donationsKg = 0, harvestKg = 0, distributedKg = 0
+    let tDoa = 0, tHar = 0, tDis = 0, tApr = 0
+
+    for (const k of meses) {
+      const l = legado.get(k)
+      const d = escolher(l?.DOACAO ?? 0, appDoa.get(k) ?? 0)
+      const c = escolher(l?.COLHEITA ?? 0, appHar.get(k) ?? 0)
+      const x = escolher(l?.DISTRIBUICAO ?? 0, appDis.get(k) ?? 0)
+      donationsKg += d
+      harvestKg += c
+      distributedKg += x
+      if (!mesSemTaxa(l)) {
+        tDoa += d
+        tHar += c
+        tDis += x
+        tApr += appApr.get(k) ?? 0
+      }
+    }
+
+    donationsKg = round3(donationsKg)
+    harvestKg = round3(harvestKg)
+    distributedKg = round3(distributedKg)
+
+    // 🧮 FÓRMULAS OFICIAIS (Onda 16.5) — só sobre meses sem planilha
+    const approvedKg = round3(tApr)
+    const entradasKg = round3(tDoa + tHar)
+    const aproveitadoTotalKg = round3(approvedKg + tHar)
 
     const utilizationPct =
       entradasKg > 0 ? round1((aproveitadoTotalKg / entradasKg) * 100) : 0
-
     const destinationPct =
-      aproveitadoTotalKg > 0
-        ? round1((distributedKg / aproveitadoTotalKg) * 100)
-        : 0
+      aproveitadoTotalKg > 0 ? round1((tDis / aproveitadoTotalKg) * 100) : 0
+    const lossKg = round3(Math.max(0, tDoa - approvedKg))
 
-    const lossKg = round3(Math.max(0, donationsKg - approvedKg))
-
-    // 📦 Estoque atual: reutiliza a lib oficial (parte do último marco)
     const stock = await calculateStock(to)
     const currentStockKg = stock.hasMarker ? stock.currentStockKg : null
 
     return {
       period: { from, to },
       hasEntityFilter: false,
-      volumes,
+      volumes: { donationsKg, harvestKg, distributedKg },
       utilization: {
         approvedKg,
         utilizationPct,
@@ -259,6 +270,7 @@ export async function calculateUtilization(
         lossKg,
         currentStockKg,
       },
+      mesesPlanilha,
       calculatedAt: new Date(),
     }
   } catch (error) {
@@ -268,17 +280,9 @@ export async function calculateUtilization(
 }
 
 /* ------------------------------------------------------------------ */
-/* Função SÉRIE TEMPORAL (Onda 16.5.B · PAA na 23.7e-1)                */
-/*                                                                     */
-/* Granularidade (auto):                                               */
-/*   ≤ 31 dias → 'day'   |   ≤ 92 dias → 'week'   |   > 92 → 'month'    */
-/*                                                                     */
-/* ⚠️ DailyApproval não tem entidade → série só na VISÃO GERAL.        */
-/*                                                                     */
-/* 🇧🇷 FONTE ÚNICA DE FRONTEIRA: as chaves de bucket derivam de         */
-/*    startOfDayBrasilia. Movimentações (DateTime) usam bucketKey;      */
-/*    @db.Date (DailyApproval, EntregaPaa.dataEntrega) usam             */
-/*    bucketKeyDateOnly — o dia civil já é absoluto, sem offset.        */
+/* SÉRIE TEMPORAL                                                      */
+/* Granularidade: ≤31d day | ≤92d week | >92 month                      */
+/* 📜 Se o período toca mês da planilha → força 'month'.               */
 /* ------------------------------------------------------------------ */
 
 export async function calculateUtilizationSeries(
@@ -295,9 +299,8 @@ export async function calculateUtilizationSeries(
     donorIds || producerIds || beneficiaryIds || employeeIds,
   )
 
-  const granularity = pickGranularity(from, to)
+  let granularity = pickGranularity(from, to)
 
-  // 🛡️ Defesa de cache do client Prisma
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!(prisma as any).donationItem || !(prisma as any).dailyApproval) {
     console.warn(
@@ -307,19 +310,19 @@ export async function calculateUtilizationSeries(
     return EMPTY_SERIES(from, to, granularity, hasEntityFilter)
   }
 
-  // ⚠️ Série só na visão geral (aproveitado não é atribuível a entidade)
   if (hasEntityFilter) {
     return EMPTY_SERIES(from, to, granularity, true)
   }
 
   try {
-    // 📅 23.7e-1: EntregaPaa.dataEntrega é @db.Date. from/to são bordas de
-    //    Brasília (03:00Z) e EXCLUIRIAM o primeiro dia. Range em dia civil UTC.
+    const legado = await buscarLegadoPorMes(mesesTocados(from, to))
+    const mesesPlanilha = mesesTocados(from, to).filter((k) =>
+      mesTemPlanilha(legado.get(k)),
+    )
+    if (mesesPlanilha.length > 0) granularity = 'month'
+
     const paaRange = dateOnlyRange(from, to)
 
-    // ----------------------------------------------------------------
-    // Busca crua com as DATAS (agrupamos por bucket no JS).
-    // ----------------------------------------------------------------
     const [
       donationItems,
       harvestItems,
@@ -348,7 +351,6 @@ export async function calculateUtilizationSeries(
         where: { date: { gte: from, lte: to } },
         select: { date: true, approvedQty: true },
       }),
-      // 🌾 23.7e-1: pesoKg do item (quantidade pode estar em cx/dz/mç).
       prisma.entregaPaaItem.findMany({
         where: { entregaPaa: { dataEntrega: paaRange } },
         select: {
@@ -358,13 +360,8 @@ export async function calculateUtilizationSeries(
       }),
     ])
 
-    // ----------------------------------------------------------------
-    // Esqueleto de buckets (todos zerados) — dias sem dado viram 0,
-    // e não furo na série.
-    // ----------------------------------------------------------------
     const buckets = buildBuckets(from, to, granularity)
 
-    // 🇧🇷 Movimentações DateTime → bucket em horário de Brasília.
     const addLocal = (
       date: Date,
       field: 'donationsKg' | 'harvestKg' | 'distributedKg',
@@ -375,8 +372,6 @@ export async function calculateUtilizationSeries(
       if (point) point[field] = round3(point[field] + qty)
     }
 
-    // 📅 @db.Date: o valor JÁ É o dia civil (meia-noite UTC).
-    //    NÃO aplicar offset Brasília aqui (deslocaria 1 dia pra trás).
     const addDateOnly = (
       date: Date,
       field: 'approvedKg' | 'paaKg',
@@ -387,49 +382,44 @@ export async function calculateUtilizationSeries(
       if (point) point[field] = round3(point[field] + qty)
     }
 
-    for (const it of donationItems) {
-      addLocal(it.donation.date, 'donationsKg', it.quantity)
-    }
-    for (const it of harvestItems) {
-      addLocal(it.harvest.date, 'harvestKg', it.quantity)
-    }
-    for (const it of distributionItems) {
-      addLocal(it.distribution.date, 'distributedKg', it.quantity)
-    }
-    for (const ap of approvalRows) {
-      addDateOnly(ap.date, 'approvedKg', ap.approvedQty)
-    }
+    for (const it of donationItems) addLocal(it.donation.date, 'donationsKg', it.quantity)
+    for (const it of harvestItems) addLocal(it.harvest.date, 'harvestKg', it.quantity)
+    for (const it of distributionItems) addLocal(it.distribution.date, 'distributedKg', it.quantity)
+    for (const ap of approvalRows) addDateOnly(ap.date, 'approvedKg', ap.approvedQty)
     for (const it of paaItems) {
-      const kg = Number(it.pesoKg ?? 0) // Decimal → number
+      const kg = Number(it.pesoKg ?? 0)
       if (!Number.isFinite(kg)) continue
       addDateOnly(it.entregaPaa.dataEntrega, 'paaKg', kg)
     }
 
-    // ----------------------------------------------------------------
-    // Deriva campos compostos por bucket (mesma lógica das fórmulas)
-    // ----------------------------------------------------------------
-    const points: UtilizationSeriesPoint[] = Array.from(buckets.values()).map(
-      (p) => ({
+    const points: UtilizationSeriesPoint[] = Array.from(buckets.values()).map((p) => {
+      // 📜 só em granularidade mensal o bucket = mês civil
+      const l = granularity === 'month' ? legado.get(p.bucket.slice(0, 7)) : undefined
+      const donationsKg = round3(escolher(l?.DOACAO ?? 0, p.donationsKg))
+      const harvestKg = round3(escolher(l?.COLHEITA ?? 0, p.harvestKg))
+      const distributedKg = round3(escolher(l?.DISTRIBUICAO ?? 0, p.distributedKg))
+      const semTaxa = mesSemTaxa(l)
+      return {
         bucket: p.bucket,
         label: p.label,
-        donationsKg: p.donationsKg,
-        harvestKg: p.harvestKg,
+        donationsKg,
+        harvestKg,
         approvedKg: p.approvedKg,
-        distributedKg: p.distributedKg,
-        // 🌾 colheita 100% aproveitada → entra no aproveitado total
-        approvedTotalKg: round3(p.approvedKg + p.harvestKg),
-        // 🗑️ perda só sobre doação bruta
-        lossKg: round3(Math.max(0, p.donationsKg - p.approvedKg)),
-        // 🌾 PAA exibido lado a lado, fora das fórmulas de aproveitamento
+        distributedKg,
+        // 🌾 colheita 100% aproveitada; 📜 mês de planilha não tem taxa
+        approvedTotalKg: semTaxa ? 0 : round3(p.approvedKg + harvestKg),
+        lossKg: semTaxa ? 0 : round3(Math.max(0, donationsKg - p.approvedKg)),
         paaKg: p.paaKg,
-      }),
-    )
+        planilha: mesTemPlanilha(l),
+      }
+    })
 
     return {
       period: { from, to },
       granularity,
       hasEntityFilter: false,
       points,
+      mesesPlanilha,
       calculatedAt: new Date(),
     }
   } catch (error) {
@@ -446,6 +436,18 @@ function sumQty(items: { quantity: number }[]): number {
   return items.reduce((sum, i) => sum + i.quantity, 0)
 }
 
+function agruparMes<T extends { quantity: number }>(
+  items: T[],
+  key: (i: T) => string,
+): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const i of items) {
+    const k = key(i)
+    m.set(k, (m.get(k) ?? 0) + i.quantity)
+  }
+  return m
+}
+
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000
 }
@@ -454,16 +456,14 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
-// arrays vazios ou undefined viram undefined (filtro inativo)
 function nonEmpty(arr?: string[]): string[] | undefined {
   return arr && arr.length > 0 ? arr : undefined
 }
 
 /* ------------------------------------------------------------------ */
-/* Helpers da série temporal — FONTE ÚNICA: day-boundaries.ts           */
+/* Helpers da série temporal                                           */
 /* ------------------------------------------------------------------ */
 
-// Escolhe granularidade automaticamente pelo tamanho do período
 function pickGranularity(from: Date, to: Date): SeriesGranularity {
   const days = Math.floor((to.getTime() - from.getTime()) / MS_PER_DAY) + 1
   if (days <= 31) return 'day'
@@ -471,9 +471,8 @@ function pickGranularity(from: Date, to: Date): SeriesGranularity {
   return 'month'
 }
 
-// 🇧🇷 Componentes "civis" de Brasília de uma data DateTime.
 function brasiliaCivilParts(date: Date): { y: number; m: number; d: number } {
-  const start = startOfDayBrasilia(date) // 03:00 UTC = 00:00 BSB do dia civil
+  const start = startOfDayBrasilia(date)
   return {
     y: start.getUTCFullYear(),
     m: start.getUTCMonth(),
@@ -481,16 +480,10 @@ function brasiliaCivilParts(date: Date): { y: number; m: number; d: number } {
   }
 }
 
-// Início do dia (chave UTC hora 0) a partir de partes civis (y, m, d).
 function dayKeyFromParts(y: number, m: number, d: number): Date {
   return new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
 }
 
-/**
- * 🌾 23.7e-1: range para colunas @db.Date a partir de bordas Brasília.
- * Converte [from..to] no par de dias civis UTC correspondentes, para que
- * o primeiro e o último dia do período NÃO sejam perdidos.
- */
 function dateOnlyRange(from: Date, to: Date): { gte: Date; lte: Date } {
   const f = brasiliaCivilParts(from)
   const t = brasiliaCivilParts(to)
@@ -500,16 +493,14 @@ function dateOnlyRange(from: Date, to: Date): { gte: Date; lte: Date } {
   }
 }
 
-// Recua para a segunda-feira da semana do dia informado.
 function toMonday(dayStart: Date): Date {
   const s = new Date(dayStart)
-  const dow = s.getUTCDay() // 0=domingo .. 6=sábado
-  const diff = dow === 0 ? 6 : dow - 1 // segunda como início
+  const dow = s.getUTCDay()
+  const diff = dow === 0 ? 6 : dow - 1
   s.setUTCDate(s.getUTCDate() - diff)
   return s
 }
 
-// Aplica a granularidade sobre partes civis já resolvidas.
 function bucketStartFromParts(
   y: number,
   m: number,
@@ -518,16 +509,14 @@ function bucketStartFromParts(
 ): Date {
   if (g === 'day') return dayKeyFromParts(y, m, d)
   if (g === 'week') return toMonday(dayKeyFromParts(y, m, d))
-  return dayKeyFromParts(y, m, 1) // início do mês
+  return dayKeyFromParts(y, m, 1)
 }
 
-// 🇧🇷 Chave de bucket para MOVIMENTAÇÕES (DateTime) → aplica offset Brasília.
 function bucketKey(date: Date, g: SeriesGranularity): string {
   const { y, m, d } = brasiliaCivilParts(date)
   return bucketStartFromParts(y, m, d, g).toISOString().slice(0, 10)
 }
 
-// 📅 Chave de bucket para @db.Date → usa o dia UTC direto, SEM offset.
 function bucketKeyDateOnly(date: Date, g: SeriesGranularity): string {
   const y = date.getUTCFullYear()
   const m = date.getUTCMonth()
@@ -535,18 +524,14 @@ function bucketKeyDateOnly(date: Date, g: SeriesGranularity): string {
   return bucketStartFromParts(y, m, d, g).toISOString().slice(0, 10)
 }
 
-// Fim do bucket (último dia incluído) — usado só para o label de intervalo.
 function bucketEnd(start: Date, g: SeriesGranularity): Date {
   if (g === 'day') return start
-  if (g === 'week') {
-    return new Date(start.getTime() + 6 * MS_PER_DAY)
-  }
+  if (g === 'week') return new Date(start.getTime() + 6 * MS_PER_DAY)
   return new Date(
     Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 0, 0, 0, 0),
   )
 }
 
-// Label amigável pro eixo X (pt-BR)
 function bucketLabel(start: Date, g: SeriesGranularity): string {
   const fmtDM = (d: Date) =>
     `${String(d.getUTCDate()).padStart(2, '0')}/${String(
@@ -554,18 +539,12 @@ function bucketLabel(start: Date, g: SeriesGranularity): string {
     ).padStart(2, '0')}`
 
   if (g === 'day') return fmtDM(start)
-
-  if (g === 'week') {
-    const end = bucketEnd(start, g)
-    return `${fmtDM(start)} – ${fmtDM(end)}`
-  }
+  if (g === 'week') return `${fmtDM(start)} – ${fmtDM(bucketEnd(start, g))}`
 
   const mm = String(start.getUTCMonth() + 1).padStart(2, '0')
-  const yyyy = start.getUTCFullYear()
-  return `${mm}/${yyyy}`
+  return `${mm}/${start.getUTCFullYear()}`
 }
 
-/* Tipo interno do esqueleto de buckets (+ paaKg na 23.7e-1) */
 type BucketAcc = {
   bucket: string
   label: string
@@ -576,14 +555,12 @@ type BucketAcc = {
   paaKg: number
 }
 
-// Constrói o Map de buckets do período inteiro, todos zerados.
 function buildBuckets(
   from: Date,
   to: Date,
   g: SeriesGranularity,
 ): Map<string, BucketAcc> {
   const map = new Map<string, BucketAcc>()
-
   const fromParts = brasiliaCivilParts(from)
   const toParts = brasiliaCivilParts(to)
 
@@ -601,17 +578,9 @@ function buildBuckets(
       distributedKg: 0,
       paaKg: 0,
     })
-
-    if (g === 'day') {
-      cursor = new Date(cursor.getTime() + MS_PER_DAY)
-    } else if (g === 'week') {
-      cursor = new Date(cursor.getTime() + 7 * MS_PER_DAY)
-    } else {
-      cursor = new Date(
-        Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1),
-      )
-    }
+    if (g === 'day') cursor = new Date(cursor.getTime() + MS_PER_DAY)
+    else if (g === 'week') cursor = new Date(cursor.getTime() + 7 * MS_PER_DAY)
+    else cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))
   }
-
   return map
 }
