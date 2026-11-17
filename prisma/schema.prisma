@@ -929,3 +929,25 @@ model RateLimit {
 
   @@map("rate_limits")
 }
+
+// ============================================
+// LEGADO — HISTÓRICO MENSAL (planilhas pré-app)
+// Isolado: não entra no estoque, nas listas nem no calculate-stock.
+// ============================================
+model HistoricoMensal {
+  id           String   @id @default(cuid())
+  ano          Int
+  mes          Int
+  /// DOACAO | COLHEITA | DISTRIBUICAO | FAMILIAS
+  tipo         String
+  /// doador, instituição ou CRAS
+  origem       String
+  kg           Decimal  @default(0) @db.Decimal(12, 2)
+  atendimentos Int?
+  nota         String?
+  createdAt    DateTime @default(now())
+
+  @@unique([ano, mes, tipo, origem])
+  @@index([ano, tipo])
+  @@map("historico_mensal")
+}
