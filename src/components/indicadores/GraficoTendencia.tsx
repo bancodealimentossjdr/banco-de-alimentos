@@ -11,6 +11,10 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
+/* 🙈 Oculto temporariamente (decisão do Vitor). NÃO remover:
+ *    o cálculo segue na API. Para reexibir, troque para true. */
+const MOSTRAR_APROVEITADO_TOTAL = false;
+
 export interface SeriePoint {
   bucket: string;
   label: string;
@@ -118,7 +122,9 @@ export default function GraficoTendencia({ data }: Props) {
             )}
             <Bar dataKey="distributedKg" name="Distribuído" fill="#2563eb" radius={[2, 2, 0, 0]} maxBarSize={14} />
             <Bar dataKey="donationsKg" name="Doações" fill="#86efac" radius={[2, 2, 0, 0]} maxBarSize={14} />
-            <Bar dataKey="approvedTotalKg" name="Aproveitado total" fill="#15803d" radius={[2, 2, 0, 0]} maxBarSize={14} />
+            {MOSTRAR_APROVEITADO_TOTAL && (
+              <Bar dataKey="approvedTotalKg" name="Aproveitado total" fill="#15803d" radius={[2, 2, 0, 0]} maxBarSize={14} />
+            )}
           </BarChart>
         </ResponsiveContainer>
       )}

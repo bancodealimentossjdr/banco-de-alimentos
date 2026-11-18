@@ -13,9 +13,6 @@ import GraficoTendencia, {
 } from '@/components/indicadores/GraficoTendencia';
 import GraficoBarras from '@/components/indicadores/GraficoBarras';
 import BotoesExportacao from '@/components/indicadores/BotoesExportacao';
-import TopFuncionariosCard from '@/components/indicadores/TopFuncionariosCard';
-import TabelaParticipacaoFuncionarios from '@/components/indicadores/TabelaParticipacaoFuncionarios';
-import type { FuncionarioParticipacao } from '@/lib/data/indicadores-data';
 import AnnonaeLoader from '@/components/ui/AnnonaeLoader';
 
 interface Macro {
@@ -47,16 +44,13 @@ export default function IndicadoresPage() {
   const [topDoadores, setTopDoadores] = useState<any[]>([]);
   const [topBeneficiarios, setTopBeneficiarios] = useState<any[]>([]);
   const [topProdutores, setTopProdutores] = useState<any[]>([]);
-  const [participacao, setParticipacao] = useState<FuncionarioParticipacao[]>([]);
   const [paa, setPaa] = useState<PaaIndicadores | null>(null);
   const [loading, setLoading] = useState(false);
 
   /* ------------------------------------------------------------------
    * 🔁 UM ÚNICO efeito. (histórico do fix "data filtra, dropdown não")
-   *
-   * 🌾 23.7e-1: entra /api/indicadores/paa. O .catch(() => null) é
-   *    proposital — quem não tem permissão de PAA recebe 403 e apenas
-   *    não vê a seção, sem derrubar a página inteira.
+   * 🌾 23.7e-1: /api/indicadores/paa com .catch(() => null) proposital.
+   * 🚫 Top funcionários retirado (fix/visualizador-painel).
    * ------------------------------------------------------------------ */
   useEffect(() => {
     if (!filters) return;
@@ -73,10 +67,9 @@ export default function IndicadoresPage() {
       get(`/api/indicadores/rankings?${qs}&type=doadores`),
       get(`/api/indicadores/rankings?${qs}&type=beneficiarios`),
       get(`/api/indicadores/rankings?${qs}&type=produtores`),
-      get(`/api/indicadores/participacao-funcionarios?${qs}`),
       get(`/api/indicadores/paa?${qs}`).catch(() => null),
     ])
-      .then(([m, serie, p, d, b, pr, part, paaRes]) => {
+      .then(([m, serie, p, d, b, pr, paaRes]) => {
         setMacro(m);
         setTendencia(
           serie && Array.isArray(serie.points) ? (serie as SerieData) : null,
@@ -85,7 +78,6 @@ export default function IndicadoresPage() {
         setTopDoadores(Array.isArray(d) ? d : []);
         setTopBeneficiarios(Array.isArray(b) ? b : []);
         setTopProdutores(Array.isArray(pr) ? pr : []);
-        setParticipacao(Array.isArray(part) ? part : []);
         setPaa(paaRes && paaRes.card ? (paaRes as PaaIndicadores) : null);
       })
       .catch((e) => {
@@ -101,7 +93,6 @@ export default function IndicadoresPage() {
     (n ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
   const exportFilters = filters ? { from: filters.from, to: filters.to } : null;
-  const mostrarTabelaDetalhada = (filters?.funcionarioIds.length ?? 0) > 0;
 
   return (
     <div className="container mx-auto p-6">
@@ -132,26 +123,10 @@ export default function IndicadoresPage() {
           )}
 
           <div className={loading ? 'pointer-events-none select-none' : ''}>
-            {/* ===== KPIs — 📦 Em Estoque removido na 23.7d · 🌾 PAA entra na 23.7e ===== */}
             <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-              <KpiCard
-                label="Total Doado"
-                value={fmt(macro.totalDoado)}
-                unit="kg"
-                emoji="🏪"
-              />
-              <KpiCard
-                label="Distribuído"
-                value={fmt(macro.totalDistribuido)}
-                unit="kg"
-                emoji="📤"
-              />
-              <KpiCard
-                label="Colheita"
-                value={fmt(macro.totalColheita)}
-                unit="kg"
-                emoji="🌾"
-              />
+              <KpiCard label="Total Doado" value={fmt(macro.totalDoado)} unit="kg" emoji="🏪" />
+              <KpiCard label="Distribuído" value={fmt(macro.totalDistribuido)} unit="kg" emoji="📤" />
+              <KpiCard label="Colheita" value={fmt(macro.totalColheita)} unit="kg" emoji="🌾" />
               {paa && (
                 <KpiCard
                   label={`PAA · ${paa.card.totalEntregas} entregas`}
@@ -160,54 +135,27 @@ export default function IndicadoresPage() {
                   emoji="🌾"
                 />
               )}
-              <KpiCard
-                label="Aproveitamento"
-                value={fmt(macro.percentualAproveitamento)}
-                unit="%"
-                emoji="✅"
-              />
-              <KpiCard
-                label="Beneficiários"
-                value={macro.beneficiariosAtendidos}
-                emoji="👥"
-              />
+              <KpiCard label="Aproveitamento" value={fmt(macro.percentualAproveitamento)} unit="%" emoji="✅" />
+              <KpiCard label="Beneficiários" value={macro.beneficiariosAtendidos} emoji="👥" />
             </div>
 
             <div className="mb-6">
               <GraficoTendencia data={tendencia} />
             </div>
 
-            {/* 🌾 Top Produtos soma doação + colheita + PAA (23.7d) */}
             <div className="mb-6">
-              <GraficoBarras
-                data={topProdutos}
-                titulo="Top 10 Produtos Recebidos"
-                cor="#16a34a"
-              />
+              <GraficoBarras data={topProdutos} titulo="Top 10 Produtos Recebidos" cor="#16a34a" />
             </div>
 
             <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <GraficoBarras
-                data={topDoadores}
-                titulo="Top 10 Doadores"
-                cor="#16a34a"
-              />
-              <GraficoBarras
-                data={topBeneficiarios}
-                titulo="Top 10 Beneficiários"
-                cor="#2563eb"
-              />
+              <GraficoBarras data={topDoadores} titulo="Top 10 Doadores" cor="#16a34a" />
+              <GraficoBarras data={topBeneficiarios} titulo="Top 10 Beneficiários" cor="#2563eb" />
             </div>
 
             <div className="mb-6">
-              <GraficoBarras
-                data={topProdutores}
-                titulo="Top 10 Produtores Rurais"
-                cor="#ea580c"
-              />
+              <GraficoBarras data={topProdutores} titulo="Top 10 Produtores Rurais" cor="#ea580c" />
             </div>
 
-            {/* ===== 🌾 PAA — produtos entregues (23.7e-1) ===== */}
             {paa && (
               <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <GraficoBarras
@@ -222,16 +170,6 @@ export default function IndicadoresPage() {
                 />
               </div>
             )}
-
-            <div className="mt-2 border-t border-gray-200 pt-6">
-              <TopFuncionariosCard dados={participacao} loading={loading} />
-              {mostrarTabelaDetalhada && (
-                <TabelaParticipacaoFuncionarios
-                  dados={participacao}
-                  loading={loading}
-                />
-              )}
-            </div>
           </div>
         </div>
       )}
