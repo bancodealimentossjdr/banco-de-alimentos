@@ -22,14 +22,15 @@ interface DistributionItem {
   product: { name: string; unit: string }
 }
 
+/* 🛡️ status/legacy/receipt são opcionais: a API os omite para o visualizador */
 interface Distribution {
   id: string
   date: string
   notes: string | null
-  status: 'PENDENTE' | 'ENTREGUE'
-  legacy: boolean
+  status?: 'PENDENTE' | 'ENTREGUE'
+  legacy?: boolean
   origem?: Origem
-  receipt: { id: string } | null
+  receipt?: { id: string } | null
   beneficiary: { id: string; name: string; type: string }
   employee: { id: string; name: string } | null
   employee2: { id: string; name: string } | null
@@ -77,14 +78,14 @@ export default function DistribuicoesPage() {
   const distributions = distributionsData ?? []
   const loading = loadingDistributions && !distributionsData
 
+  // 🛡️ Onda 2: o servidor decide. Sem status na resposta = role sem acesso a ele.
+  const temStatus = distributions.some(d => d.status !== undefined)
+
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  // 🆕 FILTRO — instituição selecionada ('' = todas)
   const [filtroBeneficiaryId, setFiltroBeneficiaryId] = useState('')
-  // 🆕 FILTRO — status ('' = todos | 'PENDENTE' | 'ENTREGUE')
   const [filtroStatus, setFiltroStatus] = useState('')
-  // 🆕 FILTRO — intervalo de datas (yyyy-mm-dd)
   const [filtroDataDe, setFiltroDataDe] = useState('')
   const [filtroDataAte, setFiltroDataAte] = useState('')
 
@@ -118,11 +119,10 @@ export default function DistribuicoesPage() {
     disabled: editingId !== null,
   })
 
-  // 🆕 FILTRO — lista filtrada (instituição + status + data)
   const distributionsFiltradas = useMemo(() => {
     return distributions.filter(d => {
       if (filtroBeneficiaryId && d.beneficiary.id !== filtroBeneficiaryId) return false
-      if (filtroStatus && d.status !== filtroStatus) return false
+      if (temStatus && filtroStatus && d.status !== filtroStatus) return false
 
       const dataDist = d.date.includes('T') ? d.date.split('T')[0] : d.date
       if (filtroDataDe && dataDist < filtroDataDe) return false
@@ -130,10 +130,11 @@ export default function DistribuicoesPage() {
 
       return true
     })
-  }, [distributions, filtroBeneficiaryId, filtroStatus, filtroDataDe, filtroDataAte])
+  }, [distributions, temStatus, filtroBeneficiaryId, filtroStatus, filtroDataDe, filtroDataAte])
 
-  // 🆕 há algum filtro ativo?
-  const temFiltroAtivo = !!(filtroBeneficiaryId || filtroStatus || filtroDataDe || filtroDataAte)
+  const temFiltroAtivo = !!(
+    filtroBeneficiaryId || (temStatus && filtroStatus) || filtroDataDe || filtroDataAte
+  )
 
   const resetForm = () => {
     setForm({
@@ -161,7 +162,6 @@ export default function DistribuicoesPage() {
     })
     setFormItems(
       dist.items.map(item => ({
-        // ⚠️ productsAll: inclui produtos inativados
         productId: productsAll.find(p => p.name === item.product.name)?.id || '',
         quantity: item.quantity,
         boxes: item.boxes ?? undefined,
@@ -274,9 +274,34 @@ export default function DistribuicoesPage() {
     return Array.from(set)
   }
 
+  /* 🏷️ Selo de situação: ausência de dado NÃO vira "Pendente" */
+  const renderSelo = (dist: Distribution) => {
+    if (dist.legacy) {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+          🗄️ Legado
+        </span>
+      )
+    }
+    if (dist.status === 'ENTREGUE') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+          ✅ Entregue
+        </span>
+      )
+    }
+    if (dist.status === 'PENDENTE') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+          ⏳ Pendente
+        </span>
+      )
+    }
+    return null
+  }
+
   return (
     <div>
-      {/* Header da página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-gray-900">📤 Distribuições</h2>
         {podeEditar && (
@@ -297,7 +322,6 @@ export default function DistribuicoesPage() {
         />
       )}
 
-      {/* Formulário */}
       {showForm && podeEditar && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-4 md:p-6 mb-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">
@@ -525,7 +549,6 @@ export default function DistribuicoesPage() {
         </form>
       )}
 
-      {/* 🆕 FILTRO — painel de busca */}
       {!showForm && distributions.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
@@ -546,7 +569,7 @@ export default function DistribuicoesPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${temStatus ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Instituição</label>
               <select
@@ -555,25 +578,26 @@ export default function DistribuicoesPage() {
                 className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
               >
                 <option value="">Todas</option>
-                {/* ⚠️ Todos (inclui inativas): filtrar histórico antigo deve continuar possível */}
                 {beneficiariesAll.map(b => (
                   <option key={b.id} value={b.id}>{b.name}{sufixoInativo(b)}</option>
                 ))}
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Status</label>
-              <select
-                value={filtroStatus}
-                onChange={e => setFiltroStatus(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
-              >
-                <option value="">Todos</option>
-                <option value="PENDENTE">⏳ Pendente (falta finalizar)</option>
-                <option value="ENTREGUE">✅ Entregue</option>
-              </select>
-            </div>
+            {temStatus && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Status</label>
+                <select
+                  value={filtroStatus}
+                  onChange={e => setFiltroStatus(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+                >
+                  <option value="">Todos</option>
+                  <option value="PENDENTE">⏳ Pendente (falta finalizar)</option>
+                  <option value="ENTREGUE">✅ Entregue</option>
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs text-gray-500 mb-1">De</label>
@@ -604,7 +628,6 @@ export default function DistribuicoesPage() {
         </div>
       )}
 
-      {/* Listagem */}
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500"></div>
@@ -654,19 +677,7 @@ export default function DistribuicoesPage() {
                           🥫 Doação
                         </span>
                       )}
-                      {dist.legacy ? (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                          🗄️ Legado
-                        </span>
-                      ) : dist.status === 'ENTREGUE' ? (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                          ✅ Entregue
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                          ⏳ Pendente
-                        </span>
-                      )}
+                      {renderSelo(dist)}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {formatDate(dist.date)}

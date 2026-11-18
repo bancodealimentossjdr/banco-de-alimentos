@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView, requireEditRecord } from '@/lib/auth-helpers'
-import { auth } from '@/lib/auth'
 import {
   maskNotesIfReadOnly,
   maskBeneficiario,
@@ -15,6 +14,8 @@ export async function GET(
 ) {
   const authResult = await requireView('distribuicoes')
   if (authResult instanceof NextResponse) return authResult
+  // 🛡️ Princípio 1: role vem do gate, não de auth() cru
+  const role = authResult.user.role
 
   try {
     const { id } = await params
@@ -36,10 +37,6 @@ export async function GET(
       )
     }
 
-    // 🔐 Aplica máscaras conforme o role
-    const session = await auth()
-    const role = session?.user?.role
-
     // 1) Mascara notes se for somente leitura no módulo
     let distributionSegura = maskNotesIfReadOnly(distribution, role, 'distribuicoes')
 
@@ -60,6 +57,14 @@ export async function GET(
           ? maskFuncionario(distributionSegura.employee3, role)
           : distributionSegura.employee3,
       }
+    }
+
+    // 3) 🛡️ Visualizador não recebe status/legacy (espelha a listagem)
+    if (role === 'visualizador') {
+      const { status, legacy, ...rest } = distributionSegura
+      void status
+      void legacy
+      return NextResponse.json(rest)
     }
 
     return NextResponse.json(distributionSegura)
@@ -114,44 +119,42 @@ export async function PUT(
       )
     }
 
-            // 🆕 ONDA 19 — normaliza origem POR ITEM (DOACAO | COLHEITA | EVENTO)
-        type Origem = 'DOACAO' | 'COLHEITA' | 'EVENTO'
-        const ORIGENS_VALIDAS: Origem[] = ['DOACAO', 'COLHEITA', 'EVENTO']
-        const normOrigem = (o: unknown): Origem =>
-          o === 'EVENTO' || o === 'COLHEITA' ? o : 'DOACAO'
+    // 🆕 ONDA 19 — normaliza origem POR ITEM (DOACAO | COLHEITA | EVENTO)
+    type Origem = 'DOACAO' | 'COLHEITA' | 'EVENTO'
+    const ORIGENS_VALIDAS: Origem[] = ['DOACAO', 'COLHEITA', 'EVENTO']
+    const normOrigem = (o: unknown): Origem =>
+      o === 'EVENTO' || o === 'COLHEITA' ? o : 'DOACAO'
 
-        type IncomingItem = {
-          productId: string
-          quantity: number
-          boxes?: number
-          origem?: Origem
-        }
-        const incomingItems: IncomingItem[] = Array.isArray(items) ? items : []
+    type IncomingItem = {
+      productId: string
+      quantity: number
+      boxes?: number
+      origem?: Origem
+    }
+    const incomingItems: IncomingItem[] = Array.isArray(items) ? items : []
 
-        if (incomingItems.length === 0) {
-          return NextResponse.json(
-            { error: 'Adicione pelo menos um produto' },
-            { status: 400 }
-          )
-        }
+    if (incomingItems.length === 0) {
+      return NextResponse.json(
+        { error: 'Adicione pelo menos um produto' },
+        { status: 400 }
+      )
+    }
 
-        // Valida cada origem
-        for (const it of incomingItems) {
-          if (
-            it.origem !== undefined &&
-            !ORIGENS_VALIDAS.includes(it.origem as Origem)
-          ) {
-            return NextResponse.json(
-              { error: 'Origem inválida. Use DOACAO, COLHEITA ou EVENTO.' },
-              { status: 400 }
-            )
-          }
-        }
+    for (const it of incomingItems) {
+      if (
+        it.origem !== undefined &&
+        !ORIGENS_VALIDAS.includes(it.origem as Origem)
+      ) {
+        return NextResponse.json(
+          { error: 'Origem inválida. Use DOACAO, COLHEITA ou EVENTO.' },
+          { status: 400 }
+        )
+      }
+    }
 
-        // origem legado (enum: só DOACAO|EVENTO). COLHEITA cai como DOACAO.
-        const origemLegado =
-          normOrigem(incomingItems[0].origem) === 'EVENTO' ? 'EVENTO' : 'DOACAO'
-
+    // origem legado (enum: só DOACAO|EVENTO). COLHEITA cai como DOACAO.
+    const origemLegado =
+      normOrigem(incomingItems[0].origem) === 'EVENTO' ? 'EVENTO' : 'DOACAO'
 
     await prisma.distributionItem.deleteMany({
       where: { distributionId: id },
@@ -172,7 +175,7 @@ export async function PUT(
             productId: item.productId,
             quantity: item.quantity,
             boxes: item.boxes ?? null,
-                            origem: normOrigem(item.origem), // 🆕 ONDA 19 — 3 valores
+            origem: normOrigem(item.origem), // 🆕 ONDA 19 — 3 valores
           })),
         },
       },

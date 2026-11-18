@@ -18,6 +18,10 @@ interface LinhaLegado {
   tipo: string
   kg: number
 }
+interface Agg {
+  qtd: number
+  kg: number
+}
 
 const TZ = 'America/Sao_Paulo'
 
@@ -64,10 +68,14 @@ export async function GET() {
   const mask = shouldMaskPersonalData(role)
   const isGestor = role === 'admin' || role === 'dev'
   const vePaa = canView(role, 'paa')
+  // 🛡️ Visualizador não recebe pendências nem agenda; recebe resumo de 30 dias
+  const isVisualizador = role === 'visualizador'
 
   const { ano, mes: mesAtual } = anoMesAtual()
   const inicioAno = new Date(`${ano}-01-01T03:00:00.000Z`)
   const inicioProx = new Date(`${ano + 1}-01-01T03:00:00.000Z`)
+  // 📅 Janela móvel de 30 dias (somente app: legado é mensal e não recorta por dia)
+  const inicio30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
 
   try {
     const [
@@ -84,6 +92,9 @@ export async function GET() {
       colheitasAgendadas,
       paaRascunhoCount,
       termosSemNfCount,
+      r30Doacao,
+      r30Colheita,
+      r30Distribuicao,
     ] = await Promise.all([
       prisma.donation.findMany({
         take: 5,
@@ -132,23 +143,53 @@ export async function GET() {
         WHERE d."legacy" = false AND d."date" >= ${inicioAno} AND d."date" < ${inicioProx}
         GROUP BY 1`,
 
-      // ⏳ Pendências
-      prisma.distribution.count({ where: { status: 'PENDENTE', legacy: false } }),
-      prisma.distribution.findMany({
-        where: { status: 'PENDENTE', legacy: false },
-        take: 5,
-        orderBy: { date: 'asc' },
-        select: { id: true, date: true, beneficiary: { select: { name: true } } },
-      }),
-      prisma.solidarityHarvest.count({ where: { status: 'agendada' } }),
-      prisma.solidarityHarvest.findMany({
-        where: { status: 'agendada' },
-        take: 5,
-        orderBy: { date: 'asc' },
-        select: { id: true, date: true, producer: { select: { name: true } } },
-      }),
-      vePaa ? prisma.entregaPaa.count({ where: { status: 'RASCUNHO' } }) : Promise.resolve(null),
+      // ⏳ Pendências — nunca consultadas para visualizador
+      isVisualizador
+        ? Promise.resolve(0)
+        : prisma.distribution.count({ where: { status: 'PENDENTE', legacy: false } }),
+      isVisualizador
+        ? Promise.resolve([])
+        : prisma.distribution.findMany({
+            where: { status: 'PENDENTE', legacy: false },
+            take: 5,
+            orderBy: { date: 'asc' },
+            select: { id: true, date: true, beneficiary: { select: { name: true } } },
+          }),
+      isVisualizador
+        ? Promise.resolve(0)
+        : prisma.solidarityHarvest.count({ where: { status: 'agendada' } }),
+      isVisualizador
+        ? Promise.resolve([])
+        : prisma.solidarityHarvest.findMany({
+            where: { status: 'agendada' },
+            take: 5,
+            orderBy: { date: 'asc' },
+            select: { id: true, date: true, producer: { select: { name: true } } },
+          }),
+      vePaa && !isVisualizador
+        ? prisma.entregaPaa.count({ where: { status: 'RASCUNHO' } })
+        : Promise.resolve(null),
       isGestor ? prisma.termoPaa.count({ where: { notaFiscal: null } }) : Promise.resolve(null),
+
+      // 📅 Resumo 30 dias — só para visualizador
+      isVisualizador
+        ? prisma.$queryRaw<Agg[]>`
+            SELECT COUNT(DISTINCT d."id")::int AS qtd, COALESCE(SUM(i."quantity"), 0)::float AS kg
+            FROM "DonationItem" i JOIN "Donation" d ON d."id" = i."donationId"
+            WHERE d."date" >= ${inicio30}`
+        : Promise.resolve([] as Agg[]),
+      isVisualizador
+        ? prisma.$queryRaw<Agg[]>`
+            SELECT COUNT(DISTINCT h."id")::int AS qtd, COALESCE(SUM(i."quantity"), 0)::float AS kg
+            FROM "HarvestItem" i JOIN "SolidarityHarvest" h ON h."id" = i."harvestId"
+            WHERE h."status" = 'realizada' AND h."date" >= ${inicio30}`
+        : Promise.resolve([] as Agg[]),
+      isVisualizador
+        ? prisma.$queryRaw<Agg[]>`
+            SELECT COUNT(DISTINCT d."id")::int AS qtd, COALESCE(SUM(i."quantity"), 0)::float AS kg
+            FROM "DistributionItem" i JOIN "Distribution" d ON d."id" = i."distributionId"
+            WHERE d."legacy" = false AND d."date" >= ${inicio30}`
+        : Promise.resolve([] as Agg[]),
     ])
 
     // 🧮 Monta a série jan → mês atual
@@ -197,6 +238,11 @@ export async function GET() {
       producer: { name: nome(h.producer.name) },
     }))
 
+    const agg = (rows: Agg[]) => ({
+      qtd: Number(rows[0]?.qtd ?? 0),
+      kg: r2(Number(rows[0]?.kg ?? 0)),
+    })
+
     return NextResponse.json({
       stockItems: [],
       notifications: [],
@@ -206,26 +252,37 @@ export async function GET() {
 
       ano,
       historico,
-      pendencias: {
-        distribuicoes: {
-          total: distPendentesCount,
-          itens: distPendentes.map((d) => ({
-            id: d.id,
-            date: d.date,
-            nome: nome(d.beneficiary.name),
-          })),
-        },
-        paaRascunho: paaRascunhoCount,
-        termosSemNf: termosSemNfCount,
-      },
-      colheitasAgendadas: {
-        total: colheitasAgendadasCount,
-        itens: colheitasAgendadas.map((h) => ({
-          id: h.id,
-          date: h.date,
-          nome: nome(h.producer.name),
-        })),
-      },
+
+      ...(isVisualizador
+        ? {
+            resumo30d: {
+              doacoes: agg(r30Doacao),
+              colheitas: agg(r30Colheita),
+              distribuicoes: agg(r30Distribuicao),
+            },
+          }
+        : {
+            pendencias: {
+              distribuicoes: {
+                total: distPendentesCount,
+                itens: distPendentes.map((d) => ({
+                  id: d.id,
+                  date: d.date,
+                  nome: nome(d.beneficiary.name),
+                })),
+              },
+              paaRascunho: paaRascunhoCount,
+              termosSemNf: termosSemNfCount,
+            },
+            colheitasAgendadas: {
+              total: colheitasAgendadasCount,
+              itens: colheitasAgendadas.map((h) => ({
+                id: h.id,
+                date: h.date,
+                nome: nome(h.producer.name),
+              })),
+            },
+          }),
     })
   } catch (error) {
     console.error('Erro GET dashboard:', error)
