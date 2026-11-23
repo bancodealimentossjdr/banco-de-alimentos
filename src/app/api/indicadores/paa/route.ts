@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireView } from '@/lib/auth-helpers'
-import { auth } from '@/lib/auth'
 import { shouldMaskPersonalData } from '@/lib/mask-by-role'
 import {
   parseIndicadoresQuery,
@@ -62,10 +61,10 @@ export async function GET(req: NextRequest) {
     ...paaEmployeeOr(q.funcionarioIds),
   }
 
-  // 🎭 Máscara financeira (antecipa a 23.8): visualizador recebe null,
-  //    não zero e não string. Fail-secure: role desconhecido → mascara.
-  const session = await auth()
-  const mascararValor = shouldMaskPersonalData(session?.user?.role)
+  // 🎭 Máscara financeira: visualizador recebe null, não zero e não string.
+  // Passo 16 (Onda 24): role vem da sessão já validada — sem 2º auth().
+  // Fail-secure: role desconhecido → mascara.
+  const mascararValor = shouldMaskPersonalData(authResult.user.role)
 
   try {
     const [entregas, itens] = await Promise.all([

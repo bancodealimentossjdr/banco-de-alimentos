@@ -100,12 +100,13 @@ const brl = (v: string | null) =>
   v === null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export default function ProdutosPage() {
-  const { canEdit, isDev } = usePermissions()
+  const { canEdit, isDev, isAdmin } = usePermissions()
   const podeEditar = canEdit('produtos')
 
-  // 🔒 ONDA 23.8 — o bloco PAA é a tabela CONAB normativa: dev-only.
-  // Defesa em profundidade: a UI trava e a API rejeita com 403.
-  const podeGerirConab = isDev
+  // 🔓 ONDA 24 (22/11) — decisão 23.8 revista: admin E dev editam o bloco PAA.
+  // Preço aplicado fica congelado em EntregaPaaItem (não afeta o passado).
+  // Defesa em profundidade: a UI trava e a API rejeita com 403 (canManageTabelaConab).
+  const podeGerirConab = isAdmin || isDev
 
   const { isSubmitting, handleSubmit: runSubmit } = useFormSubmit()
 
@@ -315,7 +316,7 @@ export default function ProdutosPage() {
             </div>
           </div>
 
-          {/* ====== BLOCO PAA (🔒 dev-only — tabela CONAB) ====== */}
+          {/* ====== BLOCO PAA (🔒 admin/dev — preços de referência) ====== */}
           <div className="mt-5 pt-5 border-t">
             <label
               className={`flex items-center gap-2 select-none ${
@@ -336,7 +337,7 @@ export default function ProdutosPage() {
 
             {!podeGerirConab && (
               <p className="text-xs text-amber-600 mt-1.5">
-                🔒 Preços e códigos da tabela CONAB são normativos — alteração exclusiva do perfil dev.
+                🔒 Preços e códigos de referência do PAA são normativos — alteração restrita a admin e dev.
               </p>
             )}
 
@@ -409,6 +410,7 @@ export default function ProdutosPage() {
                     <input
                       type="checkbox"
                       checked={form.temOrganico}
+                      disabled={!podeGerirConab}
                       onChange={e => setForm({ ...form, temOrganico: e.target.checked })}
                       className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 disabled:opacity-50"
                     />

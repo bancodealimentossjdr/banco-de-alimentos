@@ -149,17 +149,20 @@ export function canCalibrateStock(role: UserRole): boolean {
 }
 
 /**
- * 🆕 ONDA 23 — Manutenção da TABELA CONAB (preços do PAA).
+ * 🆕 ONDA 23 — Preços de referência do PAA (marcar PAA, códigos, preços,
+ * unidade e fator kg do produto).
  *
- * 🔒 Poder EXCLUSIVO do dev. Alterar a tabela de preços muda a base de
- * cálculo de toda prestação de contas futura; admin lança entregas, mas
- * não redefine a régua. Ação estrutural, mesma família de canCalibrateStock.
- *
- * ⚠️ Ainda NÃO está gateado em nenhuma rota — será usado na 23.7/23.8,
- * quando o versionamento por safra (débito técnico #4) for implementado.
+ * 🔓 Onda 24 (22/11): decisão 23.8 revista — admin E dev.
+ * Motivos: multi-tenant (cada organização mantém seus preços) e fontes
+ * de preço variadas (CONAB, município, estado). A fonte é identificada
+ * pelos dados institucionais do PaaConfig (ver paa-fonte-preco.ts).
+ * O preço aplicado fica congelado em EntregaPaaItem: alterar aqui não
+ * afeta entregas nem Termos já registrados.
+ * Nome mantido por compatibilidade de imports.
+ * 🛡️ Fail-secure: operador, visualizador e role desconhecido → nega.
  */
 export function canManageTabelaConab(role: UserRole): boolean {
-  return role === 'dev'
+  return role === 'dev' || role === 'admin'
 }
 
 /**
@@ -169,7 +172,7 @@ export function canManageTabelaConab(role: UserRole): boolean {
  * negócio (admin controla, o registro continua na lista); `hiddenAt`
  * remove da listagem sem apagar histórico — serve para poluição de
  * cadastro e duplicatas. Admin não alcança, senão vira exclusão informal
- * sem rastro. Mesma família de canCalibrateStock/canManageTabelaConab.
+ * sem rastro. Mesma família de canCalibrateStock.
  */
 export function canToggleVisibility(role: UserRole): boolean {
   return role === 'dev'

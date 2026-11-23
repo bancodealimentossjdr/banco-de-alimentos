@@ -31,9 +31,15 @@ export async function PUT(
     // 🔒 ONDA 23.8 — débito #5: só o dev muda a tabela CONAB.
     // Diff contra o banco: reenviar o mesmo valor não é alteração, então
     // admin segue editando nome/categoria/unidade de um produto PAA.
-    const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, product)
-    if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
-      return NextResponse.json({ error: conabDeniedMessage(conabAlterado) }, { status: 403 })
+    // 🐛 B1-PUT (22/11): mesma lógica do POST. Produto comum que continua
+    // comum não tem preço normativo; sem isso, legado com null no banco vs
+    // 0 do buildPaaData daria 403 ao admin. Promover/despromover segue gateado.
+    const envolvePaa = product.isPaa === true || paa.data.isPaa === true
+    if (envolvePaa) {
+      const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, product)
+      if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
+        return NextResponse.json({ error: conabDeniedMessage(conabAlterado) }, { status: 403 })
+      }
     }
 
     // Bloqueia despromoção de produto com entregas PAA registradas

@@ -1,9 +1,12 @@
 import type { Product } from '@prisma/client'
 
 /**
- * 🔒 ONDA 23.8 — Campos normativos da tabela CONAB.
- * Só o dev altera: preço/código mudam por safra (ato da CONAB),
- * não por decisão da ONG. Base documental do Termo de Recebimento (23.9).
+ * 🔒 Campos normativos do PAA (preço/código de referência).
+ * Onda 24 (22/11): decisão 23.8 revista — admin E dev editam.
+ * A fonte do preço varia por organização e é identificada pelos dados
+ * institucionais (ver paa-fonte-preco.ts). O preço aplicado fica
+ * congelado em EntregaPaaItem, então alterar aqui não afeta o passado.
+ * Nome do arquivo mantido por compatibilidade de imports.
  */
 export const CONAB_FIELDS = [
   'isPaa',
@@ -30,11 +33,9 @@ function norm(v: unknown): string {
 }
 
 /**
- * Retorna a lista de campos CONAB que o payload TENTA alterar.
- * Vazio = nada normativo mudou → não exige dev.
- *
- * ⚠️ Enviar o mesmo valor NÃO é alteração: admin pode salvar um produto
- * PAA (renomear, trocar categoria) sem cair no 403.
+ * Retorna os campos PAA normativos que o payload TENTA alterar.
+ * Vazio = nada normativo mudou.
+ * ⚠️ Enviar o mesmo valor NÃO é alteração.
  */
 export function conabFieldsChanged(
   paaData: Record<string, unknown>,
@@ -50,5 +51,5 @@ export function conabFieldsChanged(
 
 /** Mensagem única para o 403 — mesma em POST e PUT. */
 export function conabDeniedMessage(campos: ConabField[]): string {
-  return `Apenas o perfil dev pode alterar a tabela de preços CONAB (campos: ${campos.join(', ')}).`
+  return `Apenas admin ou dev podem alterar os preços de referência do PAA (campos: ${campos.join(', ')}).`
 }

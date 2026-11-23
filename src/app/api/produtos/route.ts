@@ -56,10 +56,9 @@ export async function POST(request: Request) {
     const paa = buildPaaData(body)
     if ('error' in paa) return NextResponse.json({ error: paa.error }, { status: 400 })
 
-    // 🔒 ONDA 23.8 — tabela CONAB é dev-only.
-    // 🐛 B1 (16/11): só produto PAA define preço normativo. Produto comum
-    // (isPaa=false) recebe os campos PAA zerados pelo buildPaaData, e o diff
-    // contra `null` os contava como "alteração" → admin levava 403 em tudo.
+    // 🔒 Preços de referência PAA: admin e dev (Onda 24, decisão 23.8 revista).
+    // Segunda barreira: barra qualquer role com edit em 'produtos' que não
+    // seja admin/dev. 🐛 B1 (16/11): só produto PAA define preço normativo.
     if (paa.data.isPaa === true) {
       const conabAlterado = conabFieldsChanged(paa.data as Record<string, unknown>, null)
       if (conabAlterado.length > 0 && !canManageTabelaConab(authResult.user.role)) {
